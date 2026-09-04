@@ -21,6 +21,8 @@
 - **Settings-írás:** kizárólag atomikusan (temp fájl + rename), és kizárólag merge-elve. A meglévő kulcsok (`model`, `enabledPlugins`, `effortLevel`, `tui`, `permissions`) érintetlenül maradnak.
 - **Hálózat:** a daemon HTTP és WS szervere kizárólag `127.0.0.1`-re bindol, és minden kérés bearer tokent követel.
 - **Transcript-fájl megtalálása:** soha ne a `cwd`-ből képzett könyvtárnévvel. Mindig glob: `<claudeDir>/projects/*/<sessionId>.jsonl`. A könyvtárnév-kódolás nem dokumentált és változhat.
+- **Workspace-függőségek build-je:** a csomagok egymást a lefordított `dist/`-en át érik el (`"main": "./dist/index.js"`). A `daemon` és a `desktop` tesztje vagy futtatása előtt a függőségeiknek build-elve kell lenniük. Az `nx.json` `test` és `dev` targetjei ezért `dependsOn: ["^build"]`-et használnak; ha egy taskban közvetlen `pnpm --filter` hívás szerepel, előtte `pnpm build` kell.
+- **React 19 típusok:** nincs globális `JSX` névtér. Ahol JSX visszatérési típus kell, `import type { JSX } from 'react'` az explicit import.
 
 ---
 
@@ -115,8 +117,9 @@ strict-peer-dependencies=false
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "targetDefaults": {
     "build": { "dependsOn": ["^build"], "cache": true },
-    "test": { "cache": true },
-    "check-types": { "dependsOn": ["^build"], "cache": true }
+    "test": { "dependsOn": ["^build"], "cache": true },
+    "check-types": { "dependsOn": ["^build"], "cache": true },
+    "dev": { "dependsOn": ["^build"], "cache": false }
   }
 }
 ```
@@ -455,8 +458,8 @@ Ez a rendszer legfontosabb tesztje: a valós gépen 20 lock fájl van, és a 810
 `packages/core/src/liveness.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
-import { resolveLiveSessions } from './liveness.js'
-import type { IdeLock, ProcessProbe, SessionRecord } from './index.js'
+import { resolveLiveSessions, type ProcessProbe } from './liveness.js'
+import type { IdeLock, SessionRecord } from './types.js'
 
 function session(over: Partial<SessionRecord> = {}): SessionRecord {
   return {
@@ -1303,7 +1306,9 @@ describe('POST /statusline', () => {
 
 - [ ] **Step 3: Futtasd, hogy lásd a hibát**
 
-Run: `pnpm install && pnpm --filter @claudeswitcher/daemon test`
+A `daemon` a `core`-t a lefordított `dist/`-en át éri el, ezért előbb build kell.
+
+Run: `pnpm install && pnpm build && pnpm --filter @claudeswitcher/daemon test`
 Expected: FAIL — `Failed to resolve import "./hook-server.js"`
 
 - [ ] **Step 4: Írd meg az implementációt**
@@ -2619,6 +2624,7 @@ contextBridge.exposeInMainWorld('claudeswitcher', {
 
 `apps/desktop/src/renderer/main.tsx`:
 ```tsx
+import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 
 function App(): JSX.Element {
@@ -2630,7 +2636,9 @@ createRoot(document.getElementById('root')!).render(<App />)
 
 - [ ] **Step 5: Kézi ellenőrzés**
 
-Run: `pnpm --filter @claudeswitcher/desktop dev`
+A `desktop` a `core`-t és a `daemon`-t a lefordított `dist/`-en át éri el.
+
+Run: `pnpm build && pnpm --filter @claudeswitcher/desktop dev`
 Expected: megnyílik egy keret nélküli ablak "ClaudeSwitcher" felirattal, és a
 konzolon nincs hiba. Ellenőrizd, hogy a daemon elindult: a DevTools konzolján
 `await window.claudeswitcher.state()` visszaadja a futó sessionjeidet.
@@ -2877,8 +2885,9 @@ export function registerHotkey(accelerator: string, handler: () => void): boolea
 - [ ] **Step 3: Kösd össze a main processzben**
 
 `apps/desktop/src/main/index.ts` — cseréld le az `app.whenReady()` végén lévő
-`overlay.showInactive()` sort erre, és vedd fel a hiányzó importokat
-(`createTray`, `registerHotkey`, `screen`):
+`overlay.showInactive()` sort erre. A hiányzó importok: `screen` és
+`globalShortcut` az `electron`-ból, `createTray` a `./tray.js`-ből,
+`registerHotkey` a `./hotkey.js`-ből:
 
 ```ts
   overlay = createOverlay()
@@ -3150,7 +3159,7 @@ export function useDaemonState(): DaemonState {
 
 `apps/desktop/src/renderer/App.tsx`:
 ```tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type JSX } from 'react'
 import { formatDuration, formatResetsIn, summarize } from './format.js'
 import { useDaemonState } from './useDaemonState.js'
 import './styles.css'
