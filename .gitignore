@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+out/
+build/
+release/
+*.tsbuildinfo
+
+# Nx
+.nx/cache
+.nx/workspace-data
+
+# Electron
+apps/desktop/release/
+
+# VSCode extension
+*.vsix
+
+# local config / secrets
+.env
+.env.*
+!.env.example
+
+# editor / OS
+.vscode/settings.json
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
