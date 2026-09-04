@@ -1,0 +1,17 @@
+{
+  "name": "claudeswitcher",
+  "private": true,
+  "packageManager": "pnpm@11.13.1",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "nx run-many -t build",
+    "test": "nx run-many -t test",
+    "check-types": "nx run-many -t check-types",
+    "lint": "nx run-many -t lint"
+  },
+  "devDependencies": {
+    "nx": "^21.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
