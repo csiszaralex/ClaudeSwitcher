@@ -1,0 +1,3540 @@
+# ClaudeSwitcher M1 — Read-only monitor Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Egy tálcán futó Electron app, ami globális hotkey-re megmutatja az összes élő Claude Code sessiont, az állapotukat, a limitek állását, és egy gombnyomással a megfelelő VSCode ablakra ugrik.
+
+**Architecture:** Egy `core` csomag tartalmazza az összes IO-mentes logikát (session-felderítés, transcript-olvasás, settings-merge), egy `daemon` csomag adja a hook HTTP endpointot, a fájlfigyelőket és a WS hubot, és egy Electron app hosztolja a daemont a main processzében, plusz adja a tray-t és az overlayt. Az M1 nem vesz el döntést a Claude Code-tól: csak a `Notification` és életciklus hookokat használja, amelyek dokumentáltan nem tudnak blokkolni.
+
+**Tech Stack:** TypeScript (strict), pnpm workspace + Nx, Vitest, Hono + `@hono/node-server`, `ws`, `chokidar`, Electron + electron-vite + React, `koffi` (Win32 ablakfókusz).
+
+**Spec:** `docs/superpowers/specs/2026-09-04-claudeswitcher-design.md`
+
+## Global Constraints
+
+- **Platform:** Windows-only. A kód futtatható más platformon (tesztek miatt), de nem támogatott.
+- **Node:** 22+. **pnpm:** 11+.
+- **TypeScript:** `strict: true`, `noUncheckedIndexedAccess: true` minden csomagban.
+- **Claude config dir:** mindig a `CLAUDE_CONFIG_DIR` env változó, ha be van állítva; egyébként `path.join(os.homedir(), '.claude')`. Soha ne legyen hardcode-olva.
+- **Transcript-olvasás:** ismeretlen rekordtípus kihagyása kötelező, soha ne dobjon kivételt. (A valós fájlokban legalább ezek szerepelnek: `queue-operation`, `user`, `attachment`, `file-history-snapshot`, `ai-title`, `atis-latch`, `assistant`.)
+- **Liveness:** pid önmagában soha nem elég. Mindig pid **és** process creation time egyeztetés — a `~/.claude/ide/` mappában elárvult lock fájlok vannak újrahasznosított pidekkel.
+- **Settings-írás:** kizárólag atomikusan (temp fájl + rename), és kizárólag merge-elve. A meglévő kulcsok (`model`, `enabledPlugins`, `effortLevel`, `tui`, `permissions`) érintetlenül maradnak.
+- **Hálózat:** a daemon HTTP és WS szervere kizárólag `127.0.0.1`-re bindol, és minden kérés bearer tokent követel.
+- **Transcript-fájl megtalálása:** soha ne a `cwd`-ből képzett könyvtárnévvel. Mindig glob: `<claudeDir>/projects/*/<sessionId>.jsonl`. A könyvtárnév-kódolás nem dokumentált és változhat.
+
+---
+
+## File Structure
+
+```
+claudeswitcher/
+├─ package.json                       workspace root, Nx target-ek
+├─ pnpm-workspace.yaml
+├─ nx.json
+├─ tsconfig.base.json
+├─ packages/core/
+│  ├─ src/types.ts                    minden megosztott típus
+│  ├─ src/paths.ts                    claude config dir feloldás
+│  ├─ src/session-registry.ts         sessions/*.json és ide/*.lock parse
+│  ├─ src/liveness.ts                 ProcessProbe + resolveLiveSessions
+│  ├─ src/transcript.ts               tail + SessionActivity kinyerés
+│  ├─ src/settings-writer.ts          atomikus merge író
+│  └─ src/index.ts                    public API re-export
+├─ packages/daemon/
+│  ├─ src/hook-server.ts              Hono app, auth, hook route-ok
+│  ├─ src/session-store.ts            registry + események + activity → SessionView[]
+│  ├─ src/watchers.ts                 chokidar + poll loop
+│  ├─ src/hub.ts                      WS broadcast
+│  ├─ src/rate-limits.ts              statusLine bemenet tárolása
+│  └─ src/daemon.ts                   összeszerelés, start/stop
+├─ packages/statusline/
+│  └─ src/main.ts                     stdin JSON → POST a daemonnak + sor kiírása
+└─ apps/desktop/
+   ├─ src/main/index.ts               Electron main, daemon hosztolás
+   ├─ src/main/tray.ts                tray ikon + badge
+   ├─ src/main/overlay-window.ts      frameless always-on-top ablak
+   ├─ src/main/hotkey.ts              globalShortcut
+   ├─ src/main/focus-window.ts        koffi SetForegroundWindow + code -r fallback
+   ├─ src/main/setup.ts               hookok + statusLine telepítése a settingsbe
+   ├─ src/preload/index.ts            contextBridge
+   └─ src/renderer/                   React overlay lista
+```
+
+---
+
+### Task 1: Monorepo scaffolding
+
+**Files:**
+- Create: `package.json`, `pnpm-workspace.yaml`, `nx.json`, `tsconfig.base.json`, `.npmrc`
+- Create: `packages/core/package.json`, `packages/core/tsconfig.json`, `packages/core/vitest.config.ts`
+- Test: `packages/core/src/smoke.test.ts`
+
+**Interfaces:**
+- Consumes: semmi
+- Produces: a `@claudeswitcher/core` workspace csomag, futó `pnpm test`
+
+- [ ] **Step 1: Root workspace fájlok**
+
+`pnpm-workspace.yaml`:
+```yaml
+packages:
+  - "packages/*"
+  - "apps/*"
+```
+
+`.npmrc`:
+```
+node-linker=isolated
+strict-peer-dependencies=false
+```
+
+`package.json`:
+```json
+{
+  "name": "claudeswitcher",
+  "private": true,
+  "packageManager": "pnpm@11.13.1",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "nx run-many -t build",
+    "test": "nx run-many -t test",
+    "check-types": "nx run-many -t check-types",
+    "lint": "nx run-many -t lint"
+  },
+  "devDependencies": {
+    "nx": "^21.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
+```
+
+`nx.json`:
+```json
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "targetDefaults": {
+    "build": { "dependsOn": ["^build"], "cache": true },
+    "test": { "cache": true },
+    "check-types": { "dependsOn": ["^build"], "cache": true }
+  }
+}
+```
+
+`tsconfig.base.json`:
+```json
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "declaration": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}
+```
+
+- [ ] **Step 2: A core csomag váza**
+
+`packages/core/package.json`:
+```json
+{
+  "name": "@claudeswitcher/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  }
+}
+```
+
+`packages/core/tsconfig.json`:
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "dist", "rootDir": "src" },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts"]
+}
+```
+
+`packages/core/vitest.config.ts`:
+```ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: { include: ['src/**/*.test.ts'] },
+})
+```
+
+- [ ] **Step 3: Írd meg a smoke tesztet**
+
+`packages/core/src/smoke.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+
+describe('toolchain', () => {
+  it('runs vitest', () => {
+    expect(1 + 1).toBe(2)
+  })
+})
+```
+
+- [ ] **Step 4: Telepítés és futtatás**
+
+Run: `pnpm install && pnpm test`
+Expected: PASS, 1 teszt.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A
+git commit -m "chore: scaffold pnpm + nx monorepo with core package"
+```
+
+---
+
+### Task 2: core — típusok és nyers fájl-parse
+
+**Files:**
+- Create: `packages/core/src/types.ts`, `packages/core/src/session-registry.ts`
+- Test: `packages/core/src/session-registry.test.ts`
+
+**Interfaces:**
+- Consumes: semmi
+- Produces:
+  - `SessionRecord`, `IdeLock`, `SessionStatus`, `SessionActivity`, `LiveSession`, `SessionView`, `RateLimitWindow`, `RateLimits` típusok
+  - `parseSessionRecord(raw: unknown): SessionRecord | null`
+  - `parseIdeLock(raw: unknown, port: number): IdeLock | null`
+
+- [ ] **Step 1: Írd meg a failing tesztet**
+
+`packages/core/src/session-registry.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { parseIdeLock, parseSessionRecord } from './session-registry.js'
+
+const REAL_SESSION = {
+  pid: 21548,
+  sessionId: '02df22e9-0cb8-4e89-8124-fb3c597ee4f0',
+  cwd: 'p:\\01_Fullstack\\journal',
+  startedAt: 1788447404737,
+  procStart: '134329210033019891',
+  version: '2.1.259',
+  kind: 'interactive',
+  entrypoint: 'claude-vscode',
+  name: 'journal-58',
+  nameSource: 'derived',
+  bridgeSessionId: 'session_01LtDxAq3W2y7XNbXfPk1nVF',
+}
+
+const REAL_LOCK = {
+  pid: 8108,
+  workspaceFolders: ['p:\\08_Apps\\ClaudeSwitcher'],
+  ideName: 'Visual Studio Code',
+  transport: 'ws',
+  runningInWindows: true,
+  authToken: 'cc6b82e3-2562-4ff4-a85f-ea6c95aa57e7',
+}
+
+describe('parseSessionRecord', () => {
+  it('parses a real session file', () => {
+    const r = parseSessionRecord(REAL_SESSION)
+    expect(r).not.toBeNull()
+    expect(r!.pid).toBe(21548)
+    expect(r!.sessionId).toBe('02df22e9-0cb8-4e89-8124-fb3c597ee4f0')
+    expect(r!.cwd).toBe('p:\\01_Fullstack\\journal')
+    expect(r!.procStart).toBe('134329210033019891')
+    expect(r!.name).toBe('journal-58')
+    expect(r!.bridgeSessionId).toBe('session_01LtDxAq3W2y7XNbXfPk1nVF')
+  })
+
+  it('tolerates a missing bridgeSessionId', () => {
+    const r = parseSessionRecord({ ...REAL_SESSION, bridgeSessionId: null })
+    expect(r!.bridgeSessionId).toBeNull()
+  })
+
+  it('survives unknown future fields', () => {
+    const r = parseSessionRecord({ ...REAL_SESSION, somethingNew: { a: 1 } })
+    expect(r).not.toBeNull()
+  })
+
+  it('returns null when a required field is missing', () => {
+    const { sessionId, ...withoutId } = REAL_SESSION
+    expect(parseSessionRecord(withoutId)).toBeNull()
+    expect(parseSessionRecord(null)).toBeNull()
+    expect(parseSessionRecord('nonsense')).toBeNull()
+  })
+})
+
+describe('parseIdeLock', () => {
+  it('parses a real lock file', () => {
+    const l = parseIdeLock(REAL_LOCK, 50269)
+    expect(l).not.toBeNull()
+    expect(l!.port).toBe(50269)
+    expect(l!.pid).toBe(8108)
+    expect(l!.workspaceFolders).toEqual(['p:\\08_Apps\\ClaudeSwitcher'])
+  })
+
+  it('returns null without workspaceFolders', () => {
+    const { workspaceFolders, ...bad } = REAL_LOCK
+    expect(parseIdeLock(bad, 1)).toBeNull()
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/core test`
+Expected: FAIL — `Failed to resolve import "./session-registry.js"`
+
+- [ ] **Step 3: Írd meg a típusokat**
+
+`packages/core/src/types.ts`:
+```ts
+/** Nyers rekord a ~/.claude/sessions/<pid>.json fájlból. Nem dokumentált formátum. */
+export interface SessionRecord {
+  pid: number
+  sessionId: string
+  cwd: string
+  startedAt: number
+  procStart?: string
+  version?: string
+  kind?: string
+  entrypoint?: string
+  name?: string
+  bridgeSessionId?: string | null
+}
+
+/** Nyers rekord a ~/.claude/ide/<port>.lock fájlból. Nem dokumentált formátum. */
+export interface IdeLock {
+  port: number
+  pid: number
+  workspaceFolders: string[]
+  ideName?: string
+  transport?: string
+}
+
+export type SessionStatus = 'waiting' | 'working' | 'idle' | 'unknown'
+
+export interface SessionActivity {
+  lastAssistantText?: string
+  runningTool?: string
+  lastEventAt?: number
+}
+
+export interface LiveSession {
+  record: SessionRecord
+  window?: IdeLock
+}
+
+/** Amit a daemon a UI-nak küld. */
+export interface SessionView {
+  sessionId: string
+  pid: number
+  name: string
+  cwd: string
+  status: SessionStatus
+  activity: SessionActivity
+  windowPid?: number
+  workspaceFolder?: string
+  bridgeSessionId?: string | null
+  waitingSince?: number
+  notificationText?: string
+}
+
+export interface RateLimitWindow {
+  used_percentage: number
+  resets_at: number
+}
+
+export interface RateLimits {
+  five_hour?: RateLimitWindow
+  seven_day?: RateLimitWindow
+  spend_limit?: RateLimitWindow
+}
+```
+
+- [ ] **Step 4: Írd meg a parse-olókat**
+
+`packages/core/src/session-registry.ts`:
+```ts
+import type { IdeLock, SessionRecord } from './types.js'
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * Toleráns parse: ismeretlen mezőket figyelmen kívül hagy, hiányzó kötelező
+ * mezőnél null-t ad. Soha nem dob — a formátum nem dokumentált, verzióváltásnál
+ * változhat, és egy rossz fájl nem viheti magával a többi sessiont.
+ */
+export function parseSessionRecord(raw: unknown): SessionRecord | null {
+  if (!isRecord(raw)) return null
+  const { pid, sessionId, cwd, startedAt } = raw
+  if (typeof pid !== 'number' || typeof sessionId !== 'string') return null
+  if (typeof cwd !== 'string' || typeof startedAt !== 'number') return null
+
+  return {
+    pid,
+    sessionId,
+    cwd,
+    startedAt,
+    procStart: typeof raw.procStart === 'string' ? raw.procStart : undefined,
+    version: typeof raw.version === 'string' ? raw.version : undefined,
+    kind: typeof raw.kind === 'string' ? raw.kind : undefined,
+    entrypoint: typeof raw.entrypoint === 'string' ? raw.entrypoint : undefined,
+    name: typeof raw.name === 'string' ? raw.name : undefined,
+    bridgeSessionId:
+      typeof raw.bridgeSessionId === 'string' ? raw.bridgeSessionId
+      : raw.bridgeSessionId === null ? null
+      : undefined,
+  }
+}
+
+export function parseIdeLock(raw: unknown, port: number): IdeLock | null {
+  if (!isRecord(raw)) return null
+  const { pid, workspaceFolders } = raw
+  if (typeof pid !== 'number' || !Array.isArray(workspaceFolders)) return null
+  const folders = workspaceFolders.filter((f): f is string => typeof f === 'string')
+  if (folders.length === 0) return null
+
+  return {
+    port,
+    pid,
+    workspaceFolders: folders,
+    ideName: typeof raw.ideName === 'string' ? raw.ideName : undefined,
+    transport: typeof raw.transport === 'string' ? raw.transport : undefined,
+  }
+}
+```
+
+- [ ] **Step 5: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/core test`
+Expected: PASS, minden teszt.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/core/src/types.ts packages/core/src/session-registry.ts packages/core/src/session-registry.test.ts
+git commit -m "feat(core): tolerant parsing of session registry and IDE lock files"
+```
+
+---
+
+### Task 3: core — liveness és session/ablak párosítás
+
+**Files:**
+- Create: `packages/core/src/liveness.ts`
+- Test: `packages/core/src/liveness.test.ts`
+
+**Interfaces:**
+- Consumes: `SessionRecord`, `IdeLock`, `LiveSession` (Task 2)
+- Produces:
+  - `interface ProcessProbe { isAlive(pid: number, procStart?: string): boolean }`
+  - `resolveLiveSessions(records: SessionRecord[], locks: IdeLock[], probe: ProcessProbe): LiveSession[]`
+  - `createWin32ProcessProbe(): ProcessProbe`
+
+- [ ] **Step 1: Írd meg a failing tesztet**
+
+Ez a rendszer legfontosabb tesztje: a valós gépen 20 lock fájl van, és a 8108-as pid két különböző workspace-szel is szerepel. `procStart` nélkül rossz ablakra ugranánk.
+
+`packages/core/src/liveness.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { resolveLiveSessions } from './liveness.js'
+import type { IdeLock, ProcessProbe, SessionRecord } from './index.js'
+
+function session(over: Partial<SessionRecord> = {}): SessionRecord {
+  return {
+    pid: 100,
+    sessionId: 'sid-100',
+    cwd: 'p:\\proj\\alpha',
+    startedAt: 1,
+    procStart: 'ps-100',
+    ...over,
+  }
+}
+
+function lock(over: Partial<IdeLock> = {}): IdeLock {
+  return { port: 1000, pid: 900, workspaceFolders: ['p:\\proj\\alpha'], ...over }
+}
+
+/** Csak a felsorolt pid+procStart párokat tekinti élőnek. */
+function probeFor(alive: Array<[number, string | undefined]>): ProcessProbe {
+  return {
+    isAlive: (pid, procStart) =>
+      alive.some(([p, s]) => p === pid && s === procStart),
+  }
+}
+
+describe('resolveLiveSessions', () => {
+  it('drops sessions whose process is gone', () => {
+    const probe = probeFor([])
+    expect(resolveLiveSessions([session()], [lock()], probe)).toEqual([])
+  })
+
+  it('pairs a live session with the window whose workspace contains its cwd', () => {
+    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
+    const out = resolveLiveSessions([session()], [lock()], probe)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.window?.pid).toBe(900)
+  })
+
+  it('matches a cwd nested below the workspace folder', () => {
+    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
+    const s = session({ cwd: 'p:\\proj\\alpha\\apps\\api' })
+    const out = resolveLiveSessions([s], [lock()], probe)
+    expect(out[0]!.window?.pid).toBe(900)
+  })
+
+  it('matches case-insensitively and ignores trailing separators', () => {
+    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
+    const s = session({ cwd: 'P:/PROJ/Alpha/' })
+    const out = resolveLiveSessions([s], [lock()], probe)
+    expect(out[0]!.window?.pid).toBe(900)
+  })
+
+  it('does not match a sibling directory with a shared prefix', () => {
+    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
+    const s = session({ cwd: 'p:\\proj\\alpha-two' })
+    const out = resolveLiveSessions([s], [lock()], probe)
+    expect(out[0]!.window).toBeUndefined()
+  })
+
+  it('ignores a stale lock whose pid was reused by another process', () => {
+    // Két lock ugyanazzal a piddel, különböző workspace-szel — pontosan ez a
+    // helyzet a valós gépen. Az élő ablak az alpha-t tartja; a beta lock elárvult.
+    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
+    const stale = lock({ port: 1001, pid: 901, workspaceFolders: ['p:\\proj\\beta'] })
+    const out = resolveLiveSessions([session()], [stale, lock()], probe)
+    expect(out[0]!.window?.port).toBe(1000)
+  })
+
+  it('leaves window undefined when no lock matches', () => {
+    const probe = probeFor([[100, 'ps-100']])
+    const out = resolveLiveSessions([session()], [], probe)
+    expect(out).toHaveLength(1)
+    expect(out[0]!.window).toBeUndefined()
+  })
+
+  it('prefers the most specific workspace folder when several match', () => {
+    const probe = probeFor([[100, 'ps-100'], [900, undefined], [901, undefined]])
+    const broad = lock({ port: 1000, pid: 900, workspaceFolders: ['p:\\proj'] })
+    const exact = lock({ port: 1001, pid: 901, workspaceFolders: ['p:\\proj\\alpha'] })
+    const out = resolveLiveSessions([session()], [broad, exact], probe)
+    expect(out[0]!.window?.pid).toBe(901)
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/core test liveness`
+Expected: FAIL — `Failed to resolve import "./liveness.js"`
+
+- [ ] **Step 3: Írd meg az implementációt**
+
+`packages/core/src/liveness.ts`:
+```ts
+import { execFileSync } from 'node:child_process'
+import type { IdeLock, LiveSession, SessionRecord } from './types.js'
+
+export interface ProcessProbe {
+  /**
+   * Igaz, ha a pid létezik ÉS — ha `procStart` meg van adva — a process
+   * indulási ideje egyezik. A pid önmagában nem elég: a Windows újrahasznosítja
+   * a pideket, és az elárvult lock fájlok miatt rossz ablakra ugranánk.
+   */
+  isAlive(pid: number, procStart?: string): boolean
+}
+
+function normalize(p: string): string {
+  return p.replace(/[\\/]+/g, '\\').replace(/\\+$/, '').toLowerCase()
+}
+
+/** Igaz, ha `child` azonos `parent`-tel vagy alatta van. */
+function isWithin(child: string, parent: string): boolean {
+  const c = normalize(child)
+  const p = normalize(parent)
+  return c === p || c.startsWith(p + '\\')
+}
+
+function bestWindow(cwd: string, locks: IdeLock[], probe: ProcessProbe): IdeLock | undefined {
+  let best: IdeLock | undefined
+  let bestLength = -1
+
+  for (const lock of locks) {
+    if (!probe.isAlive(lock.pid)) continue
+    for (const folder of lock.workspaceFolders) {
+      if (!isWithin(cwd, folder)) continue
+      const length = normalize(folder).length
+      if (length > bestLength) {
+        best = lock
+        bestLength = length
+      }
+    }
+  }
+  return best
+}
+
+export function resolveLiveSessions(
+  records: SessionRecord[],
+  locks: IdeLock[],
+  probe: ProcessProbe,
+): LiveSession[] {
+  return records
+    .filter((r) => probe.isAlive(r.pid, r.procStart))
+    .map((record) => ({ record, window: bestWindow(record.cwd, locks, probe) }))
+}
+
+const SNAPSHOT_SCRIPT = [
+  'Get-Process | ForEach-Object {',
+  '  try { "$($_.Id) $($_.StartTime.ToFileTime())" } catch { }',
+  '}',
+].join(' ')
+
+/**
+ * Windows process probe. A `procStart` a session fájlban a process creation
+ * FILETIME decimálisan; a PowerShell `StartTime.ToFileTime()` ugyanezt adja.
+ *
+ * Egyetlen pillanatképet vesz az összes processzről, és abból válaszol. Ez
+ * szándékos: egy szkennelés 20-30 pidet kérdez meg, és pidenként egy
+ * PowerShell indítása (~200 ms) a másodperces poll mellett elfogadhatatlan.
+ * A pillanatkép `ttlMs`-ig érvényes, és hiba esetén az előzőt tartjuk meg —
+ * egy elbukott lekérdezés ne tüntesse el az összes sessiont a listáról.
+ */
+export function createWin32ProcessProbe(ttlMs = 2000): ProcessProbe {
+  let snapshot = new Map<number, string>()
+  let takenAt = 0
+
+  function refresh(): void {
+    const now = Date.now()
+    if (now - takenAt < ttlMs) return
+    takenAt = now
+
+    let output: string
+    try {
+      output = execFileSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', SNAPSHOT_SCRIPT],
+        { encoding: 'utf8', windowsHide: true, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 },
+      )
+    } catch (error) {
+      console.error('[probe] process snapshot failed, keeping the previous one', error)
+      return
+    }
+
+    const next = new Map<number, string>()
+    for (const line of output.split('\n')) {
+      const [rawPid, fileTime] = line.trim().split(' ')
+      if (rawPid === undefined || fileTime === undefined) continue
+      const pid = Number.parseInt(rawPid, 10)
+      if (!Number.isNaN(pid)) next.set(pid, fileTime)
+    }
+    if (next.size > 0) snapshot = next
+  }
+
+  return {
+    isAlive(pid, procStart) {
+      refresh()
+      const startFileTime = snapshot.get(pid)
+      if (startFileTime === undefined) return false
+      if (procStart === undefined) return true
+      return startFileTime === procStart
+    },
+  }
+}
+```
+
+- [ ] **Step 4: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/core test liveness`
+Expected: PASS, 8 teszt.
+
+- [ ] **Step 5: Kézi ellenőrzés a valós gépen**
+
+Ez azt igazolja, hogy a `procStart` formátumfeltevés helyes. Futtasd egy élő session pidjével:
+
+```powershell
+$s = Get-Content "$env:USERPROFILE\.claude\sessions\<pid>.json" -Raw | ConvertFrom-Json
+"file: $($s.procStart)"
+"proc: $((Get-Process -Id $s.pid).StartTime.ToFileTime())"
+```
+Expected: a két érték azonos. Ha nem, állítsd le a taskot és jelezd — a
+`createWin32ProcessProbe` feltevése hibás, és a párosítás az egész M1 alapja.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/core/src/liveness.ts packages/core/src/liveness.test.ts
+git commit -m "feat(core): liveness check with process start time and session/window pairing"
+```
+
+---
+
+### Task 4: core — transcript-olvasás
+
+**Files:**
+- Create: `packages/core/src/transcript.ts`
+- Test: `packages/core/src/transcript.test.ts`
+
+**Interfaces:**
+- Consumes: `SessionActivity` (Task 2)
+- Produces:
+  - `readActivityFromLines(lines: string[]): SessionActivity`
+  - `findTranscriptPath(claudeDir: string, sessionId: string): Promise<string | undefined>`
+  - `tailLines(filePath: string, maxBytes?: number): Promise<string[]>`
+
+- [ ] **Step 1: Írd meg a failing tesztet**
+
+`packages/core/src/transcript.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { readActivityFromLines } from './transcript.js'
+
+const assistantText = JSON.stringify({
+  type: 'assistant',
+  timestamp: '2026-09-04T10:00:00.000Z',
+  message: { content: [{ type: 'text', text: 'Megnézem a konfigot.' }] },
+})
+
+const assistantTool = JSON.stringify({
+  type: 'assistant',
+  timestamp: '2026-09-04T10:00:05.000Z',
+  message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'pnpm test' } }] },
+})
+
+describe('readActivityFromLines', () => {
+  it('returns the last assistant text', () => {
+    const a = readActivityFromLines([assistantText])
+    expect(a.lastAssistantText).toBe('Megnézem a konfigot.')
+    expect(a.lastEventAt).toBe(Date.parse('2026-09-04T10:00:00.000Z'))
+  })
+
+  it('reports a running tool from the newest assistant message', () => {
+    const a = readActivityFromLines([assistantText, assistantTool])
+    expect(a.runningTool).toBe('Bash')
+    expect(a.lastAssistantText).toBe('Megnézem a konfigot.')
+  })
+
+  it('clears the running tool once its result arrives', () => {
+    const result = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-09-04T10:00:09.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'x' }] },
+    })
+    const a = readActivityFromLines([assistantTool, result])
+    expect(a.runningTool).toBeUndefined()
+  })
+
+  it('skips unknown record types without throwing', () => {
+    const noise = [
+      JSON.stringify({ type: 'queue-operation', operation: 'x' }),
+      JSON.stringify({ type: 'atis-latch', atis: 1 }),
+      JSON.stringify({ type: 'file-history-snapshot', snapshot: {} }),
+      JSON.stringify({ type: 'ai-title', aiTitle: 'x' }),
+      JSON.stringify({ type: 'attachment', attachment: {} }),
+      JSON.stringify({ type: 'brand-new-type-from-the-future' }),
+    ]
+    expect(() => readActivityFromLines(noise)).not.toThrow()
+    expect(readActivityFromLines(noise).lastAssistantText).toBeUndefined()
+  })
+
+  it('skips malformed JSON and truncated lines', () => {
+    const a = readActivityFromLines(['{"type":"assis', '', '   ', assistantText])
+    expect(a.lastAssistantText).toBe('Megnézem a konfigot.')
+  })
+
+  it('returns an empty activity for no input', () => {
+    expect(readActivityFromLines([])).toEqual({})
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/core test transcript`
+Expected: FAIL — `Failed to resolve import "./transcript.js"`
+
+- [ ] **Step 3: Írd meg az implementációt**
+
+`packages/core/src/transcript.ts`:
+```ts
+import { open, readdir } from 'node:fs/promises'
+import path from 'node:path'
+import type { SessionActivity } from './types.js'
+
+interface ContentBlock {
+  type?: unknown
+  text?: unknown
+  name?: unknown
+}
+
+function blocks(rec: Record<string, unknown>): ContentBlock[] {
+  const message = rec.message
+  if (typeof message !== 'object' || message === null) return []
+  const content = (message as Record<string, unknown>).content
+  return Array.isArray(content) ? (content as ContentBlock[]) : []
+}
+
+/**
+ * A transcript utolsó soraiból kiolvassa, mit csinál épp a session.
+ * Ismeretlen rekordtípus némán kimarad — a formátum bővül, és egy új típus
+ * nem törheti el a monitort.
+ */
+export function readActivityFromLines(lines: string[]): SessionActivity {
+  const activity: SessionActivity = {}
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+
+    let rec: Record<string, unknown>
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      if (typeof parsed !== 'object' || parsed === null) continue
+      rec = parsed as Record<string, unknown>
+    } catch {
+      continue
+    }
+
+    const at = typeof rec.timestamp === 'string' ? Date.parse(rec.timestamp) : NaN
+    if (!Number.isNaN(at)) activity.lastEventAt = at
+
+    if (rec.type === 'assistant') {
+      for (const block of blocks(rec)) {
+        if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
+          activity.lastAssistantText = block.text.trim()
+        }
+        if (block.type === 'tool_use' && typeof block.name === 'string') {
+          activity.runningTool = block.name
+        }
+      }
+    } else if (rec.type === 'user') {
+      // Egy tool_result lezárja a futó toolt.
+      if (blocks(rec).some((b) => b.type === 'tool_result')) {
+        activity.runningTool = undefined
+      }
+    }
+  }
+
+  return activity
+}
+
+/**
+ * Megkeresi a session transcriptjét. Szándékosan glob-bal, nem a cwd-ből
+ * képzett könyvtárnévvel: a kódolás nem dokumentált és változhat.
+ */
+export async function findTranscriptPath(
+  claudeDir: string,
+  sessionId: string,
+): Promise<string | undefined> {
+  const projects = path.join(claudeDir, 'projects')
+  let entries: string[]
+  try {
+    entries = await readdir(projects)
+  } catch {
+    return undefined
+  }
+
+  for (const entry of entries) {
+    const candidate = path.join(projects, entry, `${sessionId}.jsonl`)
+    try {
+      const handle = await open(candidate, 'r')
+      await handle.close()
+      return candidate
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
+
+/** A fájl utolsó `maxBytes` bájtját olvassa, és eldobja az első, csonka sort. */
+export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promise<string[]> {
+  let handle
+  try {
+    handle = await open(filePath, 'r')
+  } catch {
+    return []
+  }
+  try {
+    const { size } = await handle.stat()
+    const start = Math.max(0, size - maxBytes)
+    const length = size - start
+    if (length === 0) return []
+
+    const buffer = Buffer.alloc(length)
+    await handle.read(buffer, 0, length, start)
+    const lines = buffer.toString('utf8').split('\n')
+    if (start > 0) lines.shift()
+    return lines
+  } finally {
+    await handle.close()
+  }
+}
+```
+
+- [ ] **Step 4: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/core test transcript`
+Expected: PASS, 6 teszt.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/core/src/transcript.ts packages/core/src/transcript.test.ts
+git commit -m "feat(core): transcript tailing and activity extraction"
+```
+
+---
+
+### Task 5: core — paths és atomikus settings-író
+
+**Files:**
+- Create: `packages/core/src/paths.ts`, `packages/core/src/settings-writer.ts`, `packages/core/src/index.ts`
+- Test: `packages/core/src/settings-writer.test.ts`
+
+**Interfaces:**
+- Consumes: semmi
+- Produces:
+  - `resolveClaudeDir(env?: NodeJS.ProcessEnv): string`
+  - `mergeSettings(existing: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown>`
+  - `updateSettingsFile(filePath: string, patch: Record<string, unknown>): Promise<void>`
+  - `packages/core/src/index.ts` re-exportálja az összes eddigi publikus API-t és típust
+
+- [ ] **Step 1: Írd meg a failing tesztet**
+
+`packages/core/src/settings-writer.test.ts`:
+```ts
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { mergeSettings, updateSettingsFile } from './settings-writer.js'
+
+describe('mergeSettings', () => {
+  it('preserves unrelated keys', () => {
+    const existing = {
+      model: 'opus[1m]',
+      effortLevel: 'xhigh',
+      tui: 'fullscreen',
+      permissions: { allow: ['Bash(pnpm build *)'] },
+    }
+    const out = mergeSettings(existing, { statusLine: { type: 'command', command: 'x' } })
+    expect(out.model).toBe('opus[1m]')
+    expect(out.effortLevel).toBe('xhigh')
+    expect(out.tui).toBe('fullscreen')
+    expect(out.permissions).toEqual({ allow: ['Bash(pnpm build *)'] })
+    expect(out.statusLine).toEqual({ type: 'command', command: 'x' })
+  })
+
+  it('deep-merges nested objects instead of replacing them', () => {
+    const existing = { permissions: { allow: ['a'], deny: ['b'] } }
+    const out = mergeSettings(existing, { permissions: { ask: ['c'] } })
+    expect(out.permissions).toEqual({ allow: ['a'], deny: ['b'], ask: ['c'] })
+  })
+
+  it('replaces arrays wholesale rather than concatenating', () => {
+    const existing = { hooks: { Notification: [{ old: true }] } }
+    const out = mergeSettings(existing, { hooks: { Notification: [{ fresh: true }] } })
+    expect(out.hooks).toEqual({ Notification: [{ fresh: true }] })
+  })
+
+  it('does not mutate its inputs', () => {
+    const existing = { permissions: { allow: ['a'] } }
+    const frozen = JSON.stringify(existing)
+    mergeSettings(existing, { permissions: { allow: ['b'] } })
+    expect(JSON.stringify(existing)).toBe(frozen)
+  })
+})
+
+describe('updateSettingsFile', () => {
+  it('creates the file when it does not exist', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await updateSettingsFile(file, { model: 'opus' })
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ model: 'opus' })
+  })
+
+  it('merges into an existing file', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ model: 'opus', tui: 'fullscreen' }))
+    await updateSettingsFile(file, { statusLine: { type: 'command' } })
+    const out = JSON.parse(await readFile(file, 'utf8'))
+    expect(out).toEqual({
+      model: 'opus',
+      tui: 'fullscreen',
+      statusLine: { type: 'command' },
+    })
+  })
+
+  it('refuses to write when the existing file is unparseable', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, '{ this is not json')
+    await expect(updateSettingsFile(file, { model: 'opus' })).rejects.toThrow(/parse/i)
+    expect(await readFile(file, 'utf8')).toBe('{ this is not json')
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/core test settings-writer`
+Expected: FAIL — `Failed to resolve import "./settings-writer.js"`
+
+- [ ] **Step 3: Írd meg a paths és settings-writer modult**
+
+`packages/core/src/paths.ts`:
+```ts
+import os from 'node:os'
+import path from 'node:path'
+
+/** A Claude Code konfigurációs könyvtára. CLAUDE_CONFIG_DIR felülírja. */
+export function resolveClaudeDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.CLAUDE_CONFIG_DIR
+  if (override !== undefined && override.trim() !== '') return override
+  return path.join(os.homedir(), '.claude')
+}
+
+export function sessionsDir(claudeDir: string): string {
+  return path.join(claudeDir, 'sessions')
+}
+
+export function ideDir(claudeDir: string): string {
+  return path.join(claudeDir, 'ide')
+}
+
+export function userSettingsPath(claudeDir: string): string {
+  return path.join(claudeDir, 'settings.json')
+}
+```
+
+`packages/core/src/settings-writer.ts`:
+```ts
+import { readFile, rename, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * Rekurzív merge. Objektumokat mélyen egyesít, tömböket és skalárokat cserél.
+ * A tömb-csere szándékos: a hook-konfigot idempotensen akarjuk újraírni, nem
+ * duplikálni minden telepítéskor.
+ */
+export function mergeSettings(
+  existing: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...existing }
+  for (const [key, value] of Object.entries(patch)) {
+    const current = out[key]
+    out[key] =
+      isPlainObject(value) && isPlainObject(current)
+        ? mergeSettings(current, value)
+        : value
+  }
+  return out
+}
+
+/**
+ * Atomikus merge-írás: temp fájl + rename. Parse-olhatatlan meglévő fájlnál
+ * dob, és nem ír — inkább ne módosítsunk semmit, mint hogy elveszítsük a
+ * felhasználó beállításait.
+ */
+export async function updateSettingsFile(
+  filePath: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  let existing: Record<string, unknown> = {}
+
+  let raw: string | undefined
+  try {
+    raw = await readFile(filePath, 'utf8')
+  } catch {
+    raw = undefined
+  }
+
+  if (raw !== undefined && raw.trim() !== '') {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (cause) {
+      throw new Error(`Cannot parse existing settings at ${filePath}; refusing to write`, { cause })
+    }
+    if (!isPlainObject(parsed)) {
+      throw new Error(`Settings at ${filePath} is not a JSON object; refusing to write`)
+    }
+    existing = parsed
+  }
+
+  const merged = mergeSettings(existing, patch)
+  const temp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.tmp`)
+  await writeFile(temp, JSON.stringify(merged, null, 2) + '\n', 'utf8')
+  await rename(temp, filePath)
+}
+```
+
+- [ ] **Step 4: Írd meg a public API-t**
+
+`packages/core/src/index.ts`:
+```ts
+export * from './types.js'
+export * from './paths.js'
+export * from './session-registry.js'
+export * from './liveness.js'
+export * from './transcript.js'
+export * from './settings-writer.js'
+```
+
+- [ ] **Step 5: Futtasd a teszteket és a típusellenőrzést**
+
+Run: `pnpm --filter @claudeswitcher/core test && pnpm --filter @claudeswitcher/core check-types`
+Expected: minden teszt PASS, típushiba nincs.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/core/src/paths.ts packages/core/src/settings-writer.ts packages/core/src/settings-writer.test.ts packages/core/src/index.ts
+git commit -m "feat(core): claude dir resolution and atomic settings merge writer"
+```
+
+---
+
+### Task 6: daemon — hook HTTP szerver
+
+**Files:**
+- Create: `packages/daemon/package.json`, `packages/daemon/tsconfig.json`, `packages/daemon/vitest.config.ts`
+- Create: `packages/daemon/src/hook-server.ts`
+- Test: `packages/daemon/src/hook-server.test.ts`
+
+**Interfaces:**
+- Consumes: semmi a core-ból (a szerver tiszta)
+- Produces:
+  - `interface HookEvents { onNotification(e: NotificationEvent): void; onLifecycle(e: LifecycleEvent): void; onRateLimits(r: RateLimits): void }`
+  - `NotificationEvent = { sessionId: string; cwd: string; type: string; text?: string }`
+  - `LifecycleEvent = { sessionId: string; cwd: string; kind: 'start' | 'end' | 'stop' }`
+  - `createHookApp(token: string, events: HookEvents): Hono`
+
+- [ ] **Step 1: A daemon csomag váza**
+
+`packages/daemon/package.json`:
+```json
+{
+  "name": "@claudeswitcher/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/daemon.js",
+  "types": "./dist/daemon.d.ts",
+  "exports": { ".": { "types": "./dist/daemon.d.ts", "default": "./dist/daemon.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@claudeswitcher/core": "workspace:*",
+    "@hono/node-server": "^1.13.0",
+    "chokidar": "^4.0.0",
+    "hono": "^4.6.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": { "@types/ws": "^8.5.0" }
+}
+```
+
+`packages/daemon/tsconfig.json`:
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "dist", "rootDir": "src" },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts"]
+}
+```
+
+`packages/daemon/vitest.config.ts`:
+```ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: { include: ['src/**/*.test.ts'] },
+})
+```
+
+- [ ] **Step 2: Írd meg a failing tesztet**
+
+A Hono `app.request()` port nyitása nélkül tesztelhető.
+
+`packages/daemon/src/hook-server.test.ts`:
+```ts
+import { describe, expect, it, vi } from 'vitest'
+import { createHookApp, type HookEvents } from './hook-server.js'
+
+const TOKEN = 'test-token'
+
+function events(): HookEvents {
+  return { onNotification: vi.fn(), onLifecycle: vi.fn(), onRateLimits: vi.fn() }
+}
+
+function post(app: ReturnType<typeof createHookApp>, url: string, body: unknown, token = TOKEN) {
+  return app.request(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  })
+}
+
+describe('hook app auth', () => {
+  it('rejects a missing token', async () => {
+    const app = createHookApp(TOKEN, events())
+    const res = await app.request('/hooks/notification', { method: 'POST', body: '{}' })
+    expect(res.status).toBe(401)
+  })
+
+  it('rejects a wrong token', async () => {
+    const app = createHookApp(TOKEN, events())
+    expect((await post(app, '/hooks/notification', {}, 'nope')).status).toBe(401)
+  })
+})
+
+describe('POST /hooks/notification', () => {
+  it('forwards a permission_prompt notification', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    const res = await post(app, '/hooks/notification', {
+      session_id: 'sid-1',
+      cwd: 'p:\\proj\\alpha',
+      hook_event_name: 'Notification',
+      notification_type: 'permission_prompt',
+      notification_text: 'Claude needs permission to run pnpm test',
+    })
+    expect(res.status).toBe(200)
+    expect(ev.onNotification).toHaveBeenCalledWith({
+      sessionId: 'sid-1',
+      cwd: 'p:\\proj\\alpha',
+      type: 'permission_prompt',
+      text: 'Claude needs permission to run pnpm test',
+    })
+  })
+
+  it('always answers 200 with an empty body so it never blocks a session', async () => {
+    const ev = events()
+    ;(ev.onNotification as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error('handler exploded')
+    })
+    const app = createHookApp(TOKEN, ev)
+    const res = await post(app, '/hooks/notification', {
+      session_id: 'sid-1', cwd: 'c', notification_type: 'idle_prompt',
+    })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('')
+  })
+
+  it('ignores a payload without a session_id', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    expect((await post(app, '/hooks/notification', { notification_type: 'x' })).status).toBe(200)
+    expect(ev.onNotification).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /hooks/lifecycle/:kind', () => {
+  it('forwards start, end and stop', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    for (const kind of ['start', 'end', 'stop'] as const) {
+      await post(app, `/hooks/lifecycle/${kind}`, { session_id: 'sid-1', cwd: 'c' })
+      expect(ev.onLifecycle).toHaveBeenCalledWith({ sessionId: 'sid-1', cwd: 'c', kind })
+    }
+  })
+
+  it('ignores an unknown lifecycle kind', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    expect((await post(app, '/hooks/lifecycle/bogus', { session_id: 's', cwd: 'c' })).status).toBe(200)
+    expect(ev.onLifecycle).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /statusline', () => {
+  it('forwards rate limits', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    await post(app, '/statusline', {
+      rate_limits: {
+        five_hour: { used_percentage: 23.5, resets_at: 1738425600 },
+        seven_day: { used_percentage: 41.2, resets_at: 1738857600 },
+      },
+    })
+    expect(ev.onRateLimits).toHaveBeenCalledWith({
+      five_hour: { used_percentage: 23.5, resets_at: 1738425600 },
+      seven_day: { used_percentage: 41.2, resets_at: 1738857600 },
+    })
+  })
+
+  it('ignores a payload with no rate_limits (free plans, pre-first-response)', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    expect((await post(app, '/statusline', { model: { id: 'opus' } })).status).toBe(200)
+    expect(ev.onRateLimits).not.toHaveBeenCalled()
+  })
+})
+```
+
+- [ ] **Step 3: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm install && pnpm --filter @claudeswitcher/daemon test`
+Expected: FAIL — `Failed to resolve import "./hook-server.js"`
+
+- [ ] **Step 4: Írd meg az implementációt**
+
+`packages/daemon/src/hook-server.ts`:
+```ts
+import type { RateLimits, RateLimitWindow } from '@claudeswitcher/core'
+import { Hono } from 'hono'
+
+export interface NotificationEvent {
+  sessionId: string
+  cwd: string
+  type: string
+  text?: string
+}
+
+export interface LifecycleEvent {
+  sessionId: string
+  cwd: string
+  kind: 'start' | 'end' | 'stop'
+}
+
+export interface HookEvents {
+  onNotification(event: NotificationEvent): void
+  onLifecycle(event: LifecycleEvent): void
+  onRateLimits(limits: RateLimits): void
+}
+
+const LIFECYCLE_KINDS = new Set(['start', 'end', 'stop'])
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' && v !== '' ? v : undefined
+}
+
+function limitWindow(v: unknown): RateLimitWindow | undefined {
+  if (!isRecord(v)) return undefined
+  const { used_percentage, resets_at } = v
+  if (typeof used_percentage !== 'number' || typeof resets_at !== 'number') return undefined
+  return { used_percentage, resets_at }
+}
+
+/**
+ * Az M1 hook-szervere. Minden route feltétel nélkül 200-at ad üres törzzsel:
+ * ezek display-only hookok, és a szerver hibája soha nem akaszthat meg egy
+ * sessiont. A hibát naplózzuk, nem terjesztjük.
+ */
+export function createHookApp(token: string, events: HookEvents): Hono {
+  const app = new Hono()
+
+  app.use('*', async (c, next) => {
+    if (c.req.header('authorization') !== `Bearer ${token}`) {
+      return c.text('unauthorized', 401)
+    }
+    await next()
+  })
+
+  async function body(c: { req: { json(): Promise<unknown> } }): Promise<Record<string, unknown>> {
+    try {
+      const parsed = await c.req.json()
+      return isRecord(parsed) ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  app.post('/hooks/notification', async (c) => {
+    try {
+      const b = await body(c)
+      const sessionId = str(b.session_id)
+      const type = str(b.notification_type)
+      if (sessionId !== undefined && type !== undefined) {
+        events.onNotification({
+          sessionId,
+          cwd: str(b.cwd) ?? '',
+          type,
+          text: str(b.notification_text),
+        })
+      }
+    } catch (error) {
+      console.error('[hook] notification handler failed', error)
+    }
+    return c.body(null, 200)
+  })
+
+  app.post('/hooks/lifecycle/:kind', async (c) => {
+    try {
+      const kind = c.req.param('kind')
+      const b = await body(c)
+      const sessionId = str(b.session_id)
+      if (sessionId !== undefined && LIFECYCLE_KINDS.has(kind)) {
+        events.onLifecycle({
+          sessionId,
+          cwd: str(b.cwd) ?? '',
+          kind: kind as LifecycleEvent['kind'],
+        })
+      }
+    } catch (error) {
+      console.error('[hook] lifecycle handler failed', error)
+    }
+    return c.body(null, 200)
+  })
+
+  app.post('/statusline', async (c) => {
+    try {
+      const b = await body(c)
+      const raw = b.rate_limits
+      if (isRecord(raw)) {
+        const limits: RateLimits = {}
+        const five = limitWindow(raw.five_hour)
+        const seven = limitWindow(raw.seven_day)
+        const spend = limitWindow(raw.spend_limit)
+        if (five) limits.five_hour = five
+        if (seven) limits.seven_day = seven
+        if (spend) limits.spend_limit = spend
+        if (Object.keys(limits).length > 0) events.onRateLimits(limits)
+      }
+    } catch (error) {
+      console.error('[hook] statusline handler failed', error)
+    }
+    return c.body(null, 200)
+  })
+
+  return app
+}
+```
+
+- [ ] **Step 5: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/daemon test`
+Expected: PASS, 9 teszt.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/daemon
+git commit -m "feat(daemon): loopback hook HTTP server for notification, lifecycle and statusline"
+```
+
+---
+
+### Task 7: daemon — session store
+
+**Files:**
+- Create: `packages/daemon/src/session-store.ts`
+- Test: `packages/daemon/src/session-store.test.ts`
+
+**Interfaces:**
+- Consumes: `LiveSession`, `SessionActivity`, `SessionView`, `SessionStatus` (core); `NotificationEvent`, `LifecycleEvent` (Task 6)
+- Produces:
+  - `class SessionStore` metódusokkal:
+    - `applySnapshot(sessions: LiveSession[], activities: Map<string, SessionActivity>): void`
+    - `applyNotification(event: NotificationEvent, now?: number): void`
+    - `applyLifecycle(event: LifecycleEvent): void`
+    - `views(): SessionView[]`
+    - `onChange(listener: () => void): void`
+
+- [ ] **Step 1: Írd meg a failing tesztet**
+
+`packages/daemon/src/session-store.test.ts`:
+```ts
+import type { LiveSession, SessionActivity } from '@claudeswitcher/core'
+import { describe, expect, it, vi } from 'vitest'
+import { SessionStore } from './session-store.js'
+
+function live(sessionId: string, over: Partial<LiveSession['record']> = {}): LiveSession {
+  return {
+    record: {
+      pid: 1, sessionId, cwd: 'p:\\proj\\alpha', startedAt: 1,
+      name: 'alpha-01', bridgeSessionId: 'session_01x', ...over,
+    },
+    window: { port: 1000, pid: 900, workspaceFolders: ['p:\\proj\\alpha'] },
+  }
+}
+
+const noActivity = new Map<string, SessionActivity>()
+
+describe('SessionStore', () => {
+  it('projects a snapshot into views', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    const [view] = store.views()
+    expect(view!.sessionId).toBe('s1')
+    expect(view!.name).toBe('alpha-01')
+    expect(view!.windowPid).toBe(900)
+    expect(view!.workspaceFolder).toBe('p:\\proj\\alpha')
+    expect(view!.bridgeSessionId).toBe('session_01x')
+  })
+
+  it('falls back to the directory name when the session has no name', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1', { name: undefined })], noActivity)
+    expect(store.views()[0]!.name).toBe('alpha')
+  })
+
+  it('reports working while a tool is running', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], new Map([['s1', { runningTool: 'Bash' }]]))
+    expect(store.views()[0]!.status).toBe('working')
+  })
+
+  it('reports idle with no tool running', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], new Map([['s1', { lastAssistantText: 'kész' }]]))
+    expect(store.views()[0]!.status).toBe('idle')
+  })
+
+  it('reports waiting after a permission_prompt notification', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    store.applyNotification(
+      { sessionId: 's1', cwd: 'c', type: 'permission_prompt', text: 'run pnpm test?' },
+      5_000,
+    )
+    const [view] = store.views()
+    expect(view!.status).toBe('waiting')
+    expect(view!.waitingSince).toBe(5_000)
+    expect(view!.notificationText).toBe('run pnpm test?')
+  })
+
+  it('treats agent_needs_input as waiting too', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'agent_needs_input' }, 1)
+    expect(store.views()[0]!.status).toBe('waiting')
+  })
+
+  it('keeps waiting even when a later snapshot shows a running tool', () => {
+    // A snapshot a transcriptből jön és lemaradhat; a hook a mérvadó jelzés.
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'permission_prompt' }, 1)
+    store.applySnapshot([live('s1')], new Map([['s1', { runningTool: 'Bash' }]]))
+    expect(store.views()[0]!.status).toBe('waiting')
+  })
+
+  it('clears waiting on a stop lifecycle event', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'permission_prompt' }, 1)
+    store.applyLifecycle({ sessionId: 's1', cwd: 'c', kind: 'stop' })
+    const [view] = store.views()
+    expect(view!.status).toBe('idle')
+    expect(view!.waitingSince).toBeUndefined()
+  })
+
+  it('drops a session that has left the snapshot', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1'), live('s2')], noActivity)
+    store.applySnapshot([live('s2')], noActivity)
+    expect(store.views().map((v) => v.sessionId)).toEqual(['s2'])
+  })
+
+  it('sorts waiting sessions first, oldest wait at the top', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1'), live('s2'), live('s3')], noActivity)
+    store.applyNotification({ sessionId: 's2', cwd: 'c', type: 'permission_prompt' }, 200)
+    store.applyNotification({ sessionId: 's3', cwd: 'c', type: 'permission_prompt' }, 100)
+    expect(store.views().map((v) => v.sessionId)).toEqual(['s3', 's2', 's1'])
+  })
+
+  it('notifies listeners when state changes', () => {
+    const store = new SessionStore()
+    const listener = vi.fn()
+    store.onChange(listener)
+    store.applySnapshot([live('s1')], noActivity)
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores notifications for unknown sessions', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    store.applyNotification({ sessionId: 'ghost', cwd: 'c', type: 'permission_prompt' }, 1)
+    expect(store.views()).toHaveLength(1)
+    expect(store.views()[0]!.status).toBe('idle')
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/daemon test session-store`
+Expected: FAIL — `Failed to resolve import "./session-store.js"`
+
+- [ ] **Step 3: Írd meg az implementációt**
+
+`packages/daemon/src/session-store.ts`:
+```ts
+import type { LiveSession, SessionActivity, SessionView } from '@claudeswitcher/core'
+import type { LifecycleEvent, NotificationEvent } from './hook-server.js'
+
+const WAITING_TYPES = new Set(['permission_prompt', 'agent_needs_input', 'elicitation_dialog'])
+
+interface WaitState {
+  since: number
+  text?: string
+}
+
+function displayName(record: LiveSession['record']): string {
+  if (record.name !== undefined && record.name !== '') return record.name
+  const parts = record.cwd.split(/[\\/]/).filter((p) => p !== '')
+  return parts[parts.length - 1] ?? record.sessionId
+}
+
+/**
+ * A UI-nak küldött állapot egyetlen forrása. Három bemenetet egyesít:
+ * a periodikus snapshotot (registry + transcript), a hook-eseményeket, és az
+ * életciklus-eseményeket. Ütközésnél a hook nyer: a snapshot a transcriptből
+ * származik és lemaradhat, a hook viszont a történés pillanatában érkezik.
+ */
+export class SessionStore {
+  #sessions = new Map<string, LiveSession>()
+  #activities = new Map<string, SessionActivity>()
+  #waiting = new Map<string, WaitState>()
+  #listeners: Array<() => void> = []
+
+  onChange(listener: () => void): void {
+    this.#listeners.push(listener)
+  }
+
+  #emit(): void {
+    for (const listener of this.#listeners) {
+      try {
+        listener()
+      } catch (error) {
+        console.error('[store] listener failed', error)
+      }
+    }
+  }
+
+  applySnapshot(sessions: LiveSession[], activities: Map<string, SessionActivity>): void {
+    const ids = new Set(sessions.map((s) => s.record.sessionId))
+    this.#sessions = new Map(sessions.map((s) => [s.record.sessionId, s]))
+    this.#activities = activities
+
+    for (const id of [...this.#waiting.keys()]) {
+      if (!ids.has(id)) this.#waiting.delete(id)
+    }
+    this.#emit()
+  }
+
+  applyNotification(event: NotificationEvent, now: number = Date.now()): void {
+    if (!this.#sessions.has(event.sessionId)) return
+
+    if (WAITING_TYPES.has(event.type)) {
+      this.#waiting.set(event.sessionId, { since: now, text: event.text })
+    } else {
+      this.#waiting.delete(event.sessionId)
+    }
+    this.#emit()
+  }
+
+  applyLifecycle(event: LifecycleEvent): void {
+    if (event.kind === 'end') {
+      this.#sessions.delete(event.sessionId)
+    }
+    this.#waiting.delete(event.sessionId)
+    this.#emit()
+  }
+
+  views(): SessionView[] {
+    const views: SessionView[] = []
+
+    for (const [sessionId, session] of this.#sessions) {
+      const activity = this.#activities.get(sessionId) ?? {}
+      const wait = this.#waiting.get(sessionId)
+
+      const status =
+        wait !== undefined ? 'waiting'
+        : activity.runningTool !== undefined ? 'working'
+        : 'idle'
+
+      views.push({
+        sessionId,
+        pid: session.record.pid,
+        name: displayName(session.record),
+        cwd: session.record.cwd,
+        status,
+        activity,
+        windowPid: session.window?.pid,
+        workspaceFolder: session.window?.workspaceFolders[0],
+        bridgeSessionId: session.record.bridgeSessionId,
+        waitingSince: wait?.since,
+        notificationText: wait?.text,
+      })
+    }
+
+    return views.sort((a, b) => {
+      if (a.status === 'waiting' && b.status !== 'waiting') return -1
+      if (b.status === 'waiting' && a.status !== 'waiting') return 1
+      if (a.status === 'waiting' && b.status === 'waiting') {
+        return (a.waitingSince ?? 0) - (b.waitingSince ?? 0)
+      }
+      return a.name.localeCompare(b.name)
+    })
+  }
+}
+```
+
+- [ ] **Step 4: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/daemon test session-store`
+Expected: PASS, 12 teszt.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/daemon/src/session-store.ts packages/daemon/src/session-store.test.ts
+git commit -m "feat(daemon): session store merging registry snapshots with hook events"
+```
+
+---
+
+### Task 8: daemon — rate limit store és scanner
+
+**Files:**
+- Create: `packages/daemon/src/rate-limits.ts`, `packages/daemon/src/scanner.ts`
+- Test: `packages/daemon/src/rate-limits.test.ts`, `packages/daemon/src/scanner.test.ts`
+
+**Interfaces:**
+- Consumes: `RateLimits`, `LiveSession`, `SessionActivity`, `ProcessProbe` (core)
+- Produces:
+  - `class RateLimitStore { update(l: RateLimits): void; current(now?: number): RateLimits }`
+  - `scanSessions(claudeDir: string, probe: ProcessProbe): Promise<{ sessions: LiveSession[]; activities: Map<string, SessionActivity> }>`
+
+- [ ] **Step 1: Írd meg a rate limit failing tesztet**
+
+`packages/daemon/src/rate-limits.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { RateLimitStore } from './rate-limits.js'
+
+const NOW = 1_000_000
+
+describe('RateLimitStore', () => {
+  it('starts empty', () => {
+    expect(new RateLimitStore().current(NOW)).toEqual({})
+  })
+
+  it('keeps the most recent update', () => {
+    const store = new RateLimitStore()
+    store.update({ five_hour: { used_percentage: 10, resets_at: NOW / 1000 + 100 } })
+    store.update({ five_hour: { used_percentage: 20, resets_at: NOW / 1000 + 100 } })
+    expect(store.current(NOW).five_hour?.used_percentage).toBe(20)
+  })
+
+  it('merges windows reported in separate updates', () => {
+    const store = new RateLimitStore()
+    store.update({ five_hour: { used_percentage: 10, resets_at: NOW / 1000 + 100 } })
+    store.update({ seven_day: { used_percentage: 40, resets_at: NOW / 1000 + 200 } })
+    const current = store.current(NOW)
+    expect(current.five_hour?.used_percentage).toBe(10)
+    expect(current.seven_day?.used_percentage).toBe(40)
+  })
+
+  it('drops a window once its resets_at has passed', () => {
+    // A Claude Code maga is eldobja a lejárt ablakot; a UI ne mutasson állottat.
+    const store = new RateLimitStore()
+    store.update({ five_hour: { used_percentage: 90, resets_at: NOW / 1000 - 1 } })
+    expect(store.current(NOW).five_hour).toBeUndefined()
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/daemon test rate-limits`
+Expected: FAIL — `Failed to resolve import "./rate-limits.js"`
+
+- [ ] **Step 3: Írd meg a rate limit store-t**
+
+`packages/daemon/src/rate-limits.ts`:
+```ts
+import type { RateLimits } from '@claudeswitcher/core'
+
+/**
+ * Account-szintű adat, ezért bármelyik session statusLine-ja frissítheti.
+ * A lejárt ablakokat eldobjuk — a Claude Code is ezt teszi, és állott
+ * százalékot mutatni rosszabb, mint semmit.
+ */
+export class RateLimitStore {
+  #limits: RateLimits = {}
+
+  update(limits: RateLimits): void {
+    this.#limits = { ...this.#limits, ...limits }
+  }
+
+  current(now: number = Date.now()): RateLimits {
+    const seconds = now / 1000
+    const out: RateLimits = {}
+    for (const key of ['five_hour', 'seven_day', 'spend_limit'] as const) {
+      const window = this.#limits[key]
+      if (window !== undefined && window.resets_at > seconds) out[key] = window
+    }
+    return out
+  }
+}
+```
+
+- [ ] **Step 4: Írd meg a scanner failing tesztet**
+
+`packages/daemon/src/scanner.test.ts`:
+```ts
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import type { ProcessProbe } from '@claudeswitcher/core'
+import { describe, expect, it } from 'vitest'
+import { scanSessions } from './scanner.js'
+
+const aliveProbe: ProcessProbe = { isAlive: () => true }
+const deadProbe: ProcessProbe = { isAlive: () => false }
+
+async function fixture(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'cs-scan-'))
+  await mkdir(path.join(dir, 'sessions'), { recursive: true })
+  await mkdir(path.join(dir, 'ide'), { recursive: true })
+  await mkdir(path.join(dir, 'projects', 'encoded-alpha'), { recursive: true })
+
+  await writeFile(
+    path.join(dir, 'sessions', '100.json'),
+    JSON.stringify({
+      pid: 100, sessionId: 'sid-100', cwd: 'p:\\proj\\alpha',
+      startedAt: 1, procStart: 'ps-100', name: 'alpha-01',
+    }),
+  )
+  // Szemét, ami nem session fájl — nem szabad elszállni rajta.
+  await writeFile(path.join(dir, 'sessions', '100.abc123'), JSON.stringify({ peerToken: 'x' }))
+  await writeFile(path.join(dir, 'sessions', 'broken.json'), '{ not json')
+
+  await writeFile(
+    path.join(dir, 'ide', '50269.lock'),
+    JSON.stringify({ pid: 900, workspaceFolders: ['p:\\proj\\alpha'], transport: 'ws' }),
+  )
+
+  await writeFile(
+    path.join(dir, 'projects', 'encoded-alpha', 'sid-100.jsonl'),
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-09-04T10:00:00.000Z',
+      message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] },
+    }) + '\n',
+  )
+  return dir
+}
+
+describe('scanSessions', () => {
+  it('finds live sessions, pairs windows, and reads activity', async () => {
+    const dir = await fixture()
+    const { sessions, activities } = await scanSessions(dir, aliveProbe)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]!.record.sessionId).toBe('sid-100')
+    expect(sessions[0]!.window?.pid).toBe(900)
+    expect(activities.get('sid-100')?.runningTool).toBe('Bash')
+  })
+
+  it('returns nothing when no process is alive', async () => {
+    const dir = await fixture()
+    const { sessions } = await scanSessions(dir, deadProbe)
+    expect(sessions).toEqual([])
+  })
+
+  it('survives a missing claude directory', async () => {
+    const { sessions, activities } = await scanSessions(
+      path.join(tmpdir(), 'cs-does-not-exist'),
+      aliveProbe,
+    )
+    expect(sessions).toEqual([])
+    expect(activities.size).toBe(0)
+  })
+
+  it('derives the lock port from the filename', async () => {
+    const dir = await fixture()
+    const { sessions } = await scanSessions(dir, aliveProbe)
+    expect(sessions[0]!.window?.port).toBe(50269)
+  })
+})
+```
+
+- [ ] **Step 5: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/daemon test scanner`
+Expected: FAIL — `Failed to resolve import "./scanner.js"`
+
+- [ ] **Step 6: Írd meg a scannert**
+
+`packages/daemon/src/scanner.ts`:
+```ts
+import { readFile, readdir } from 'node:fs/promises'
+import path from 'node:path'
+import {
+  type LiveSession,
+  type ProcessProbe,
+  type SessionActivity,
+  type SessionRecord,
+  type IdeLock,
+  findTranscriptPath,
+  ideDir,
+  parseIdeLock,
+  parseSessionRecord,
+  readActivityFromLines,
+  resolveLiveSessions,
+  sessionsDir,
+  tailLines,
+} from '@claudeswitcher/core'
+
+async function readJson(filePath: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(filePath, 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
+async function listDir(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir)
+  } catch {
+    return []
+  }
+}
+
+async function readRecords(claudeDir: string): Promise<SessionRecord[]> {
+  const dir = sessionsDir(claudeDir)
+  const names = (await listDir(dir)).filter((n) => n.endsWith('.json'))
+  const records = await Promise.all(
+    names.map(async (name) => parseSessionRecord(await readJson(path.join(dir, name)))),
+  )
+  return records.filter((r): r is SessionRecord => r !== null)
+}
+
+async function readLocks(claudeDir: string): Promise<IdeLock[]> {
+  const dir = ideDir(claudeDir)
+  const names = (await listDir(dir)).filter((n) => n.endsWith('.lock'))
+  const locks = await Promise.all(
+    names.map(async (name) => {
+      const port = Number.parseInt(path.basename(name, '.lock'), 10)
+      if (Number.isNaN(port)) return null
+      return parseIdeLock(await readJson(path.join(dir, name)), port)
+    }),
+  )
+  return locks.filter((l): l is IdeLock => l !== null)
+}
+
+/** Egy teljes állapot-pillanatkép: élő sessionök, párosított ablakok, aktivitás. */
+export async function scanSessions(
+  claudeDir: string,
+  probe: ProcessProbe,
+): Promise<{ sessions: LiveSession[]; activities: Map<string, SessionActivity> }> {
+  const [records, locks] = await Promise.all([readRecords(claudeDir), readLocks(claudeDir)])
+  const sessions = resolveLiveSessions(records, locks, probe)
+
+  const entries = await Promise.all(
+    sessions.map(async ({ record }): Promise<[string, SessionActivity]> => {
+      const transcript = await findTranscriptPath(claudeDir, record.sessionId)
+      if (transcript === undefined) return [record.sessionId, {}]
+      return [record.sessionId, readActivityFromLines(await tailLines(transcript))]
+    }),
+  )
+
+  return { sessions, activities: new Map(entries) }
+}
+```
+
+- [ ] **Step 7: Futtasd az összes daemon tesztet**
+
+Run: `pnpm --filter @claudeswitcher/daemon test`
+Expected: PASS, minden teszt.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add packages/daemon/src/rate-limits.ts packages/daemon/src/rate-limits.test.ts packages/daemon/src/scanner.ts packages/daemon/src/scanner.test.ts
+git commit -m "feat(daemon): rate limit store and filesystem session scanner"
+```
+
+---
+
+### Task 9: daemon — WS hub és összeszerelés
+
+**Files:**
+- Create: `packages/daemon/src/hub.ts`, `packages/daemon/src/daemon.ts`
+- Test: `packages/daemon/src/daemon.test.ts`
+
+**Interfaces:**
+- Consumes: minden korábbi daemon modul
+- Produces:
+  - `interface DaemonState { sessions: SessionView[]; rateLimits: RateLimits }`
+  - `interface Daemon { readonly port: number; readonly token: string; state(): DaemonState; refresh(): Promise<void>; stop(): Promise<void> }`
+  - `startDaemon(options: { claudeDir: string; probe: ProcessProbe; pollMs?: number }): Promise<Daemon>`
+
+- [ ] **Step 1: Írd meg a failing tesztet**
+
+`packages/daemon/src/daemon.test.ts`:
+```ts
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import type { ProcessProbe } from '@claudeswitcher/core'
+import { afterEach, describe, expect, it } from 'vitest'
+import { startDaemon, type Daemon } from './daemon.js'
+
+const aliveProbe: ProcessProbe = { isAlive: () => true }
+let running: Daemon | undefined
+
+afterEach(async () => {
+  await running?.stop()
+  running = undefined
+})
+
+async function fixture(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'cs-daemon-'))
+  await mkdir(path.join(dir, 'sessions'), { recursive: true })
+  await writeFile(
+    path.join(dir, 'sessions', '100.json'),
+    JSON.stringify({
+      pid: 100, sessionId: 'sid-100', cwd: 'p:\\proj\\alpha',
+      startedAt: 1, procStart: 'ps-100', name: 'alpha-01',
+    }),
+  )
+  return dir
+}
+
+describe('startDaemon', () => {
+  it('binds to loopback on an ephemeral port and exposes a token', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    expect(running.port).toBeGreaterThan(0)
+    expect(running.token).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('serves the scanned sessions', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    await running.refresh()
+    expect(running.state().sessions.map((s) => s.sessionId)).toEqual(['sid-100'])
+  })
+
+  it('marks a session waiting when a notification hook posts', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    await running.refresh()
+
+    const res = await fetch(`http://127.0.0.1:${running.port}/hooks/notification`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${running.token}` },
+      body: JSON.stringify({
+        session_id: 'sid-100',
+        cwd: 'p:\\proj\\alpha',
+        notification_type: 'permission_prompt',
+        notification_text: 'run pnpm test?',
+      }),
+    })
+    expect(res.status).toBe(200)
+    expect(running.state().sessions[0]!.status).toBe('waiting')
+  })
+
+  it('rejects an unauthenticated hook post', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const res = await fetch(`http://127.0.0.1:${running.port}/hooks/notification`, {
+      method: 'POST', body: '{}',
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('stores rate limits posted by the status line', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600
+    await fetch(`http://127.0.0.1:${running.port}/statusline`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${running.token}` },
+      body: JSON.stringify({ rate_limits: { five_hour: { used_percentage: 23.5, resets_at: resetsAt } } }),
+    })
+    expect(running.state().rateLimits.five_hour?.used_percentage).toBe(23.5)
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/daemon test daemon`
+Expected: FAIL — `Failed to resolve import "./daemon.js"`
+
+- [ ] **Step 3: Írd meg a hubot**
+
+`packages/daemon/src/hub.ts`:
+```ts
+import type { Server } from 'node:http'
+import { WebSocketServer, type WebSocket } from 'ws'
+
+/** Broadcast-only WS hub: a kliensek (overlay) csak fogadnak, nem küldenek. */
+export class Hub {
+  #wss: WebSocketServer
+  #clients = new Set<WebSocket>()
+
+  constructor(server: Server, private readonly token: string) {
+    this.#wss = new WebSocketServer({ server, path: '/ws' })
+    this.#wss.on('connection', (socket, request) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+      if (url.searchParams.get('token') !== this.token) {
+        socket.close(1008, 'unauthorized')
+        return
+      }
+      this.#clients.add(socket)
+      socket.on('close', () => this.#clients.delete(socket))
+      socket.on('error', () => this.#clients.delete(socket))
+    })
+  }
+
+  broadcast(payload: unknown): void {
+    const message = JSON.stringify(payload)
+    for (const client of this.#clients) {
+      if (client.readyState === client.OPEN) {
+        try {
+          client.send(message)
+        } catch (error) {
+          console.error('[hub] send failed', error)
+        }
+      }
+    }
+  }
+
+  async close(): Promise<void> {
+    for (const client of this.#clients) client.terminate()
+    this.#clients.clear()
+    await new Promise<void>((resolve) => this.#wss.close(() => resolve()))
+  }
+}
+```
+
+- [ ] **Step 4: Írd meg a daemon összeszerelést**
+
+`packages/daemon/src/daemon.ts`:
+```ts
+import { randomBytes } from 'node:crypto'
+import type { Server as HttpServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { serve, type ServerType } from '@hono/node-server'
+import type { ProcessProbe, RateLimits, SessionView } from '@claudeswitcher/core'
+import { createHookApp } from './hook-server.js'
+import { Hub } from './hub.js'
+import { RateLimitStore } from './rate-limits.js'
+import { scanSessions } from './scanner.js'
+import { SessionStore } from './session-store.js'
+
+export interface DaemonState {
+  sessions: SessionView[]
+  rateLimits: RateLimits
+}
+
+export interface Daemon {
+  readonly port: number
+  readonly token: string
+  state(): DaemonState
+  refresh(): Promise<void>
+  stop(): Promise<void>
+}
+
+export interface DaemonOptions {
+  claudeDir: string
+  probe: ProcessProbe
+  /** Poll periódus ms-ben. 0 kikapcsolja (tesztekhez). */
+  pollMs?: number
+}
+
+export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
+  const { claudeDir, probe, pollMs = 3000 } = options
+  const token = randomBytes(16).toString('hex')
+
+  const sessions = new SessionStore()
+  const limits = new RateLimitStore()
+
+  const app = createHookApp(token, {
+    onNotification: (event) => sessions.applyNotification(event),
+    onLifecycle: (event) => {
+      sessions.applyLifecycle(event)
+      void refresh()
+    },
+    onRateLimits: (received) => {
+      limits.update(received)
+      broadcast()
+    },
+  })
+
+  const server: ServerType = await new Promise((resolve) => {
+    const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 }, () => resolve(s))
+  })
+  const port = (server.address() as AddressInfo).port
+  // A @hono/node-server `serve()` egy node:http Servert ad vissza a
+  // default (nem HTTP/2) konfigurációval; a WS hub ezen osztozik.
+  const hub = new Hub(server as HttpServer, token)
+
+  function state(): DaemonState {
+    return { sessions: sessions.views(), rateLimits: limits.current() }
+  }
+
+  function broadcast(): void {
+    hub.broadcast({ type: 'state', payload: state() })
+  }
+
+  sessions.onChange(broadcast)
+
+  let refreshing: Promise<void> | undefined
+  async function refresh(): Promise<void> {
+    // Egyszerre csak egy szkennelés fusson; a fájlfigyelő sűrűn tüzelhet.
+    if (refreshing !== undefined) return refreshing
+    refreshing = (async () => {
+      try {
+        const snapshot = await scanSessions(claudeDir, probe)
+        sessions.applySnapshot(snapshot.sessions, snapshot.activities)
+      } catch (error) {
+        console.error('[daemon] refresh failed', error)
+      } finally {
+        refreshing = undefined
+      }
+    })()
+    return refreshing
+  }
+
+  const timer = pollMs > 0 ? setInterval(() => void refresh(), pollMs) : undefined
+  timer?.unref()
+
+  return {
+    port,
+    token,
+    state,
+    refresh,
+    async stop() {
+      if (timer !== undefined) clearInterval(timer)
+      await hub.close()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    },
+  }
+}
+```
+
+- [ ] **Step 5: Futtasd az összes daemon tesztet**
+
+Run: `pnpm --filter @claudeswitcher/daemon test`
+Expected: PASS, minden teszt.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/daemon/src/hub.ts packages/daemon/src/daemon.ts packages/daemon/src/daemon.test.ts
+git commit -m "feat(daemon): websocket hub and daemon assembly with polling refresh"
+```
+
+---
+
+### Task 10: statusLine script
+
+**Files:**
+- Create: `packages/statusline/package.json`, `packages/statusline/tsconfig.json`, `packages/statusline/vitest.config.ts`
+- Create: `packages/statusline/src/render.ts`, `packages/statusline/src/main.ts`
+- Test: `packages/statusline/src/render.test.ts`
+
+**Interfaces:**
+- Consumes: `RateLimits` (core)
+- Produces:
+  - `renderStatusLine(input: Record<string, unknown>): string`
+  - futtatható script: stdin JSON → POST a daemonnak → egy sor a stdoutra
+
+- [ ] **Step 1: Csomagváz**
+
+`packages/statusline/package.json`:
+```json
+{
+  "name": "@claudeswitcher/statusline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "claudeswitcher-statusline": "./dist/main.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": { "@claudeswitcher/core": "workspace:*" }
+}
+```
+
+`packages/statusline/tsconfig.json`:
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "dist", "rootDir": "src" },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts"]
+}
+```
+
+`packages/statusline/vitest.config.ts`:
+```ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: { include: ['src/**/*.test.ts'] },
+})
+```
+
+- [ ] **Step 2: Írd meg a failing tesztet**
+
+A statusLine látható a TUI-ban, és a bevezetése elrejti a footer hintjeit — ezért hasznosat kell mutatnia, nem csak némán posztolnia.
+
+`packages/statusline/src/render.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { renderStatusLine } from './render.js'
+
+const base = {
+  model: { display_name: 'Opus 5' },
+  workspace: { current_dir: 'p:\\proj\\alpha' },
+}
+
+describe('renderStatusLine', () => {
+  it('shows model and directory', () => {
+    const line = renderStatusLine(base)
+    expect(line).toContain('Opus 5')
+    expect(line).toContain('alpha')
+  })
+
+  it('shows the five hour and seven day usage when present', () => {
+    const line = renderStatusLine({
+      ...base,
+      rate_limits: {
+        five_hour: { used_percentage: 23.5, resets_at: 1 },
+        seven_day: { used_percentage: 41.2, resets_at: 1 },
+      },
+    })
+    expect(line).toContain('5h 24%')
+    expect(line).toContain('7d 41%')
+  })
+
+  it('omits a window that is absent', () => {
+    const line = renderStatusLine({
+      ...base,
+      rate_limits: { five_hour: { used_percentage: 10, resets_at: 1 } },
+    })
+    expect(line).toContain('5h 10%')
+    expect(line).not.toContain('7d')
+  })
+
+  it('renders without rate limits at all', () => {
+    expect(() => renderStatusLine(base)).not.toThrow()
+    expect(renderStatusLine(base)).not.toContain('5h')
+  })
+
+  it('survives a completely empty input', () => {
+    expect(() => renderStatusLine({})).not.toThrow()
+  })
+
+  it('shows the git branch when present', () => {
+    const line = renderStatusLine({ ...base, workspace: { current_dir: 'p:\\a', branch: 'main' } })
+    expect(line).toContain('main')
+  })
+})
+```
+
+- [ ] **Step 3: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/statusline test`
+Expected: FAIL — `Failed to resolve import "./render.js"`
+
+- [ ] **Step 4: Írd meg a rendert**
+
+`packages/statusline/src/render.ts`:
+```ts
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function pct(source: unknown): number | undefined {
+  if (!isRecord(source)) return undefined
+  const value = source.used_percentage
+  return typeof value === 'number' ? Math.round(value) : undefined
+}
+
+export function renderStatusLine(input: Record<string, unknown>): string {
+  const parts: string[] = []
+
+  const model = isRecord(input.model) ? input.model.display_name : undefined
+  if (typeof model === 'string') parts.push(model)
+
+  const workspace = isRecord(input.workspace) ? input.workspace : {}
+  const dir = workspace.current_dir
+  if (typeof dir === 'string') {
+    const name = dir.split(/[\\/]/).filter((s) => s !== '').pop()
+    if (name !== undefined) parts.push(name)
+  }
+  if (typeof workspace.branch === 'string') parts.push(workspace.branch)
+
+  const limits = isRecord(input.rate_limits) ? input.rate_limits : {}
+  const fiveHour = pct(limits.five_hour)
+  const sevenDay = pct(limits.seven_day)
+  if (fiveHour !== undefined) parts.push(`5h ${fiveHour}%`)
+  if (sevenDay !== undefined) parts.push(`7d ${sevenDay}%`)
+
+  return parts.join('  ·  ')
+}
+```
+
+- [ ] **Step 5: Írd meg az entry pointot**
+
+`packages/statusline/src/main.ts`:
+```ts
+#!/usr/bin/env node
+import { renderStatusLine } from './render.js'
+
+/**
+ * A Claude Code stdin-en adja a session JSON-t, és a stdoutot rendereli a
+ * statusLine-ban. Mellékhatásként a rate limiteket elküldjük a daemonnak.
+ * A POST soha nem blokkolhatja a sor kiírását: rövid timeout, hiba elnyelve.
+ */
+async function main(): Promise<void> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+
+  let input: Record<string, unknown> = {}
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    if (typeof parsed === 'object' && parsed !== null) {
+      input = parsed as Record<string, unknown>
+    }
+  } catch {
+    // Nincs értelmes bemenet — üres sort adunk, de nem hibázunk.
+  }
+
+  process.stdout.write(renderStatusLine(input))
+
+  const port = process.env.CLAUDESWITCHER_PORT
+  const token = process.env.CLAUDESWITCHER_TOKEN
+  if (port !== undefined && token !== undefined && input.rate_limits !== undefined) {
+    try {
+      await fetch(`http://127.0.0.1:${port}/statusline`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rate_limits: input.rate_limits }),
+        signal: AbortSignal.timeout(1000),
+      })
+    } catch {
+      // A daemon nem fut. A statusLine attól még helyes.
+    }
+  }
+}
+
+await main()
+```
+
+- [ ] **Step 6: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/statusline test`
+Expected: PASS, 6 teszt.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/statusline
+git commit -m "feat(statusline): status line renderer that reports rate limits to the daemon"
+```
+
+---
+
+### Task 11: desktop — Electron váz és daemon hosztolás
+
+**Files:**
+- Create: `apps/desktop/package.json`, `apps/desktop/tsconfig.json`, `apps/desktop/electron.vite.config.ts`
+- Create: `apps/desktop/src/main/index.ts`, `apps/desktop/src/preload/index.ts`
+- Create: `apps/desktop/src/renderer/index.html`, `apps/desktop/src/renderer/main.tsx`
+
+**Interfaces:**
+- Consumes: `startDaemon`, `Daemon`, `DaemonState` (Task 9); `createWin32ProcessProbe`, `resolveClaudeDir` (core)
+- Produces: futtatható Electron app, ami elindítja a daemont és megnyit egy ablakot
+
+- [ ] **Step 1: Csomagváz**
+
+`apps/desktop/package.json`:
+```json
+{
+  "name": "@claudeswitcher/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "check-types": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@claudeswitcher/core": "workspace:*",
+    "@claudeswitcher/daemon": "workspace:*",
+    "koffi": "^2.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^33.0.0",
+    "electron-vite": "^2.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
+```
+
+`apps/desktop/electron.vite.config.ts`:
+```ts
+import react from '@vitejs/plugin-react'
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+
+export default defineConfig({
+  main: { plugins: [externalizeDepsPlugin()] },
+  preload: { plugins: [externalizeDepsPlugin()] },
+  renderer: { plugins: [react()] },
+})
+```
+
+- [ ] **Step 2: Írd meg a main processzt**
+
+`apps/desktop/src/main/index.ts`:
+```ts
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
+import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
+import { BrowserWindow, app, ipcMain } from 'electron'
+
+const dirname = path.dirname(fileURLToPath(import.meta.url))
+
+let daemon: Daemon | undefined
+let overlay: BrowserWindow | undefined
+
+function createOverlay(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 620,
+    height: 460,
+    show: false,
+    frame: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: { preload: path.join(dirname, '../preload/index.js') },
+  })
+
+  if (process.env.ELECTRON_RENDERER_URL !== undefined) {
+    void window.loadURL(process.env.ELECTRON_RENDERER_URL)
+  } else {
+    void window.loadFile(path.join(dirname, '../renderer/index.html'))
+  }
+  window.on('blur', () => window.hide())
+  return window
+}
+
+app.whenReady().then(async () => {
+  daemon = await startDaemon({
+    claudeDir: resolveClaudeDir(),
+    probe: createWin32ProcessProbe(),
+  })
+  await daemon.refresh()
+
+  ipcMain.handle('daemon:connection', () => ({ port: daemon!.port, token: daemon!.token }))
+  ipcMain.handle('daemon:state', () => daemon!.state())
+
+  overlay = createOverlay()
+  overlay.showInactive()
+})
+
+app.on('window-all-closed', () => {
+  // Tálcaikonos app: az ablak bezárása nem lépteti ki.
+})
+
+app.on('before-quit', () => {
+  void daemon?.stop()
+})
+```
+
+- [ ] **Step 3: Írd meg a preloadot**
+
+`apps/desktop/src/preload/index.ts`:
+```ts
+import { contextBridge, ipcRenderer } from 'electron'
+
+export interface DaemonConnection {
+  port: number
+  token: string
+}
+
+contextBridge.exposeInMainWorld('claudeswitcher', {
+  connection: (): Promise<DaemonConnection> => ipcRenderer.invoke('daemon:connection'),
+  state: (): Promise<unknown> => ipcRenderer.invoke('daemon:state'),
+  focusSession: (sessionId: string): Promise<boolean> =>
+    ipcRenderer.invoke('session:focus', sessionId),
+  hide: (): Promise<void> => ipcRenderer.invoke('overlay:hide'),
+})
+```
+
+- [ ] **Step 4: Minimál renderer**
+
+`apps/desktop/src/renderer/index.html`:
+```html
+<!doctype html>
+<html lang="hu">
+  <head>
+    <meta charset="utf-8" />
+    <title>ClaudeSwitcher</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
+```
+
+`apps/desktop/src/renderer/main.tsx`:
+```tsx
+import { createRoot } from 'react-dom/client'
+
+function App(): JSX.Element {
+  return <div>ClaudeSwitcher</div>
+}
+
+createRoot(document.getElementById('root')!).render(<App />)
+```
+
+- [ ] **Step 5: Kézi ellenőrzés**
+
+Run: `pnpm --filter @claudeswitcher/desktop dev`
+Expected: megnyílik egy keret nélküli ablak "ClaudeSwitcher" felirattal, és a
+konzolon nincs hiba. Ellenőrizd, hogy a daemon elindult: a DevTools konzolján
+`await window.claudeswitcher.state()` visszaadja a futó sessionjeidet.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/desktop
+git commit -m "feat(desktop): electron shell hosting the daemon in the main process"
+```
+
+---
+
+### Task 12: desktop — ablakfókusz
+
+**Files:**
+- Create: `apps/desktop/src/main/focus-window.ts`
+- Modify: `apps/desktop/src/main/index.ts` — az `ipcMain.handle('session:focus', …)` regisztrálása
+
+**Interfaces:**
+- Consumes: `SessionView` (core)
+- Produces: `focusSessionWindow(view: SessionView): Promise<boolean>`
+
+- [ ] **Step 1: Írd meg a fókuszmodult**
+
+A `windowPid` a lock fájlból származó VSCode ablak processze. Ez a gyors út.
+Ha nincs (elárvult vagy hiányzó lock), a `code -r` a tartalék, ami lassabb, de
+a workspace útvonalból is megtalálja az ablakot.
+
+`apps/desktop/src/main/focus-window.ts`:
+```ts
+import { execFile } from 'node:child_process'
+import type { SessionView } from '@claudeswitcher/core'
+import koffi from 'koffi'
+
+const user32 = koffi.load('user32.dll')
+
+const GetTopWindow = user32.func('intptr GetTopWindow(intptr hWnd)')
+const GetWindow = user32.func('intptr GetWindow(intptr hWnd, uint32 uCmd)')
+const GetWindowThreadProcessId = user32.func(
+  'uint32 GetWindowThreadProcessId(intptr hWnd, _Out_ uint32 *pid)',
+)
+const IsWindowVisible = user32.func('bool IsWindowVisible(intptr hWnd)')
+const GetWindowTextLengthW = user32.func('int GetWindowTextLengthW(intptr hWnd)')
+const SetForegroundWindow = user32.func('bool SetForegroundWindow(intptr hWnd)')
+const ShowWindow = user32.func('int ShowWindow(intptr hWnd, int nCmdShow)')
+
+const SW_RESTORE = 9
+const GW_HWNDNEXT = 2
+
+/**
+ * A megadott processz első látható, címmel rendelkező top-level ablaka, vagy 0.
+ *
+ * Szándékosan a GetTopWindow + GetWindow láncot járjuk be, nem az EnumWindows-t:
+ * az EnumWindows callbacket vár, amit koffi-ban regisztrálni kell, és a
+ * regisztrált callback élettartama Electron main processzben könnyen elszáll.
+ * A lánc bejárása ugyanazt adja, csak sima skalár hívásokkal.
+ */
+function findMainWindow(targetPid: number): number {
+  const pidOut: [number] = [0]
+  let hwnd = GetTopWindow(0)
+
+  while (hwnd !== 0) {
+    if (IsWindowVisible(hwnd) && GetWindowTextLengthW(hwnd) > 0) {
+      GetWindowThreadProcessId(hwnd, pidOut)
+      if (pidOut[0] === targetPid) return hwnd
+    }
+    hwnd = GetWindow(hwnd, GW_HWNDNEXT)
+  }
+  return 0
+}
+
+function focusByPid(pid: number): boolean {
+  const hwnd = findMainWindow(pid)
+  if (hwnd === 0) return false
+  ShowWindow(hwnd, SW_RESTORE)
+  return Boolean(SetForegroundWindow(hwnd))
+}
+
+function focusByCli(folder: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile('code', ['-r', folder], { shell: true, windowsHide: true }, (error) => {
+      resolve(error === null)
+    })
+  })
+}
+
+/**
+ * Előtérbe hozza a session VSCode ablakát. Elsőként a lock fájlból ismert pid
+ * alapján, mert az azonnali; ha az nem megy, a `code -r` a tartalék.
+ */
+export async function focusSessionWindow(view: SessionView): Promise<boolean> {
+  if (view.windowPid !== undefined && focusByPid(view.windowPid)) return true
+  const folder = view.workspaceFolder ?? view.cwd
+  return focusByCli(folder)
+}
+```
+
+- [ ] **Step 2: Kösd be az IPC handlert**
+
+`apps/desktop/src/main/index.ts` — az `app.whenReady()` blokkba, a meglévő
+`ipcMain.handle` hívások mellé:
+
+```ts
+  ipcMain.handle('session:focus', async (_event, sessionId: string) => {
+    const view = daemon!.state().sessions.find((s) => s.sessionId === sessionId)
+    if (view === undefined) return false
+    overlay?.hide()
+    return focusSessionWindow(view)
+  })
+
+  ipcMain.handle('overlay:hide', () => {
+    overlay?.hide()
+  })
+```
+
+És a fájl tetejére: `import { focusSessionWindow } from './focus-window.js'`
+
+- [ ] **Step 3: Kézi ellenőrzés**
+
+Nyiss meg legalább két VSCode ablakot Claude Code sessionnel. Indítsd az appot
+(`pnpm --filter @claudeswitcher/desktop dev`), majd a DevTools konzolján:
+
+```js
+const state = await window.claudeswitcher.state()
+await window.claudeswitcher.focusSession(state.sessions[1].sessionId)
+```
+Expected: a második session VSCode ablaka előtérbe kerül, minimalizált állapotból
+is. Mérd meg: a fókusz 100 ms alatt legyen meg. Ha a `windowPid` ág nem működik
+és mindig a `code -r`-re esik vissza, jelezd — az a párosítás hibájára utal.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/desktop/src/main/focus-window.ts apps/desktop/src/main/index.ts
+git commit -m "feat(desktop): focus a session's VSCode window via Win32 with a code -r fallback"
+```
+
+---
+
+### Task 13: desktop — tray, hotkey és overlay-viselkedés
+
+**Files:**
+- Create: `apps/desktop/src/main/tray.ts`, `apps/desktop/src/main/hotkey.ts`
+- Create: `apps/desktop/resources/tray.png`, `apps/desktop/resources/tray-waiting.png`
+- Modify: `apps/desktop/src/main/index.ts`
+
+**Interfaces:**
+- Consumes: `Daemon` (Task 9)
+- Produces:
+  - `createTray(options: { onOpen(): void; onQuit(): void }): { setWaiting(count: number): void; destroy(): void }`
+  - `registerHotkey(accelerator: string, handler: () => void): boolean`
+
+- [ ] **Step 1: Írd meg a tray modult**
+
+Készítsd el a két tray ikont. Futtasd a repo gyökeréből:
+
+```bash
+node -e "
+const z=require('zlib'),f=require('fs');
+const png=(r,g,b)=>{const W=16,raw=Buffer.alloc(W*(W*4+1));
+for(let y=0;y<W;y++){raw[y*(W*4+1)]=0;
+for(let x=0;x<W;x++){const d=Math.hypot(x-7.5,y-7.5),a=d<6.5?255:0,o=y*(W*4+1)+1+x*4;
+raw[o]=r;raw[o+1]=g;raw[o+2]=b;raw[o+3]=a;}}
+const ck=(t,d)=>{const b=Buffer.concat([Buffer.from(t),d]),l=Buffer.alloc(4);l.writeUInt32BE(d.length);
+const c=Buffer.alloc(4);c.writeUInt32BE(z.crc32?z.crc32(b):require('zlib').crc32(b));return Buffer.concat([l,b,c]);};
+const ihdr=Buffer.alloc(13);ihdr.writeUInt32BE(W,0);ihdr.writeUInt32BE(W,4);ihdr[8]=8;ihdr[9]=6;
+return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),ck('IHDR',ihdr),ck('IDAT',z.deflateSync(raw)),ck('IEND',Buffer.alloc(0))]);};
+f.mkdirSync('apps/desktop/resources',{recursive:true});
+f.writeFileSync('apps/desktop/resources/tray.png',png(0x8a,0x88,0x80));
+f.writeFileSync('apps/desktop/resources/tray-waiting.png',png(0xd9,0x77,0x57));
+console.log('tray icons written');
+"
+```
+
+Ha a Node verziód nem ismeri a `zlib.crc32`-t (Node 22 alatt), egyszerűbb két
+16×16 PNG-t bármilyen képszerkesztővel elmenteni: `tray.png` szürke korong,
+`tray-waiting.png` narancs korong. A méret és a szín az egyetlen követelmény.
+
+`apps/desktop/src/main/tray.ts`:
+```ts
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Menu, Tray, nativeImage } from 'electron'
+
+const dirname = path.dirname(fileURLToPath(import.meta.url))
+const resources = path.join(dirname, '../../resources')
+
+export interface TrayHandle {
+  setWaiting(count: number): void
+  destroy(): void
+}
+
+export function createTray(options: { onOpen(): void; onQuit(): void }): TrayHandle {
+  const idle = nativeImage.createFromPath(path.join(resources, 'tray.png'))
+  const waiting = nativeImage.createFromPath(path.join(resources, 'tray-waiting.png'))
+
+  const tray = new Tray(idle)
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Megnyitás', click: options.onOpen },
+      { type: 'separator' },
+      { label: 'Kilépés', click: options.onQuit },
+    ]),
+  )
+  tray.on('click', options.onOpen)
+
+  let lastCount = -1
+  return {
+    setWaiting(count) {
+      if (count === lastCount) return
+      lastCount = count
+      tray.setImage(count > 0 ? waiting : idle)
+      tray.setToolTip(
+        count > 0 ? `ClaudeSwitcher — ${count} session vár rád` : 'ClaudeSwitcher',
+      )
+    },
+    destroy() {
+      tray.destroy()
+    },
+  }
+}
+```
+
+- [ ] **Step 2: Írd meg a hotkey modult**
+
+`apps/desktop/src/main/hotkey.ts`:
+```ts
+import { globalShortcut } from 'electron'
+
+/**
+ * Igaz, ha sikerült regisztrálni. Egy másik alkalmazás elveheti a
+ * kombinációt — ilyenkor az app fut tovább, csak a hotkey nem él.
+ */
+export function registerHotkey(accelerator: string, handler: () => void): boolean {
+  try {
+    return globalShortcut.register(accelerator, handler)
+  } catch {
+    return false
+  }
+}
+```
+
+- [ ] **Step 3: Kösd össze a main processzben**
+
+`apps/desktop/src/main/index.ts` — cseréld le az `app.whenReady()` végén lévő
+`overlay.showInactive()` sort erre, és vedd fel a hiányzó importokat
+(`createTray`, `registerHotkey`, `screen`):
+
+```ts
+  overlay = createOverlay()
+
+  const tray = createTray({
+    onOpen: () => showOverlay(),
+    onQuit: () => app.quit(),
+  })
+
+  function showOverlay(): void {
+    if (overlay === undefined) return
+    const cursor = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(cursor)
+    const [width, height] = overlay.getSize()
+    overlay.setPosition(
+      Math.round(display.workArea.x + (display.workArea.width - width) / 2),
+      Math.round(display.workArea.y + (display.workArea.height - height) / 3),
+    )
+    overlay.show()
+    overlay.focus()
+  }
+
+  function toggleOverlay(): void {
+    if (overlay?.isVisible() === true) overlay.hide()
+    else showOverlay()
+  }
+
+  if (!registerHotkey('Control+Alt+Space', toggleOverlay)) {
+    console.warn('[hotkey] Control+Alt+Space is taken by another application')
+  }
+
+  const syncTray = (): void => {
+    tray.setWaiting(daemon!.state().sessions.filter((s) => s.status === 'waiting').length)
+  }
+  syncTray()
+  setInterval(syncTray, 1000).unref()
+
+  app.on('before-quit', () => {
+    globalShortcut.unregisterAll()
+    tray.destroy()
+  })
+```
+
+- [ ] **Step 4: Kézi ellenőrzés**
+
+Run: `pnpm --filter @claudeswitcher/desktop dev`
+Expected:
+- Megjelenik a tálcaikon, és az ablak **nem** látszik induláskor.
+- `Ctrl+Alt+Space` előhozza az ablakot a kurzor melletti kijelző közepére.
+- Újra megnyomva eltűnik; máshova kattintva (blur) is eltűnik.
+- A tray ikon tooltipje a várakozók számát mutatja. Teszteléshez indíts egy
+  Claude Code sessiont és kérj tőle valami engedélyköteles műveletet — az
+  ikonnak át kell váltania (a hookok csak a 15. taskban települnek, addig
+  kézzel POST-olhatsz a daemonnak, ahogy a Task 9 tesztje teszi).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/desktop/src/main/tray.ts apps/desktop/src/main/hotkey.ts apps/desktop/src/main/index.ts apps/desktop/resources
+git commit -m "feat(desktop): tray icon with waiting badge and global hotkey overlay toggle"
+```
+
+---
+
+### Task 14: desktop — overlay lista
+
+**Files:**
+- Create: `apps/desktop/src/renderer/App.tsx`, `apps/desktop/src/renderer/useDaemonState.ts`, `apps/desktop/src/renderer/styles.css`
+- Modify: `apps/desktop/src/renderer/main.tsx`
+- Create: `apps/desktop/src/renderer/format.ts`
+- Test: `apps/desktop/src/renderer/format.test.ts`
+
+**Interfaces:**
+- Consumes: `DaemonState` (Task 9), a preload `window.claudeswitcher` API-ja (Task 11)
+- Produces: működő overlay lista billentyűnavigációval
+
+- [ ] **Step 1: Írd meg a formázók failing tesztjét**
+
+`apps/desktop/src/renderer/format.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { formatDuration, formatResetsIn, summarize } from './format.js'
+
+describe('formatDuration', () => {
+  it('renders seconds under a minute', () => {
+    expect(formatDuration(45_000)).toBe('45mp')
+  })
+
+  it('renders minutes and seconds', () => {
+    expect(formatDuration(134_000)).toBe('2:14')
+  })
+
+  it('renders hours', () => {
+    expect(formatDuration(3_700_000)).toBe('1:01:40')
+  })
+
+  it('clamps a negative duration to zero', () => {
+    expect(formatDuration(-5)).toBe('0mp')
+  })
+})
+
+describe('formatResetsIn', () => {
+  it('renders hours until reset', () => {
+    const now = 1_000_000_000_000
+    expect(formatResetsIn(now / 1000 + 7200, now)).toBe('2h múlva')
+  })
+
+  it('renders minutes when under an hour', () => {
+    const now = 1_000_000_000_000
+    expect(formatResetsIn(now / 1000 + 600, now)).toBe('10p múlva')
+  })
+})
+
+describe('summarize', () => {
+  it('prefers the notification text when waiting', () => {
+    const line = summarize({
+      status: 'waiting',
+      notificationText: 'Claude needs permission to run pnpm test',
+      activity: { runningTool: 'Bash' },
+    })
+    expect(line).toBe('Claude needs permission to run pnpm test')
+  })
+
+  it('names the running tool when working', () => {
+    expect(summarize({ status: 'working', activity: { runningTool: 'Bash' } })).toBe('Bash fut')
+  })
+
+  it('shows the last assistant text when idle', () => {
+    expect(summarize({ status: 'idle', activity: { lastAssistantText: 'Kész.' } })).toBe('Kész.')
+  })
+
+  it('truncates a long summary', () => {
+    const long = 'x'.repeat(200)
+    expect(summarize({ status: 'idle', activity: { lastAssistantText: long } }).length).toBe(80)
+  })
+
+  it('falls back when there is nothing to say', () => {
+    expect(summarize({ status: 'idle', activity: {} })).toBe('—')
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Vedd fel a `"test": "vitest run"` scriptet az `apps/desktop/package.json`
+`scripts` blokkjába, és hozd létre a config fájlt:
+
+`apps/desktop/vitest.config.ts`:
+```ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: { include: ['src/**/*.test.{ts,tsx}'] },
+})
+```
+
+Run: `pnpm --filter @claudeswitcher/desktop test`
+Expected: FAIL — `Failed to resolve import "./format.js"`
+
+- [ ] **Step 3: Írd meg a formázókat**
+
+`apps/desktop/src/renderer/format.ts`:
+```ts
+import type { SessionActivity, SessionStatus } from '@claudeswitcher/core'
+
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+  if (minutes > 0) return `${minutes}:${String(seconds).padStart(2, '0')}`
+  return `${seconds}mp`
+}
+
+export function formatResetsIn(resetsAt: number, now: number = Date.now()): string {
+  const minutes = Math.max(0, Math.round((resetsAt * 1000 - now) / 60_000))
+  if (minutes >= 60) return `${Math.round(minutes / 60)}h múlva`
+  return `${minutes}p múlva`
+}
+
+export function summarize(view: {
+  status: SessionStatus
+  activity: SessionActivity
+  notificationText?: string
+}): string {
+  const raw =
+    view.status === 'waiting' && view.notificationText !== undefined ? view.notificationText
+    : view.status === 'working' && view.activity.runningTool !== undefined
+      ? `${view.activity.runningTool} fut`
+    : view.activity.lastAssistantText ?? '—'
+
+  const flat = raw.replace(/\s+/g, ' ').trim()
+  return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat
+}
+```
+
+- [ ] **Step 4: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/desktop test`
+Expected: PASS, 11 teszt.
+
+- [ ] **Step 5: Írd meg az állapot-hookot**
+
+`apps/desktop/src/renderer/useDaemonState.ts`:
+```ts
+import { useEffect, useState } from 'react'
+import type { RateLimits, SessionView } from '@claudeswitcher/core'
+
+export interface DaemonState {
+  sessions: SessionView[]
+  rateLimits: RateLimits
+}
+
+declare global {
+  interface Window {
+    claudeswitcher: {
+      connection(): Promise<{ port: number; token: string }>
+      state(): Promise<DaemonState>
+      focusSession(sessionId: string): Promise<boolean>
+      hide(): Promise<void>
+    }
+  }
+}
+
+/** Kezdeti állapot IPC-n, utána élő frissítés a daemon WS hubjáról. */
+export function useDaemonState(): DaemonState {
+  const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {} })
+
+  useEffect(() => {
+    let socket: WebSocket | undefined
+    let closed = false
+
+    void (async () => {
+      setState(await window.claudeswitcher.state())
+      const { port, token } = await window.claudeswitcher.connection()
+      if (closed) return
+
+      socket = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+      socket.onmessage = (event) => {
+        try {
+          const message: unknown = JSON.parse(String(event.data))
+          if (
+            typeof message === 'object' && message !== null &&
+            (message as { type?: unknown }).type === 'state'
+          ) {
+            setState((message as { payload: DaemonState }).payload)
+          }
+        } catch {
+          // Rossz üzenet — a következő broadcast úgyis felülírja.
+        }
+      }
+    })()
+
+    return () => {
+      closed = true
+      socket?.close()
+    }
+  }, [])
+
+  return state
+}
+```
+
+- [ ] **Step 6: Írd meg az App komponenst**
+
+`apps/desktop/src/renderer/App.tsx`:
+```tsx
+import { useEffect, useState } from 'react'
+import { formatDuration, formatResetsIn, summarize } from './format.js'
+import { useDaemonState } from './useDaemonState.js'
+import './styles.css'
+
+const STATUS_LABEL = {
+  waiting: '●',
+  working: '◐',
+  idle: '○',
+  unknown: '?',
+} as const
+
+export function App(): JSX.Element {
+  const { sessions, rateLimits } = useDaemonState()
+  const [selected, setSelected] = useState(0)
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    if (selected >= sessions.length) setSelected(Math.max(0, sessions.length - 1))
+  }, [sessions.length, selected])
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === 'Escape') void window.claudeswitcher.hide()
+      if (event.key === 'ArrowDown') setSelected((i) => Math.min(i + 1, sessions.length - 1))
+      if (event.key === 'ArrowUp') setSelected((i) => Math.max(i - 1, 0))
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        const view = sessions[selected]
+        if (view !== undefined) void window.claudeswitcher.focusSession(view.sessionId)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sessions, selected])
+
+  return (
+    <div className="overlay">
+      <ul className="sessions">
+        {sessions.length === 0 && <li className="empty">Nincs futó session</li>}
+        {sessions.map((view, index) => (
+          <li
+            key={view.sessionId}
+            className={`session ${view.status} ${index === selected ? 'selected' : ''}`}
+            onClick={() => void window.claudeswitcher.focusSession(view.sessionId)}
+          >
+            <span className="marker">{STATUS_LABEL[view.status]}</span>
+            <span className="name">
+              {view.name}
+              {(view.bridgeSessionId === null || view.bridgeSessionId === undefined) && (
+                // Remote Control nélkül ez a session telefonról nem érhető el.
+                <span className="unbridged" title="Nincs Remote Control kapcsolata">
+                  {' ⚑'}
+                </span>
+              )}
+            </span>
+            <span className="summary">{summarize(view)}</span>
+            <span className="age">
+              {view.waitingSince !== undefined ? formatDuration(now - view.waitingSince) : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="limits">
+        {rateLimits.five_hour !== undefined && (
+          <span>
+            5h {Math.round(rateLimits.five_hour.used_percentage)}% ·{' '}
+            {formatResetsIn(rateLimits.five_hour.resets_at, now)}
+          </span>
+        )}
+        {rateLimits.seven_day !== undefined && (
+          <span>
+            7d {Math.round(rateLimits.seven_day.used_percentage)}% ·{' '}
+            {formatResetsIn(rateLimits.seven_day.resets_at, now)}
+          </span>
+        )}
+        {rateLimits.five_hour === undefined && rateLimits.seven_day === undefined && (
+          <span className="muted">Limitadat még nincs</span>
+        )}
+      </div>
+    </div>
+  )
+}
+```
+
+`apps/desktop/src/renderer/styles.css`:
+```css
+:root { color-scheme: dark; }
+
+body {
+  margin: 0;
+  font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+  color: #e8e6e3;
+  background: #1c1b1a;
+}
+
+.overlay { display: flex; flex-direction: column; height: 100vh; }
+.sessions { flex: 1; margin: 0; padding: 6px; list-style: none; overflow-y: auto; }
+
+.session {
+  display: grid;
+  grid-template-columns: 16px 130px 1fr 56px;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.session.selected { background: #2f2e2c; }
+.session.waiting .marker { color: #d97757; }
+.session.working .marker { color: #7aa2c4; }
+.session.idle .marker { color: #6b6a67; }
+
+.name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unbridged { color: #6b6a67; font-weight: 400; }
+.summary { color: #a8a6a2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.age { color: #6b6a67; text-align: right; font-variant-numeric: tabular-nums; }
+.empty { padding: 24px; text-align: center; color: #6b6a67; }
+
+.limits {
+  display: flex;
+  gap: 16px;
+  padding: 8px 14px;
+  border-top: 1px solid #2f2e2c;
+  color: #a8a6a2;
+  font-variant-numeric: tabular-nums;
+}
+
+.muted { color: #6b6a67; }
+```
+
+- [ ] **Step 7: Kösd be a renderert**
+
+`apps/desktop/src/renderer/main.tsx`:
+```tsx
+import { createRoot } from 'react-dom/client'
+import { App } from './App.js'
+
+createRoot(document.getElementById('root')!).render(<App />)
+```
+
+- [ ] **Step 8: Kézi ellenőrzés**
+
+Run: `pnpm --filter @claudeswitcher/desktop dev`
+Expected: `Ctrl+Alt+Space` után megjelenik az összes futó sessionöd. Nyíllal
+navigálható, Enter a kiválasztott session VSCode ablakára ugrik és elrejti az
+overlayt, Esc bezár. A státuszjelölő a futó sessionöknél `◐`, a tétleneknél `○`.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/desktop/src/renderer
+git commit -m "feat(desktop): overlay session list with keyboard navigation and limit bar"
+```
+
+---
+
+### Task 15: setup — hookok és statusLine telepítése
+
+**Files:**
+- Create: `apps/desktop/src/main/setup.ts`
+- Test: `apps/desktop/src/main/setup.test.ts`
+- Modify: `apps/desktop/src/main/index.ts`
+
+**Interfaces:**
+- Consumes: `updateSettingsFile`, `userSettingsPath` (core)
+- Produces:
+  - `buildHookSettings(options: { port: number; token: string; statusLineCommand: string }): Record<string, unknown>`
+  - `installIntegration(claudeDir: string, options: { port: number; token: string; statusLineCommand: string }): Promise<void>`
+
+- [ ] **Step 1: Írd meg a failing tesztet**
+
+`apps/desktop/src/main/setup.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { buildHookSettings } from './setup.js'
+
+const OPTIONS = { port: 41234, token: 'abc123', statusLineCommand: 'node C:\\cs\\statusline.js' }
+
+describe('buildHookSettings', () => {
+  it('registers only non-blocking hook events in M1', () => {
+    const settings = buildHookSettings(OPTIONS)
+    const hooks = settings.hooks as Record<string, unknown>
+    expect(Object.keys(hooks).sort()).toEqual(['Notification', 'SessionEnd', 'SessionStart', 'Stop'])
+    // A PermissionRequest az M2 hatásköre; az M1 semmit nem vesz el.
+    expect(hooks.PermissionRequest).toBeUndefined()
+  })
+
+  it('points hooks at the loopback daemon with the bearer token', () => {
+    const settings = buildHookSettings(OPTIONS)
+    const hooks = settings.hooks as Record<string, Array<Record<string, unknown>>>
+    const hook = (hooks.Notification![0]!.hooks as Array<Record<string, unknown>>)[0]!
+    expect(hook.type).toBe('http')
+    expect(hook.url).toBe('http://127.0.0.1:41234/hooks/notification')
+    expect((hook.headers as Record<string, string>).Authorization).toBe(
+      'Bearer $CLAUDESWITCHER_TOKEN',
+    )
+    expect(hook.allowedEnvVars).toEqual(['CLAUDESWITCHER_TOKEN'])
+  })
+
+  it('keeps hook timeouts short because these hooks cannot block', () => {
+    const settings = buildHookSettings(OPTIONS)
+    const hooks = settings.hooks as Record<string, Array<Record<string, unknown>>>
+    for (const entries of Object.values(hooks)) {
+      const hook = (entries[0]!.hooks as Array<Record<string, unknown>>)[0]!
+      expect(hook.timeout).toBe(5)
+    }
+  })
+
+  it('configures the status line and the env vars it needs', () => {
+    const settings = buildHookSettings(OPTIONS)
+    expect(settings.statusLine).toEqual({
+      type: 'command',
+      command: 'node C:\\cs\\statusline.js',
+      padding: 0,
+    })
+    expect(settings.env).toEqual({
+      CLAUDESWITCHER_PORT: '41234',
+      CLAUDESWITCHER_TOKEN: 'abc123',
+    })
+  })
+
+  it('writes nothing outside hooks, statusLine and env', () => {
+    expect(Object.keys(buildHookSettings(OPTIONS)).sort()).toEqual(['env', 'hooks', 'statusLine'])
+  })
+})
+```
+
+- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+
+Run: `pnpm --filter @claudeswitcher/desktop test setup`
+Expected: FAIL — `Failed to resolve import "./setup.js"`
+
+- [ ] **Step 3: Írd meg az implementációt**
+
+`apps/desktop/src/main/setup.ts`:
+```ts
+import { updateSettingsFile, userSettingsPath } from '@claudeswitcher/core'
+
+export interface IntegrationOptions {
+  port: number
+  token: string
+  statusLineCommand: string
+}
+
+function httpHook(url: string): Record<string, unknown> {
+  return {
+    hooks: [
+      {
+        type: 'http',
+        url,
+        // Rövid timeout: ezek display-only hookok, nem tudnak és nem is
+        // akarnak blokkolni. A daemon lassulása ne fékezze a sessiont.
+        timeout: 5,
+        headers: { Authorization: 'Bearer $CLAUDESWITCHER_TOKEN' },
+        allowedEnvVars: ['CLAUDESWITCHER_TOKEN'],
+      },
+    ],
+  }
+}
+
+/**
+ * Az M1 kizárólag nem blokkoló hookokat telepít. A PermissionRequest és az
+ * Elicitation az M2 hatásköre — addig egyetlen döntést sem veszünk el a
+ * Claude Code-tól, és a Remote Control is érintetlen marad.
+ */
+export function buildHookSettings(options: IntegrationOptions): Record<string, unknown> {
+  const base = `http://127.0.0.1:${options.port}`
+  return {
+    hooks: {
+      Notification: [httpHook(`${base}/hooks/notification`)],
+      SessionStart: [httpHook(`${base}/hooks/lifecycle/start`)],
+      SessionEnd: [httpHook(`${base}/hooks/lifecycle/end`)],
+      Stop: [httpHook(`${base}/hooks/lifecycle/stop`)],
+    },
+    statusLine: {
+      type: 'command',
+      command: options.statusLineCommand,
+      padding: 0,
+    },
+    env: {
+      CLAUDESWITCHER_PORT: String(options.port),
+      CLAUDESWITCHER_TOKEN: options.token,
+    },
+  }
+}
+
+export async function installIntegration(
+  claudeDir: string,
+  options: IntegrationOptions,
+): Promise<void> {
+  await updateSettingsFile(userSettingsPath(claudeDir), buildHookSettings(options))
+}
+```
+
+- [ ] **Step 4: Futtasd a teszteket**
+
+Run: `pnpm --filter @claudeswitcher/desktop test`
+Expected: PASS, minden teszt.
+
+- [ ] **Step 5: Hívd meg induláskor**
+
+`apps/desktop/src/main/index.ts` — a `daemon.refresh()` után:
+
+```ts
+  const statusLineCommand = `node "${path.join(dirname, '../../../../packages/statusline/dist/main.js')}"`
+  try {
+    await installIntegration(resolveClaudeDir(), {
+      port: daemon.port,
+      token: daemon.token,
+      statusLineCommand,
+    })
+  } catch (error) {
+    console.error('[setup] could not install integration', error)
+  }
+```
+
+És a tetejére: `import { installIntegration } from './setup.js'`
+
+- [ ] **Step 6: Kézi végpróba a valós rendszeren**
+
+Ez az M1 elfogadási tesztje.
+
+1. `pnpm build` a repo gyökerében.
+2. Készíts biztonsági másolatot: `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.bak"`
+3. Indítsd az appot: `pnpm --filter @claudeswitcher/desktop dev`
+4. Ellenőrizd a settings fájlt — a `model`, `effortLevel`, `enabledPlugins`,
+   `tui` és `permissions` kulcsoknak **változatlanul** ott kell lenniük, mellettük
+   az új `hooks`, `statusLine` és `env` kulcsokkal.
+5. Indíts egy **új** Claude Code sessiont (a hookok csak új sessionre érvényesek).
+   A statusLine-nak meg kell jelennie a TUI alján, és pár másodperc múlva a
+   limiteknek meg kell jelenniük az overlay alján.
+6. Kérj a sessiontől engedélyköteles műveletet (pl. `git status` helyett valami,
+   ami nincs az allow listádon). A tálcaikonnak át kell váltania, és a
+   `Ctrl+Alt+Space` overlayen a sessionnek a lista tetején kell lennie
+   `waiting` állapotban. **A VSCode-ban a natív prompt normálisan megjelenik** —
+   az M1 nem vesz el döntést.
+7. Enter az overlayen → a megfelelő VSCode ablak előtérbe kerül.
+
+Ha bármelyik lépés bukik, állítsd vissza a `settings.json.bak`-ot, mielőtt
+tovább keresed a hibát.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add apps/desktop/src/main/setup.ts apps/desktop/src/main/setup.test.ts apps/desktop/src/main/index.ts
+git commit -m "feat(desktop): install non-blocking hooks and status line into user settings"
+```
+
+---
+
+## M1 elfogadási kritériumok
+
+- [ ] `pnpm test` zöld a repo gyökerében.
+- [ ] `pnpm check-types` hibátlan.
+- [ ] A tálcaikon a várakozó sessionök számát tükrözi.
+- [ ] `Ctrl+Alt+Space` egy másodpercen belül megmutatja az összes élő sessiont.
+- [ ] Enter a helyes VSCode ablakra ugrik, 100 ms alatt.
+- [ ] Az 5 órás és heti limit látszik, a reset idejével.
+- [ ] A `~/.claude/settings.json` minden korábbi kulcsa érintetlen.
+- [ ] Egyetlen permission prompt sem tűnt el a VSCode-ból — az M1 nem vesz el döntést.
+
+## Szándékosan M2-be halasztva a spec §7-ből
+
+A spec az `apps/desktop` leírásában sessiononkénti **Remote Control deep linket
+és QR kódot** is előír a `bridgeSessionId`-ből. Ez az M1-ben nem valósul meg,
+mert a claude.ai session-URL alakja mérendő (§10.5), és találgatásból generált
+link rosszabb, mint semmi. Az M1 a mérhető felét szállítja: a lista jelzi, ha
+egy sessionnek nincs Remote Control kapcsolata. A deep link és a QR az M2 első
+feladata, amint a spike megvan.
+
+## Az M2 tervezése előtt kimérendő
+
+A spec §10 pontjai. Az M1 egyikre sem támaszkodik, de az M2 mindegyikre igen:
+
+1. A `PermissionRequest` pontosan mely tool-hívásokra fut le (Bash, Edit, Write,
+   WebFetch, MCP tool, plan-mode kilépés, folder-trust).
+2. Az elengedett hook (üres 200) tényleg natív promptot ad-e, ami végtelenségig vár.
+3. Az interception elveszi-e a promptot a Remote Controltól.
+4. A hook `timeout` elfogad-e 600-nál nagyobb értéket.
+5. A claude.ai session-URL alakja a `bridgeSessionId`-ből.
