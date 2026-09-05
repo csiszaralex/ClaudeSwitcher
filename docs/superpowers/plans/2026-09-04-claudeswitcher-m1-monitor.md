@@ -12,6 +12,12 @@
 
 ## Global Constraints
 
+- **TDD-bizonyíték:** ahol egy task TDD-t ír elő, a jelentésnek a futtatott
+  parancsot és a futtató **szó szerinti** kimenetét kell tartalmaznia, nem az
+  elvárt kimenet leírását. Utólag rekonstruált RED-bizonyíték maga is hiba.
+  (Vitest a hiányzó modult így jelzi: `Failed to resolve import "./x.js" from
+  "src/x.test.ts". Does the file exist?` — nem Node-stílusú `Cannot find module`
+  üzenettel.)
 - **Platform:** Windows-only. A kód futtatható más platformon (tesztek miatt), de nem támogatott.
 - **Node:** 22+. **pnpm:** 11+.
 - **TypeScript:** `strict: true`, `noUncheckedIndexedAccess: true` minden csomagban.
@@ -296,6 +302,21 @@ describe('parseSessionRecord', () => {
     expect(parseSessionRecord(null)).toBeNull()
     expect(parseSessionRecord('nonsense')).toBeNull()
   })
+
+  it('returns null when a required field has the wrong type', () => {
+    expect(parseSessionRecord({ ...REAL_SESSION, pid: '21548' })).toBeNull()
+    expect(parseSessionRecord({ ...REAL_SESSION, startedAt: 'yesterday' })).toBeNull()
+    expect(parseSessionRecord({ ...REAL_SESSION, cwd: null })).toBeNull()
+  })
+
+  it('never throws, whatever shape it is handed', () => {
+    // A never-throws szerződés globális megkötés: egy hibás fájl nem viheti
+    // magával a többi sessiont. Ez a teszt tartja életben.
+    for (const bad of [null, undefined, 'nonsense', 42, true, [], [REAL_SESSION]]) {
+      expect(() => parseSessionRecord(bad)).not.toThrow()
+      expect(parseSessionRecord(bad)).toBeNull()
+    }
+  })
 })
 
 describe('parseIdeLock', () => {
@@ -310,6 +331,22 @@ describe('parseIdeLock', () => {
   it('returns null without workspaceFolders', () => {
     const { workspaceFolders, ...bad } = REAL_LOCK
     expect(parseIdeLock(bad, 1)).toBeNull()
+  })
+
+  it('drops non-string entries from workspaceFolders', () => {
+    const lock = parseIdeLock({ ...REAL_LOCK, workspaceFolders: [123, 'p:\\proj', null] }, 1)
+    expect(lock!.workspaceFolders).toEqual(['p:\\proj'])
+  })
+
+  it('returns null when every workspace folder entry is unusable', () => {
+    expect(parseIdeLock({ ...REAL_LOCK, workspaceFolders: [123, null] }, 1)).toBeNull()
+  })
+
+  it('never throws, whatever shape it is handed', () => {
+    for (const bad of [null, undefined, 'nonsense', 42, true, []]) {
+      expect(() => parseIdeLock(bad, 1)).not.toThrow()
+      expect(parseIdeLock(bad, 1)).toBeNull()
+    }
   })
 })
 ```
@@ -444,7 +481,7 @@ export function parseIdeLock(raw: unknown, port: number): IdeLock | null {
 - [ ] **Step 5: Futtasd a teszteket**
 
 Run: `pnpm --filter @claudeswitcher/core test`
-Expected: PASS, minden teszt.
+Expected: PASS, 11 teszt a `session-registry.test.ts`-ben.
 
 - [ ] **Step 6: Commit**
 
