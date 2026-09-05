@@ -181,6 +181,18 @@ export default defineConfig({
 })
 ```
 
+`packages/core/src/index.ts` — üres barrel, a Task 5 tölti fel. **Kötelező már
+most:** a `tsconfig.json` `include`-ja `src/**/*`, az `exclude`-ja
+`src/**/*.test.ts`, tehát ha a `src/` alatt csak tesztfájl van, a `tsc` nem talál
+fordítandó bemenetet és `TS18003`-mal elszáll. Enélkül a `build` és a
+`check-types` target nem működik, és a `dist/index.js` — amin az összes
+csomagközi import múlik — soha nem jön létre.
+
+```ts
+// A publikus API-t a Task 5 exportálja innen.
+export {}
+```
+
 - [ ] **Step 3: Írd meg a smoke tesztet**
 
 `packages/core/src/smoke.test.ts`:
@@ -194,10 +206,15 @@ describe('toolchain', () => {
 })
 ```
 
-- [ ] **Step 4: Telepítés és futtatás**
+- [ ] **Step 4: Telepítés és a három target futtatása**
 
-Run: `pnpm install && pnpm test`
-Expected: PASS, 1 teszt.
+Mindhárom root script ebben a taskban készül el, tehát mindhármat futtatni kell.
+Csak a `pnpm test` futtatása elrejtené, ha a `build` vagy a `check-types` nem
+működik — a `dist/` pedig ettől a két targettől függ.
+
+Run: `pnpm install && pnpm build && pnpm check-types && pnpm test`
+Expected: mindhárom hibátlan; a `pnpm test` 1 tesztet futtat, és létrejön a
+`packages/core/dist/index.js`.
 
 - [ ] **Step 5: Commit**
 
@@ -909,7 +926,8 @@ git commit -m "feat(core): transcript tailing and activity extraction"
 ### Task 5: core — paths és atomikus settings-író
 
 **Files:**
-- Create: `packages/core/src/paths.ts`, `packages/core/src/settings-writer.ts`, `packages/core/src/index.ts`
+- Create: `packages/core/src/paths.ts`, `packages/core/src/settings-writer.ts`
+- Modify: `packages/core/src/index.ts` — a Task 1 üres barreljét cseréld le a teljes re-exportra
 - Test: `packages/core/src/settings-writer.test.ts`
 
 **Interfaces:**
@@ -1098,7 +1116,7 @@ export async function updateSettingsFile(
 
 - [ ] **Step 4: Írd meg a public API-t**
 
-`packages/core/src/index.ts`:
+`packages/core/src/index.ts` — a Task 1 `export {}` placeholderét cseréld le erre:
 ```ts
 export * from './types.js'
 export * from './paths.js'
