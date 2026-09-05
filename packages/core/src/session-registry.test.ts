@@ -52,6 +52,21 @@ describe('parseSessionRecord', () => {
     expect(parseSessionRecord(null)).toBeNull()
     expect(parseSessionRecord('nonsense')).toBeNull()
   })
+
+  it('returns null when a required field has the wrong type', () => {
+    expect(parseSessionRecord({ ...REAL_SESSION, pid: '21548' })).toBeNull()
+    expect(parseSessionRecord({ ...REAL_SESSION, startedAt: 'yesterday' })).toBeNull()
+    expect(parseSessionRecord({ ...REAL_SESSION, cwd: null })).toBeNull()
+  })
+
+  it('never throws, whatever shape it is handed', () => {
+    // A never-throws szerződés globális megkötés: egy hibás fájl nem viheti
+    // magával a többi sessiont. Ez a teszt tartja életben.
+    for (const bad of [null, undefined, 'nonsense', 42, true, [], [REAL_SESSION]]) {
+      expect(() => parseSessionRecord(bad)).not.toThrow()
+      expect(parseSessionRecord(bad)).toBeNull()
+    }
+  })
 })
 
 describe('parseIdeLock', () => {
@@ -66,5 +81,21 @@ describe('parseIdeLock', () => {
   it('returns null without workspaceFolders', () => {
     const { workspaceFolders, ...bad } = REAL_LOCK
     expect(parseIdeLock(bad, 1)).toBeNull()
+  })
+
+  it('drops non-string entries from workspaceFolders', () => {
+    const lock = parseIdeLock({ ...REAL_LOCK, workspaceFolders: [123, 'p:\\proj', null] }, 1)
+    expect(lock!.workspaceFolders).toEqual(['p:\\proj'])
+  })
+
+  it('returns null when every workspace folder entry is unusable', () => {
+    expect(parseIdeLock({ ...REAL_LOCK, workspaceFolders: [123, null] }, 1)).toBeNull()
+  })
+
+  it('never throws, whatever shape it is handed', () => {
+    for (const bad of [null, undefined, 'nonsense', 42, true, []]) {
+      expect(() => parseIdeLock(bad, 1)).not.toThrow()
+      expect(parseIdeLock(bad, 1)).toBeNull()
+    }
   })
 })
