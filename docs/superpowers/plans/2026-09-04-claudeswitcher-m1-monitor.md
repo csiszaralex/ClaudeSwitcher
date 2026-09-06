@@ -164,9 +164,14 @@ strict-peer-dependencies=false
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "check-types": "tsc -p tsconfig.json --noEmit"
-  }
+  },
+  "devDependencies": { "@types/node": "^22.0.0" }
 }
 ```
+
+A `@types/node` kötelező: a `core` a `node:fs/promises`, `node:path`,
+`node:child_process` és `console` API-kat használja a Task 3-tól kezdve, és
+nélküle a `check-types` elszáll.
 
 `packages/core/tsconfig.json`:
 ```json
