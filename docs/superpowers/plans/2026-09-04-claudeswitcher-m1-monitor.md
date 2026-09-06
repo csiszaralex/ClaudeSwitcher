@@ -15,9 +15,14 @@
 - **TDD-bizonyíték:** ahol egy task TDD-t ír elő, a jelentésnek a futtatott
   parancsot és a futtató **szó szerinti** kimenetét kell tartalmaznia, nem az
   elvárt kimenet leírását. Utólag rekonstruált RED-bizonyíték maga is hiba.
-  (Vitest a hiányzó modult így jelzi: `Failed to resolve import "./x.js" from
-  "src/x.test.ts". Does the file exist?` — nem Node-stílusú `Cannot find module`
-  üzenettel.)
+  Referenciaként a vitest 3.2.7 pontosan ezt adja hiányzó modulra (a repóban
+  lemérve, nem emlékezetből):
+  ```
+  Error: Cannot find module './liveness.js' imported from '…/src/liveness.test.ts'
+  Caused by: Error: Failed to load url ./liveness.js (resolved id: ./liveness.js)
+  in …/src/liveness.test.ts. Does the file exist?
+  ```
+  A `Cannot find module` itt **helyes** — nem a rekonstrukció jele.
 - **Platform:** Windows-only. A kód futtatható más platformon (tesztek miatt), de nem támogatott.
 - **Node:** 22+. **pnpm:** 11+.
 - **TypeScript:** `strict: true`, `noUncheckedIndexedAccess: true` minden csomagban.
@@ -506,9 +511,9 @@ git commit -m "feat(core): tolerant parsing of session registry and IDE lock fil
 **Interfaces:**
 - Consumes: `SessionRecord`, `IdeLock`, `LiveSession` (Task 2)
 - Produces:
-  - `interface ProcessProbe { isAlive(pid: number, procStart?: string): boolean }`
+  - `interface ProcessProbe { isAlive(pid, procStart?): boolean; imageName(pid): string | undefined }`
   - `resolveLiveSessions(records: SessionRecord[], locks: IdeLock[], probe: ProcessProbe): LiveSession[]`
-  - `createWin32ProcessProbe(): ProcessProbe`
+  - `createWin32ProcessProbe(ttlMs?: number): ProcessProbe`
 
 - [ ] **Step 1: Írd meg a failing tesztet**
 
@@ -517,7 +522,7 @@ Ez a rendszer legfontosabb tesztje: a valós gépen 20 lock fájl van, és a 810
 `packages/core/src/liveness.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest'
-import { resolveLiveSessions, type ProcessProbe } from './liveness.js'
+import { createWin32ProcessProbe, resolveLiveSessions, type ProcessProbe } from './liveness.js'
 import type { IdeLock, SessionRecord } from './types.js'
 
 function session(over: Partial<SessionRecord> = {}): SessionRecord {
@@ -535,70 +540,135 @@ function lock(over: Partial<IdeLock> = {}): IdeLock {
   return { port: 1000, pid: 900, workspaceFolders: ['p:\\proj\\alpha'], ...over }
 }
 
-/** Csak a felsorolt pid+procStart párokat tekinti élőnek. */
-function probeFor(alive: Array<[number, string | undefined]>): ProcessProbe {
+interface FakeProcess {
+  /** A process creation FILETIME, ahogy a session fájl tárolja. */
+  procStart?: string
+  /** A Get-Process `Name` megfelelője. */
+  image?: string
+}
+
+/** Csak a felsorolt pidek élnek. Ami nincs a táblában, az halott. */
+function probeFor(processes: Record<number, FakeProcess>): ProcessProbe {
   return {
-    isAlive: (pid, procStart) =>
-      alive.some(([p, s]) => p === pid && s === procStart),
+    isAlive: (pid, procStart) => {
+      const proc = processes[pid]
+      if (proc === undefined) return false
+      return procStart === undefined || proc.procStart === procStart
+    },
+    imageName: (pid) => processes[pid]?.image,
   }
 }
 
+/** A tipikus felállás: az élő session és a hozzá tartozó élő VSCode ablak. */
+const ALIVE = { 100: { procStart: 'ps-100' }, 900: { image: 'Code' } }
+
 describe('resolveLiveSessions', () => {
   it('drops sessions whose process is gone', () => {
-    const probe = probeFor([])
+    expect(resolveLiveSessions([session()], [lock()], probeFor({}))).toEqual([])
+  })
+
+  it('drops a session whose pid is alive but started at a different time', () => {
+    // Pid-újrahasznosítás: a pid él, de már egy másik processz birtokolja.
+    const probe = probeFor({ 100: { procStart: 'someone-else' }, 900: { image: 'Code' } })
     expect(resolveLiveSessions([session()], [lock()], probe)).toEqual([])
   })
 
   it('pairs a live session with the window whose workspace contains its cwd', () => {
-    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
-    const out = resolveLiveSessions([session()], [lock()], probe)
+    const out = resolveLiveSessions([session()], [lock()], probeFor(ALIVE))
     expect(out).toHaveLength(1)
     expect(out[0]!.window?.pid).toBe(900)
   })
 
   it('matches a cwd nested below the workspace folder', () => {
-    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
     const s = session({ cwd: 'p:\\proj\\alpha\\apps\\api' })
-    const out = resolveLiveSessions([s], [lock()], probe)
+    const out = resolveLiveSessions([s], [lock()], probeFor(ALIVE))
     expect(out[0]!.window?.pid).toBe(900)
   })
 
   it('matches case-insensitively and ignores trailing separators', () => {
-    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
     const s = session({ cwd: 'P:/PROJ/Alpha/' })
-    const out = resolveLiveSessions([s], [lock()], probe)
+    const out = resolveLiveSessions([s], [lock()], probeFor(ALIVE))
     expect(out[0]!.window?.pid).toBe(900)
   })
 
   it('does not match a sibling directory with a shared prefix', () => {
-    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
     const s = session({ cwd: 'p:\\proj\\alpha-two' })
-    const out = resolveLiveSessions([s], [lock()], probe)
+    const out = resolveLiveSessions([s], [lock()], probeFor(ALIVE))
     expect(out[0]!.window).toBeUndefined()
   })
 
-  it('ignores a stale lock whose pid was reused by another process', () => {
-    // Két lock ugyanazzal a piddel, különböző workspace-szel — pontosan ez a
-    // helyzet a valós gépen. Az élő ablak az alpha-t tartja; a beta lock elárvult.
-    const probe = probeFor([[100, 'ps-100'], [900, undefined]])
+  it('ignores a lock whose process is gone', () => {
     const stale = lock({ port: 1001, pid: 901, workspaceFolders: ['p:\\proj\\beta'] })
-    const out = resolveLiveSessions([session()], [stale, lock()], probe)
+    const out = resolveLiveSessions([session()], [stale, lock()], probeFor(ALIVE))
     expect(out[0]!.window?.port).toBe(1000)
   })
 
+  it('rejects a VSCode lock whose recycled pid now belongs to something else', () => {
+    // A veszélyes eset: elárvult lock ugyanarra a workspace-re, aminek a pidjét
+    // időközben egy teljesen független processz kapta meg. Élő pid, egyező
+    // útvonal — csak az image név árulja el, hogy nem VSCode ablak.
+    const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'notepad' } })
+    const vscodeLock = lock({ ideName: 'Visual Studio Code' })
+    const out = resolveLiveSessions([session()], [vscodeLock], probe)
+    expect(out[0]!.window).toBeUndefined()
+  })
+
+  it('accepts a VSCode lock whose pid really is a VSCode process', () => {
+    const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code' } })
+    const vscodeLock = lock({ ideName: 'Visual Studio Code' })
+    expect(resolveLiveSessions([session()], [vscodeLock], probe)[0]!.window?.pid).toBe(900)
+  })
+
+  it('accepts Code - Insiders as a VSCode process', () => {
+    const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code - Insiders' } })
+    const vscodeLock = lock({ ideName: 'Visual Studio Code - Insiders' })
+    expect(resolveLiveSessions([session()], [vscodeLock], probe)[0]!.window?.pid).toBe(900)
+  })
+
+  it('skips the image check for a lock from an IDE it does not know', () => {
+    // Nem VSCode IDE-nél nem tudjuk, mi a helyes image név — inkább párosítunk,
+    // mint hogy egy támogatott szerkesztőt kizárjunk.
+    const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'cursor' } })
+    const other = lock({ ideName: 'Cursor' })
+    expect(resolveLiveSessions([session()], [other], probe)[0]!.window?.pid).toBe(900)
+  })
+
   it('leaves window undefined when no lock matches', () => {
-    const probe = probeFor([[100, 'ps-100']])
-    const out = resolveLiveSessions([session()], [], probe)
+    const out = resolveLiveSessions([session()], [], probeFor(ALIVE))
     expect(out).toHaveLength(1)
     expect(out[0]!.window).toBeUndefined()
   })
 
   it('prefers the most specific workspace folder when several match', () => {
-    const probe = probeFor([[100, 'ps-100'], [900, undefined], [901, undefined]])
+    const probe = probeFor({
+      100: { procStart: 'ps-100' },
+      900: { image: 'Code' },
+      901: { image: 'Code' },
+    })
     const broad = lock({ port: 1000, pid: 900, workspaceFolders: ['p:\\proj'] })
     const exact = lock({ port: 1001, pid: 901, workspaceFolders: ['p:\\proj\\alpha'] })
     const out = resolveLiveSessions([session()], [broad, exact], probe)
     expect(out[0]!.window?.pid).toBe(901)
+  })
+})
+
+describe('createWin32ProcessProbe', () => {
+  const onWindows = process.platform === 'win32'
+
+  it.skipIf(!onWindows)('reports the current process as alive', () => {
+    expect(createWin32ProcessProbe().isAlive(process.pid)).toBe(true)
+  })
+
+  it.skipIf(!onWindows)('reports an implausible pid as dead', () => {
+    expect(createWin32ProcessProbe().isAlive(999_999_998)).toBe(false)
+  })
+
+  it.skipIf(!onWindows)('returns an image name for the current process', () => {
+    expect(createWin32ProcessProbe().imageName(process.pid)).toMatch(/\S/)
+  })
+
+  it.skipIf(!onWindows)('rejects the current pid when the start time disagrees', () => {
+    expect(createWin32ProcessProbe().isAlive(process.pid, 'not-a-filetime')).toBe(false)
   })
 })
 ```
@@ -622,7 +692,17 @@ export interface ProcessProbe {
    * a pideket, és az elárvult lock fájlok miatt rossz ablakra ugranánk.
    */
   isAlive(pid: number, procStart?: string): boolean
+  /**
+   * A processz image neve (a `Get-Process` `Name` oszlopa), vagy `undefined`,
+   * ha a pid nem él. A lock fájlok nem tárolnak `procStart`-ot, így náluk ez az
+   * egyetlen fogódzó annak eldöntésére, hogy a pid tényleg a bejegyzett IDE-hez
+   * tartozik-e, vagy időközben újrahasznosították.
+   */
+  imageName(pid: number): string | undefined
 }
+
+/** A `Get-Process` szerinti image nevek, amik VSCode ablakot jelentenek. */
+const VSCODE_IMAGE_NAMES = new Set(['code', 'code - insiders'])
 
 function normalize(p: string): string {
   return p.replace(/[\\/]+/g, '\\').replace(/\\+$/, '').toLowerCase()
@@ -635,12 +715,28 @@ function isWithin(child: string, parent: string): boolean {
   return c === p || c.startsWith(p + '\\')
 }
 
+/**
+ * Igaz, ha a lock pidje tényleg az a fajta processz, aminek a lock mondja.
+ *
+ * A veszélyes eset, ami ellen véd: egy elárvult lock ugyanarra a workspace-re,
+ * aminek a pidjét időközben egy független processz kapta meg. A pid él, az
+ * útvonal egyezik — csak az image név árulja el, hogy nem VSCode ablak. Ismeretlen
+ * IDE-nél nem szűrünk: inkább párosítunk, mint hogy egy támogatott szerkesztőt
+ * kizárjunk egy tipp alapján.
+ */
+function ownsLock(lock: IdeLock, probe: ProcessProbe): boolean {
+  const image = probe.imageName(lock.pid)
+  if (image === undefined) return false
+  if (lock.ideName === undefined || !/visual studio code/i.test(lock.ideName)) return true
+  return VSCODE_IMAGE_NAMES.has(image.toLowerCase())
+}
+
 function bestWindow(cwd: string, locks: IdeLock[], probe: ProcessProbe): IdeLock | undefined {
   let best: IdeLock | undefined
   let bestLength = -1
 
   for (const lock of locks) {
-    if (!probe.isAlive(lock.pid)) continue
+    if (!ownsLock(lock, probe)) continue
     for (const folder of lock.workspaceFolders) {
       if (!isWithin(cwd, folder)) continue
       const length = normalize(folder).length
@@ -665,9 +761,14 @@ export function resolveLiveSessions(
 
 const SNAPSHOT_SCRIPT = [
   'Get-Process | ForEach-Object {',
-  '  try { "$($_.Id) $($_.StartTime.ToFileTime())" } catch { }',
+  '  try { "$($_.Id)`t$($_.StartTime.ToFileTime())`t$($_.Name)" } catch { }',
   '}',
 ].join(' ')
+
+interface ProcessInfo {
+  startFileTime: string
+  image: string
+}
 
 /**
  * Windows process probe. A `procStart` a session fájlban a process creation
@@ -680,12 +781,17 @@ const SNAPSHOT_SCRIPT = [
  * egy elbukott lekérdezés ne tüntesse el az összes sessiont a listáról.
  */
 export function createWin32ProcessProbe(ttlMs = 2000): ProcessProbe {
-  let snapshot = new Map<number, string>()
+  let snapshot = new Map<number, ProcessInfo>()
   let takenAt = 0
+  let primed = false
 
   function refresh(): void {
     const now = Date.now()
-    if (now - takenAt < ttlMs) return
+    // Amíg egyszer sem sikerült, sűrűbben próbálkozunk: az üres pillanatkép
+    // minden sessiont halottnak mutatna, és a teljes TTL-t végigvárni ezzel a
+    // hazugsággal rosszabb, mint egy gyors újrapróbálkozás.
+    const interval = primed ? ttlMs : Math.min(ttlMs, 250)
+    if (now - takenAt < interval) return
     takenAt = now
 
     let output: string
@@ -700,23 +806,30 @@ export function createWin32ProcessProbe(ttlMs = 2000): ProcessProbe {
       return
     }
 
-    const next = new Map<number, string>()
+    const next = new Map<number, ProcessInfo>()
     for (const line of output.split('\n')) {
-      const [rawPid, fileTime] = line.trim().split(' ')
-      if (rawPid === undefined || fileTime === undefined) continue
+      const [rawPid, startFileTime, image] = line.trim().split('\t')
+      if (rawPid === undefined || startFileTime === undefined || image === undefined) continue
       const pid = Number.parseInt(rawPid, 10)
-      if (!Number.isNaN(pid)) next.set(pid, fileTime)
+      if (!Number.isNaN(pid)) next.set(pid, { startFileTime, image })
     }
-    if (next.size > 0) snapshot = next
+    if (next.size > 0) {
+      snapshot = next
+      primed = true
+    }
   }
 
   return {
     isAlive(pid, procStart) {
       refresh()
-      const startFileTime = snapshot.get(pid)
-      if (startFileTime === undefined) return false
+      const proc = snapshot.get(pid)
+      if (proc === undefined) return false
       if (procStart === undefined) return true
-      return startFileTime === procStart
+      return proc.startFileTime === procStart
+    },
+    imageName(pid) {
+      refresh()
+      return snapshot.get(pid)?.image
     },
   }
 }
@@ -725,7 +838,7 @@ export function createWin32ProcessProbe(ttlMs = 2000): ProcessProbe {
 - [ ] **Step 4: Futtasd a teszteket**
 
 Run: `pnpm --filter @claudeswitcher/core test liveness`
-Expected: PASS, 8 teszt.
+Expected: PASS, 17 teszt (13 a `resolveLiveSessions`-re, 4 a valós Win32 probe-ra).
 
 - [ ] **Step 5: Kézi ellenőrzés a valós gépen**
 
