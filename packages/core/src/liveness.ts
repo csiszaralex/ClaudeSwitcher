@@ -8,7 +8,17 @@ export interface ProcessProbe {
    * a pideket, és az elárvult lock fájlok miatt rossz ablakra ugranánk.
    */
   isAlive(pid: number, procStart?: string): boolean
+  /**
+   * A processz image neve (a `Get-Process` `Name` oszlopa), vagy `undefined`,
+   * ha a pid nem él. A lock fájlok nem tárolnak `procStart`-ot, így náluk ez az
+   * egyetlen fogódzó annak eldöntésére, hogy a pid tényleg a bejegyzett IDE-hez
+   * tartozik-e, vagy időközben újrahasznosították.
+   */
+  imageName(pid: number): string | undefined
 }
+
+/** A `Get-Process` szerinti image nevek, amik VSCode ablakot jelentenek. */
+const VSCODE_IMAGE_NAMES = new Set(['code', 'code - insiders'])
 
 function normalize(p: string): string {
   return p.replace(/[\\/]+/g, '\\').replace(/\\+$/, '').toLowerCase()
@@ -21,12 +31,28 @@ function isWithin(child: string, parent: string): boolean {
   return c === p || c.startsWith(p + '\\')
 }
 
+/**
+ * Igaz, ha a lock pidje tényleg az a fajta processz, aminek a lock mondja.
+ *
+ * A veszélyes eset, ami ellen véd: egy elárvult lock ugyanarra a workspace-re,
+ * aminek a pidjét időközben egy független processz kapta meg. A pid él, az
+ * útvonal egyezik — csak az image név árulja el, hogy nem VSCode ablak. Ismeretlen
+ * IDE-nél nem szűrünk: inkább párosítunk, mint hogy egy támogatott szerkesztőt
+ * kizárjunk egy tipp alapján.
+ */
+function ownsLock(lock: IdeLock, probe: ProcessProbe): boolean {
+  const image = probe.imageName(lock.pid)
+  if (image === undefined) return false
+  if (lock.ideName === undefined || !/visual studio code/i.test(lock.ideName)) return true
+  return VSCODE_IMAGE_NAMES.has(image.toLowerCase())
+}
+
 function bestWindow(cwd: string, locks: IdeLock[], probe: ProcessProbe): IdeLock | undefined {
   let best: IdeLock | undefined
   let bestLength = -1
 
   for (const lock of locks) {
-    if (!probe.isAlive(lock.pid)) continue
+    if (!ownsLock(lock, probe)) continue
     for (const folder of lock.workspaceFolders) {
       if (!isWithin(cwd, folder)) continue
       const length = normalize(folder).length
@@ -51,9 +77,14 @@ export function resolveLiveSessions(
 
 const SNAPSHOT_SCRIPT = [
   'Get-Process | ForEach-Object {',
-  '  try { "$($_.Id) $($_.StartTime.ToFileTime())" } catch { }',
+  '  try { "$($_.Id)`t$($_.StartTime.ToFileTime())`t$($_.Name)" } catch { }',
   '}',
 ].join(' ')
+
+interface ProcessInfo {
+  startFileTime: string
+  image: string
+}
 
 /**
  * Windows process probe. A `procStart` a session fájlban a process creation
@@ -66,12 +97,17 @@ const SNAPSHOT_SCRIPT = [
  * egy elbukott lekérdezés ne tüntesse el az összes sessiont a listáról.
  */
 export function createWin32ProcessProbe(ttlMs = 2000): ProcessProbe {
-  let snapshot = new Map<number, string>()
+  let snapshot = new Map<number, ProcessInfo>()
   let takenAt = 0
+  let primed = false
 
   function refresh(): void {
     const now = Date.now()
-    if (now - takenAt < ttlMs) return
+    // Amíg egyszer sem sikerült, sűrűbben próbálkozunk: az üres pillanatkép
+    // minden sessiont halottnak mutatna, és a teljes TTL-t végigvárni ezzel a
+    // hazugsággal rosszabb, mint egy gyors újrapróbálkozás.
+    const interval = primed ? ttlMs : Math.min(ttlMs, 250)
+    if (now - takenAt < interval) return
     takenAt = now
 
     let output: string
@@ -86,23 +122,30 @@ export function createWin32ProcessProbe(ttlMs = 2000): ProcessProbe {
       return
     }
 
-    const next = new Map<number, string>()
+    const next = new Map<number, ProcessInfo>()
     for (const line of output.split('\n')) {
-      const [rawPid, fileTime] = line.trim().split(' ')
-      if (rawPid === undefined || fileTime === undefined) continue
+      const [rawPid, startFileTime, image] = line.trim().split('\t')
+      if (rawPid === undefined || startFileTime === undefined || image === undefined) continue
       const pid = Number.parseInt(rawPid, 10)
-      if (!Number.isNaN(pid)) next.set(pid, fileTime)
+      if (!Number.isNaN(pid)) next.set(pid, { startFileTime, image })
     }
-    if (next.size > 0) snapshot = next
+    if (next.size > 0) {
+      snapshot = next
+      primed = true
+    }
   }
 
   return {
     isAlive(pid, procStart) {
       refresh()
-      const startFileTime = snapshot.get(pid)
-      if (startFileTime === undefined) return false
+      const proc = snapshot.get(pid)
+      if (proc === undefined) return false
       if (procStart === undefined) return true
-      return startFileTime === procStart
+      return proc.startFileTime === procStart
+    },
+    imageName(pid) {
+      refresh()
+      return snapshot.get(pid)?.image
     },
   }
 }
