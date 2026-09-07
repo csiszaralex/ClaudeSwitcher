@@ -12,7 +12,13 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
   const message = rec.message
   if (typeof message !== 'object' || message === null) return []
   const content = (message as Record<string, unknown>).content
-  return Array.isArray(content) ? (content as ContentBlock[]) : []
+  if (!Array.isArray(content)) return []
+  // A nem-objektum elemeket itt dobjuk el, nem a hívóban. Egy `null` blokk
+  // valid JSON, és a `.type` olvasása rajta TypeError-t dobna — pontosan az a
+  // fajta összeomlás, amit ennek a modulnak meg kell előznie.
+  return content.filter(
+    (block): block is ContentBlock => typeof block === 'object' && block !== null,
+  )
 }
 
 /**
@@ -79,9 +85,18 @@ export async function findTranscriptPath(
     const candidate = path.join(projects, entry, `${sessionId}.jsonl`)
     try {
       const handle = await open(candidate, 'r')
-      await handle.close()
-      return candidate
+      try {
+        // A puszta megnyithatóság nem elég: egy `<sessionId>.jsonl` nevű
+        // *könyvtár* is megnyílik, és utána a tailLines vagy üres eredményt ad,
+        // vagy EISDIR-rel száll el. A típusát is meg kell nézni.
+        if ((await handle.stat()).isFile()) return candidate
+      } finally {
+        await handle.close()
+      }
     } catch {
+      // Nem létezik, vagy nem olvasható. A kettőt nem különböztetjük meg: a
+      // visszatérési szerződés `string | undefined`, és egy jogosultsági hiba
+      // ugyanúgy azt jelenti, hogy ezt a transcriptet nem tudjuk olvasni.
       continue
     }
   }
