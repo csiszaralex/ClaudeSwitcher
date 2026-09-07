@@ -1727,6 +1727,26 @@ describe('POST /hooks/notification', () => {
     expect((await post(app, '/hooks/notification', { notification_type: 'x' })).status).toBe(200)
     expect(ev.onNotification).not.toHaveBeenCalled()
   })
+
+  it('contains an async handler rejection instead of letting it escape', async () => {
+    // A kezelők `void | Promise<void>`-ot adhatnak vissza. Egy elkapatlan
+    // elutasítás alapértelmezett Node beállításokkal az egész daemont megölné.
+    const ev = events()
+    const boom = new Error('async boom')
+    ;(ev.onNotification as ReturnType<typeof vi.fn>).mockRejectedValue(boom)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/notification', {
+      session_id: 'sid-1',
+      cwd: 'c',
+      notification_type: 'idle_prompt',
+    })
+    expect(res.status).toBe(200)
+
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('notification'), boom)
+    logged.mockRestore()
+  })
 })
 
 describe('POST /hooks/lifecycle/:kind', () => {
@@ -1769,15 +1789,27 @@ describe('POST /statusline', () => {
     expect((await post(app, '/statusline', { model: { id: 'opus' } })).status).toBe(200)
     expect(ev.onRateLimits).not.toHaveBeenCalled()
   })
+
+  it('ignores rate_limits whose windows are all unusable', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    await post(app, '/statusline', {
+      rate_limits: { five_hour: { used_percentage: 'lots' }, seven_day: null },
+    })
+    expect(ev.onRateLimits).not.toHaveBeenCalled()
+  })
 })
 ```
 
 - [ ] **Step 3: Futtasd, hogy lásd a hibát**
 
-A `daemon` a `core`-t a lefordított `dist/`-en át éri el, ezért előbb build kell.
+A `daemon` a `core`-t a lefordított `dist/`-en át éri el, ezért előbb build kell —
+de **csak a `core`-t**. A teljes `pnpm build` ebben a pillanatban elszállna
+`TS18003`-mal, mert a `daemon` `src/`-jében még csak a kizárt tesztfájl van, és a
+lánc a teszt futtatása előtt megállna.
 
-Run: `pnpm install && pnpm build && pnpm --filter @claudeswitcher/daemon test`
-Expected: FAIL — `Failed to resolve import "./hook-server.js"`
+Run: `pnpm install && pnpm --filter @claudeswitcher/core build && pnpm --filter @claudeswitcher/daemon test`
+Expected: FAIL — `Cannot find module './hook-server.js'`, `Caused by: … Does the file exist?`
 
 - [ ] **Step 4: Írd meg az implementációt**
 
@@ -1800,9 +1832,25 @@ export interface LifecycleEvent {
 }
 
 export interface HookEvents {
-  onNotification(event: NotificationEvent): void
-  onLifecycle(event: LifecycleEvent): void
-  onRateLimits(limits: RateLimits): void
+  onNotification(event: NotificationEvent): void | Promise<void>
+  onLifecycle(event: LifecycleEvent): void | Promise<void>
+  onRateLimits(limits: RateLimits): void | Promise<void>
+}
+
+/**
+ * Egy hook-kezelő hibája soha nem eshet ki a route-ból. A szinkron dobást a
+ * hívást körülvevő try/catch fogja el; az aszinkron elutasítást ez.
+ *
+ * Ez nem elméleti: a kezelők `void | Promise<void>`-ot adhatnak vissza, és egy
+ * elkapatlan elutasítás alapértelmezett Node beállításokkal **az egész daemont
+ * megölné** — vagyis minden session hook-kezelését, nem csak ezt az egy hívást.
+ * Szándékosan nem `await`-eljük: a válasz azonnal megy, a kezelő a maga
+ * tempójában fut.
+ */
+function contain(result: void | Promise<void>, what: string): void {
+  void Promise.resolve(result).catch((error: unknown) => {
+    console.error(`[hook] ${what} handler failed`, error)
+  })
 }
 
 const LIFECYCLE_KINDS = new Set(['start', 'end', 'stop'])
@@ -1852,12 +1900,15 @@ export function createHookApp(token: string, events: HookEvents): Hono {
       const sessionId = str(b.session_id)
       const type = str(b.notification_type)
       if (sessionId !== undefined && type !== undefined) {
-        events.onNotification({
-          sessionId,
-          cwd: str(b.cwd) ?? '',
-          type,
-          text: str(b.notification_text),
-        })
+        contain(
+          events.onNotification({
+            sessionId,
+            cwd: str(b.cwd) ?? '',
+            type,
+            text: str(b.notification_text),
+          }),
+          'notification',
+        )
       }
     } catch (error) {
       console.error('[hook] notification handler failed', error)
@@ -1871,11 +1922,14 @@ export function createHookApp(token: string, events: HookEvents): Hono {
       const b = await body(c)
       const sessionId = str(b.session_id)
       if (sessionId !== undefined && LIFECYCLE_KINDS.has(kind)) {
-        events.onLifecycle({
-          sessionId,
-          cwd: str(b.cwd) ?? '',
-          kind: kind as LifecycleEvent['kind'],
-        })
+        contain(
+          events.onLifecycle({
+            sessionId,
+            cwd: str(b.cwd) ?? '',
+            kind: kind as LifecycleEvent['kind'],
+          }),
+          'lifecycle',
+        )
       }
     } catch (error) {
       console.error('[hook] lifecycle handler failed', error)
@@ -1895,7 +1949,9 @@ export function createHookApp(token: string, events: HookEvents): Hono {
         if (five) limits.five_hour = five
         if (seven) limits.seven_day = seven
         if (spend) limits.spend_limit = spend
-        if (Object.keys(limits).length > 0) events.onRateLimits(limits)
+        if (Object.keys(limits).length > 0) {
+          contain(events.onRateLimits(limits), 'statusline')
+        }
       }
     } catch (error) {
       console.error('[hook] statusline handler failed', error)
@@ -1909,8 +1965,8 @@ export function createHookApp(token: string, events: HookEvents): Hono {
 
 - [ ] **Step 5: Futtasd a teszteket**
 
-Run: `pnpm --filter @claudeswitcher/daemon test`
-Expected: PASS, 9 teszt.
+Run: `pnpm --filter @claudeswitcher/daemon test && pnpm check-types && pnpm build`
+Expected: PASS, 11 teszt; a `check-types` és a `build` hibátlan.
 
 - [ ] **Step 6: Commit**
 
