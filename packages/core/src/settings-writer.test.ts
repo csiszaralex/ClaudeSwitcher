@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -38,6 +38,16 @@ describe('mergeSettings', () => {
     mergeSettings(existing, { permissions: { allow: ['b'] } })
     expect(JSON.stringify(existing)).toBe(frozen)
   })
+
+  it('drops a __proto__ key instead of losing it into the prototype', () => {
+    // JSON.parse kell: az objektum-literál `__proto__` kulcsát a parser
+    // külön kezeli, és nem saját kulcsot hozna létre.
+    const patch = JSON.parse('{"__proto__":{"polluted":true}}') as Record<string, unknown>
+    const out = mergeSettings({ model: 'opus' }, patch)
+    expect(out).toEqual({ model: 'opus' })
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype)
+    expect((({} as Record<string, unknown>).polluted)).toBeUndefined()
+  })
 })
 
 describe('updateSettingsFile', () => {
@@ -67,5 +77,44 @@ describe('updateSettingsFile', () => {
     await writeFile(file, '{ this is not json')
     await expect(updateSettingsFile(file, { model: 'opus' })).rejects.toThrow(/parse/i)
     expect(await readFile(file, 'utf8')).toBe('{ this is not json')
+  })
+
+  it('serialises concurrent updates instead of interleaving them', async () => {
+    // Sorbaállítás nélkül a három írás egymásba fésülődik, és a fájl
+    // olvashatatlan JSON lesz — a pontos katasztrófa, amit ez a modul megelőz.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ model: 'opus' }))
+
+    await Promise.all([
+      updateSettingsFile(file, { statusLine: { type: 'command' } }),
+      updateSettingsFile(file, { env: { CLAUDESWITCHER_PORT: '1' } }),
+      updateSettingsFile(file, { hooks: { Stop: [] } }),
+    ])
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      model: 'opus',
+      statusLine: { type: 'command' },
+      env: { CLAUDESWITCHER_PORT: '1' },
+      hooks: { Stop: [] },
+    })
+  })
+
+  it('keeps writing after a failed update on the same file', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, '{ broken')
+    await expect(updateSettingsFile(file, { a: 1 })).rejects.toThrow(/parse/i)
+
+    await writeFile(file, '{}')
+    await updateSettingsFile(file, { b: 2 })
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ b: 2 })
+  })
+
+  it('leaves no temp files behind', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await updateSettingsFile(file, { model: 'opus' })
+    expect(await readdir(dir)).toEqual(['settings.json'])
   })
 })
