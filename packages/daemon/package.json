@@ -1,0 +1,22 @@
+{
+  "name": "@claudeswitcher/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/daemon.js",
+  "types": "./dist/daemon.d.ts",
+  "exports": { ".": { "types": "./dist/daemon.d.ts", "default": "./dist/daemon.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check-types": "tsc -p tsconfig.check.json --noEmit"
+  },
+  "dependencies": {
+    "@claudeswitcher/core": "workspace:*",
+    "@hono/node-server": "^1.13.0",
+    "chokidar": "^4.0.0",
+    "hono": "^4.6.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": { "@types/ws": "^8.5.0" }
+}
