@@ -1611,7 +1611,7 @@ git commit -m "feat(core): claude dir resolution and atomic settings merge write
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "check-types": "tsc -p tsconfig.json --noEmit"
+    "check-types": "tsc -p tsconfig.check.json --noEmit"
   },
   "dependencies": {
     "@claudeswitcher/core": "workspace:*",
@@ -1631,6 +1631,15 @@ git commit -m "feat(core): claude dir resolution and atomic settings merge write
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
   "include": ["src/**/*"],
   "exclude": ["src/**/*.test.ts"]
+}
+```
+
+`packages/daemon/tsconfig.check.json`:
+```json
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*"],
+  "exclude": []
 }
 ```
 
@@ -2744,7 +2753,7 @@ git commit -m "feat(daemon): websocket hub and daemon assembly with polling refr
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "check-types": "tsc -p tsconfig.json --noEmit"
+    "check-types": "tsc -p tsconfig.check.json --noEmit"
   },
   "dependencies": { "@claudeswitcher/core": "workspace:*" }
 }
@@ -2757,6 +2766,15 @@ git commit -m "feat(daemon): websocket hub and daemon assembly with polling refr
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
   "include": ["src/**/*"],
   "exclude": ["src/**/*.test.ts"]
+}
+```
+
+`packages/statusline/tsconfig.check.json`:
+```json
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*"],
+  "exclude": []
 }
 ```
 
@@ -3502,6 +3520,10 @@ export default defineConfig({
   test: { include: ['src/**/*.test.{ts,tsx}'] },
 })
 ```
+
+Az `apps/desktop` `check-types`-ja az `electron-vite` miatt nem külön `tsconfig`
+párra épül, hanem az egyetlen `tsconfig.json`-ra, ami a teszteket is tartalmazza
+(nincs `tsc` build lépése, amiből ki kellene hagyni őket).
 
 Run: `pnpm --filter @claudeswitcher/desktop test`
 Expected: FAIL — `Failed to resolve import "./format.js"`
