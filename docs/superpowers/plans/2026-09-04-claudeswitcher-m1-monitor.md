@@ -1218,6 +1218,7 @@ git commit -m "feat(core): transcript tailing and activity extraction"
 **Files:**
 - Create: `packages/core/src/paths.ts`, `packages/core/src/settings-writer.ts`
 - Create: `packages/core/tsconfig.check.json`
+- Test: `packages/core/src/paths.test.ts`
 - Modify: `packages/core/src/index.ts` — a Task 1 üres barreljét cseréld le a teljes re-exportra
 - Modify: `packages/core/package.json` — a `check-types` script a check configra mutasson
 - Test: `packages/core/src/settings-writer.test.ts`
@@ -1234,7 +1235,7 @@ git commit -m "feat(core): transcript tailing and activity extraction"
 
 `packages/core/src/settings-writer.test.ts`:
 ```ts
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -1274,6 +1275,16 @@ describe('mergeSettings', () => {
     mergeSettings(existing, { permissions: { allow: ['b'] } })
     expect(JSON.stringify(existing)).toBe(frozen)
   })
+
+  it('drops a __proto__ key instead of losing it into the prototype', () => {
+    // JSON.parse kell: az objektum-literál `__proto__` kulcsát a parser
+    // külön kezeli, és nem saját kulcsot hozna létre.
+    const patch = JSON.parse('{"__proto__":{"polluted":true}}') as Record<string, unknown>
+    const out = mergeSettings({ model: 'opus' }, patch)
+    expect(out).toEqual({ model: 'opus' })
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype)
+    expect((({} as Record<string, unknown>).polluted)).toBeUndefined()
+  })
 })
 
 describe('updateSettingsFile', () => {
@@ -1304,6 +1315,45 @@ describe('updateSettingsFile', () => {
     await expect(updateSettingsFile(file, { model: 'opus' })).rejects.toThrow(/parse/i)
     expect(await readFile(file, 'utf8')).toBe('{ this is not json')
   })
+
+  it('serialises concurrent updates instead of interleaving them', async () => {
+    // Sorbaállítás nélkül a három írás egymásba fésülődik, és a fájl
+    // olvashatatlan JSON lesz — a pontos katasztrófa, amit ez a modul megelőz.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ model: 'opus' }))
+
+    await Promise.all([
+      updateSettingsFile(file, { statusLine: { type: 'command' } }),
+      updateSettingsFile(file, { env: { CLAUDESWITCHER_PORT: '1' } }),
+      updateSettingsFile(file, { hooks: { Stop: [] } }),
+    ])
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      model: 'opus',
+      statusLine: { type: 'command' },
+      env: { CLAUDESWITCHER_PORT: '1' },
+      hooks: { Stop: [] },
+    })
+  })
+
+  it('keeps writing after a failed update on the same file', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, '{ broken')
+    await expect(updateSettingsFile(file, { a: 1 })).rejects.toThrow(/parse/i)
+
+    await writeFile(file, '{}')
+    await updateSettingsFile(file, { b: 2 })
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ b: 2 })
+  })
+
+  it('leaves no temp files behind', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await updateSettingsFile(file, { model: 'opus' })
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
 })
 ```
 
@@ -1321,8 +1371,8 @@ import path from 'node:path'
 
 /** A Claude Code konfigurációs könyvtára. CLAUDE_CONFIG_DIR felülírja. */
 export function resolveClaudeDir(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.CLAUDE_CONFIG_DIR
-  if (override !== undefined && override.trim() !== '') return override
+  const override = env.CLAUDE_CONFIG_DIR?.trim()
+  if (override !== undefined && override !== '') return override
   return path.join(os.homedir(), '.claude')
 }
 
@@ -1341,7 +1391,8 @@ export function userSettingsPath(claudeDir: string): string {
 
 `packages/core/src/settings-writer.ts`:
 ```ts
-import { readFile, rename, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -1359,6 +1410,10 @@ export function mergeSettings(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...existing }
   for (const [key, value] of Object.entries(patch)) {
+    // A `__proto__` értékadása a prototípus-settert hívná adatkulcs létrehozása
+    // helyett, és a payload némán eltűnne. Nem valós Claude Code beállításkulcs,
+    // de a csendes adatvesztést nem hagyjuk a kódban.
+    if (key === '__proto__') continue
     const current = out[key]
     out[key] =
       isPlainObject(value) && isPlainObject(current)
@@ -1369,11 +1424,40 @@ export function mergeSettings(
 }
 
 /**
+ * Célfájlonkénti sorbaállítás.
+ *
+ * Enélkül két egyidejű hívás ugyanarra a fájlra összefésült, olvashatatlan
+ * JSON-t hagyna maga után — pont az a katasztrófa, amit ez a modul megelőzni
+ * hivatott —, ráadásul a második beolvasás lemaradna az első írásáról, tehát az
+ * egyik patch akkor is elveszne, ha a fájl épen marad.
+ *
+ * A Map csak annyi bejegyzést tart, ahány külön settings fájlt írunk (a
+ * felhasználói és a projektszintű), tehát nem nő korlátlanul.
+ */
+const writeQueues = new Map<string, Promise<unknown>>()
+
+export function updateSettingsFile(
+  filePath: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const key = path.resolve(filePath)
+  const previous = writeQueues.get(key) ?? Promise.resolve()
+  // A következő hívónak arra kell várnia, hogy a fájlművelet *befejeződjön*, a
+  // sikerére nem — ezért fut a lánc hiba után is tovább.
+  const next = previous.then(
+    () => writeMerged(filePath, patch),
+    () => writeMerged(filePath, patch),
+  )
+  writeQueues.set(key, next.catch(() => undefined))
+  return next
+}
+
+/**
  * Atomikus merge-írás: temp fájl + rename. Parse-olhatatlan meglévő fájlnál
  * dob, és nem ír — inkább ne módosítsunk semmit, mint hogy elveszítsük a
  * felhasználó beállításait.
  */
-export async function updateSettingsFile(
+async function writeMerged(
   filePath: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
@@ -1400,10 +1484,55 @@ export async function updateSettingsFile(
   }
 
   const merged = mergeSettings(existing, patch)
-  const temp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.tmp`)
-  await writeFile(temp, JSON.stringify(merged, null, 2) + '\n', 'utf8')
-  await rename(temp, filePath)
+  // Egyedi név processzenként ÉS híváson belül: a pid önmagában nem elég, mert
+  // egy processzen belüli két írás ugyanarra a temp útvonalra esne.
+  const temp = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${randomUUID()}.tmp`,
+  )
+  try {
+    await writeFile(temp, JSON.stringify(merged, null, 2) + '\n', 'utf8')
+    await rename(temp, filePath)
+  } catch (error) {
+    // Ne hagyjunk törmeléket a ~/.claude/-ban. A célfájl érintetlen — ez a lényeg.
+    await unlink(temp).catch(() => undefined)
+    throw error
+  }
 }
+```
+
+- [ ] **Step 3b: Írd meg a `paths.ts` tesztjét**
+
+`packages/core/src/paths.test.ts`:
+```ts
+import os from 'node:os'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { ideDir, resolveClaudeDir, sessionsDir, userSettingsPath } from './paths.js'
+
+describe('resolveClaudeDir', () => {
+  it('prefers CLAUDE_CONFIG_DIR when it is set', () => {
+    expect(resolveClaudeDir({ CLAUDE_CONFIG_DIR: 'd:\\custom' })).toBe('d:\\custom')
+  })
+
+  it('trims incidental whitespace around the override', () => {
+    expect(resolveClaudeDir({ CLAUDE_CONFIG_DIR: '  d:\\custom  ' })).toBe('d:\\custom')
+  })
+
+  it('falls back to the home directory when the override is absent or blank', () => {
+    const fallback = path.join(os.homedir(), '.claude')
+    expect(resolveClaudeDir({})).toBe(fallback)
+    expect(resolveClaudeDir({ CLAUDE_CONFIG_DIR: '   ' })).toBe(fallback)
+  })
+})
+
+describe('directory helpers', () => {
+  it('derive their paths from the given claude dir', () => {
+    expect(sessionsDir('d:\\c')).toBe(path.join('d:\\c', 'sessions'))
+    expect(ideDir('d:\\c')).toBe(path.join('d:\\c', 'ide'))
+    expect(userSettingsPath('d:\\c')).toBe(path.join('d:\\c', 'settings.json'))
+  })
+})
 ```
 
 - [ ] **Step 4: Kapcsold be a tesztek típusellenőrzését**
