@@ -23,6 +23,16 @@
   in …/src/liveness.test.ts. Does the file exist?
   ```
   A `Cannot find module` itt **helyes** — nem a rekonstrukció jele.
+- **A tesztfájlokat is típusellenőrizzük.** A `tsconfig.json` kizárja az
+  `src/**/*.test.ts`-t, mert a `dist/`-be nem kell teszt — de a Vitest esbuilddel
+  fordít, ami *nem* típusellenőriz, tehát így egy elgépelt mezőnév a tesztben
+  némán átcsúszna. Ezért minden csomag kap egy `tsconfig.check.json`-t, ami a
+  build configot terjeszti ki a tesztekre, és a `check-types` script azt
+  használja:
+  ```json
+  { "extends": "./tsconfig.json", "include": ["src/**/*"], "exclude": [] }
+  ```
+  `"check-types": "tsc -p tsconfig.check.json --noEmit"`
 - **Platform:** Windows-only. A kód futtatható más platformon (tesztek miatt), de nem támogatott.
 - **Node:** 22+. **pnpm:** 11+.
 - **TypeScript:** `strict: true`, `noUncheckedIndexedAccess: true` minden csomagban.
@@ -1207,7 +1217,9 @@ git commit -m "feat(core): transcript tailing and activity extraction"
 
 **Files:**
 - Create: `packages/core/src/paths.ts`, `packages/core/src/settings-writer.ts`
+- Create: `packages/core/tsconfig.check.json`
 - Modify: `packages/core/src/index.ts` — a Task 1 üres barreljét cseréld le a teljes re-exportra
+- Modify: `packages/core/package.json` — a `check-types` script a check configra mutasson
 - Test: `packages/core/src/settings-writer.test.ts`
 
 **Interfaces:**
@@ -1394,7 +1406,25 @@ export async function updateSettingsFile(
 }
 ```
 
-- [ ] **Step 4: Írd meg a public API-t**
+- [ ] **Step 4: Kapcsold be a tesztek típusellenőrzését**
+
+`packages/core/tsconfig.check.json`:
+```json
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*"],
+  "exclude": []
+}
+```
+
+A `packages/core/package.json`-ben a script mostantól ezt használja:
+```json
+"check-types": "tsc -p tsconfig.check.json --noEmit"
+```
+
+A `build` marad a szűk `tsconfig.json`-on — a `dist/`-be nem való tesztfájl.
+
+- [ ] **Step 5: Írd meg a public API-t**
 
 `packages/core/src/index.ts` — a Task 1 `export {}` placeholderét cseréld le erre:
 ```ts
@@ -1406,15 +1436,17 @@ export * from './transcript.js'
 export * from './settings-writer.js'
 ```
 
-- [ ] **Step 5: Futtasd a teszteket és a típusellenőrzést**
+- [ ] **Step 6: Futtasd a teszteket és a típusellenőrzést**
 
-Run: `pnpm --filter @claudeswitcher/core test && pnpm --filter @claudeswitcher/core check-types`
-Expected: minden teszt PASS, típushiba nincs.
+Run: `pnpm --filter @claudeswitcher/core test && pnpm --filter @claudeswitcher/core check-types && pnpm --filter @claudeswitcher/core build`
+Expected: minden teszt PASS, típushiba nincs, a `dist/index.js` a teljes publikus
+API-t exportálja. A `check-types` mostantól a tesztfájlokat is fordítja — ha egy
+korábbi task tesztjében típushiba van, az itt fog először kiderülni.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add packages/core/src/paths.ts packages/core/src/settings-writer.ts packages/core/src/settings-writer.test.ts packages/core/src/index.ts
+git add packages/core/src/paths.ts packages/core/src/settings-writer.ts packages/core/src/settings-writer.test.ts packages/core/src/index.ts packages/core/tsconfig.check.json packages/core/package.json
 git commit -m "feat(core): claude dir resolution and atomic settings merge writer"
 ```
 
