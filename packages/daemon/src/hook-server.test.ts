@@ -67,6 +67,26 @@ describe('POST /hooks/notification', () => {
     expect((await post(app, '/hooks/notification', { notification_type: 'x' })).status).toBe(200)
     expect(ev.onNotification).not.toHaveBeenCalled()
   })
+
+  it('contains an async handler rejection instead of letting it escape', async () => {
+    // A kezelők `void | Promise<void>`-ot adhatnak vissza. Egy elkapatlan
+    // elutasítás alapértelmezett Node beállításokkal az egész daemont megölné.
+    const ev = events()
+    const boom = new Error('async boom')
+    ;(ev.onNotification as ReturnType<typeof vi.fn>).mockRejectedValue(boom)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/notification', {
+      session_id: 'sid-1',
+      cwd: 'c',
+      notification_type: 'idle_prompt',
+    })
+    expect(res.status).toBe(200)
+
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('notification'), boom)
+    logged.mockRestore()
+  })
 })
 
 describe('POST /hooks/lifecycle/:kind', () => {
@@ -107,6 +127,15 @@ describe('POST /statusline', () => {
     const ev = events()
     const app = createHookApp(TOKEN, ev)
     expect((await post(app, '/statusline', { model: { id: 'opus' } })).status).toBe(200)
+    expect(ev.onRateLimits).not.toHaveBeenCalled()
+  })
+
+  it('ignores rate_limits whose windows are all unusable', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    await post(app, '/statusline', {
+      rate_limits: { five_hour: { used_percentage: 'lots' }, seven_day: null },
+    })
     expect(ev.onRateLimits).not.toHaveBeenCalled()
   })
 })

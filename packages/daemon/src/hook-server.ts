@@ -15,9 +15,25 @@ export interface LifecycleEvent {
 }
 
 export interface HookEvents {
-  onNotification(event: NotificationEvent): void
-  onLifecycle(event: LifecycleEvent): void
-  onRateLimits(limits: RateLimits): void
+  onNotification(event: NotificationEvent): void | Promise<void>
+  onLifecycle(event: LifecycleEvent): void | Promise<void>
+  onRateLimits(limits: RateLimits): void | Promise<void>
+}
+
+/**
+ * Egy hook-kezelő hibája soha nem eshet ki a route-ból. A szinkron dobást a
+ * hívást körülvevő try/catch fogja el; az aszinkron elutasítást ez.
+ *
+ * Ez nem elméleti: a kezelők `void | Promise<void>`-ot adhatnak vissza, és egy
+ * elkapatlan elutasítás alapértelmezett Node beállításokkal **az egész daemont
+ * megölné** — vagyis minden session hook-kezelését, nem csak ezt az egy hívást.
+ * Szándékosan nem `await`-eljük: a válasz azonnal megy, a kezelő a maga
+ * tempójában fut.
+ */
+function contain(result: void | Promise<void>, what: string): void {
+  void Promise.resolve(result).catch((error: unknown) => {
+    console.error(`[hook] ${what} handler failed`, error)
+  })
 }
 
 const LIFECYCLE_KINDS = new Set(['start', 'end', 'stop'])
@@ -67,12 +83,15 @@ export function createHookApp(token: string, events: HookEvents): Hono {
       const sessionId = str(b.session_id)
       const type = str(b.notification_type)
       if (sessionId !== undefined && type !== undefined) {
-        events.onNotification({
-          sessionId,
-          cwd: str(b.cwd) ?? '',
-          type,
-          text: str(b.notification_text),
-        })
+        contain(
+          events.onNotification({
+            sessionId,
+            cwd: str(b.cwd) ?? '',
+            type,
+            text: str(b.notification_text),
+          }),
+          'notification',
+        )
       }
     } catch (error) {
       console.error('[hook] notification handler failed', error)
@@ -86,11 +105,14 @@ export function createHookApp(token: string, events: HookEvents): Hono {
       const b = await body(c)
       const sessionId = str(b.session_id)
       if (sessionId !== undefined && LIFECYCLE_KINDS.has(kind)) {
-        events.onLifecycle({
-          sessionId,
-          cwd: str(b.cwd) ?? '',
-          kind: kind as LifecycleEvent['kind'],
-        })
+        contain(
+          events.onLifecycle({
+            sessionId,
+            cwd: str(b.cwd) ?? '',
+            kind: kind as LifecycleEvent['kind'],
+          }),
+          'lifecycle',
+        )
       }
     } catch (error) {
       console.error('[hook] lifecycle handler failed', error)
@@ -110,7 +132,9 @@ export function createHookApp(token: string, events: HookEvents): Hono {
         if (five) limits.five_hour = five
         if (seven) limits.seven_day = seven
         if (spend) limits.spend_limit = spend
-        if (Object.keys(limits).length > 0) events.onRateLimits(limits)
+        if (Object.keys(limits).length > 0) {
+          contain(events.onRateLimits(limits), 'statusline')
+        }
       }
     } catch (error) {
       console.error('[hook] statusline handler failed', error)
