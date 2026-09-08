@@ -2536,6 +2536,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ProcessProbe } from '@claudeswitcher/core'
 import { afterEach, describe, expect, it } from 'vitest'
+import { WebSocket } from 'ws'
 import { startDaemon, type Daemon } from './daemon.js'
 
 const aliveProbe: ProcessProbe = { isAlive: () => true }
@@ -2598,6 +2599,24 @@ describe('startDaemon', () => {
     expect(res.status).toBe(401)
   })
 
+  it('does not re-broadcast an unchanged state', async () => {
+    // A poll másodpercenként fut; azonos pillanatképet nem küldünk újra.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    await running.refresh()
+
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
+    const messages: string[] = []
+    socket.on('message', (data) => messages.push(String(data)))
+    await new Promise((resolve) => socket.on('open', resolve))
+
+    await running.refresh()
+    await running.refresh()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    socket.close()
+
+    expect(messages).toHaveLength(0)
+  })
+
   it('stores rate limits posted by the status line', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const resetsAt = Math.floor(Date.now() / 1000) + 3600
@@ -2643,7 +2662,11 @@ export class Hub {
   }
 
   broadcast(payload: unknown): void {
-    const message = JSON.stringify(payload)
+    this.broadcastRaw(JSON.stringify(payload))
+  }
+
+  /** Már szerializált üzenet küldése — a hívó így ki tudja szűrni az ismétlést. */
+  broadcastRaw(message: string): void {
     for (const client of this.#clients) {
       if (client.readyState === client.OPEN) {
         try {
@@ -2729,8 +2752,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return { sessions: sessions.views(), rateLimits: limits.current() }
   }
 
+  // A SessionStore minden `apply*` híváskor jelez, akkor is, ha az állapot nem
+  // változott — a másodperces poll így percenként hússzor küldene azonos
+  // pillanatképet. A szűrés szándékosan itt van, nem a store-ban: a store dolga
+  // annyi, hogy „történt valami", a hubé, hogy mit érdemes elküldeni. A
+  // szerializált alak összehasonlítása pontos, ellentétben egy mezőnkénti
+  // diffel, amit el lehet rontani.
+  let lastBroadcast = ''
   function broadcast(): void {
-    hub.broadcast({ type: 'state', payload: state() })
+    const message = JSON.stringify({ type: 'state', payload: state() })
+    if (message === lastBroadcast) return
+    lastBroadcast = message
+    hub.broadcastRaw(message)
   }
 
   sessions.onChange(broadcast)
