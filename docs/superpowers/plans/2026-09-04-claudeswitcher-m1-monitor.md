@@ -2346,8 +2346,11 @@ import type { ProcessProbe } from '@claudeswitcher/core'
 import { describe, expect, it } from 'vitest'
 import { scanSessions } from './scanner.js'
 
-const aliveProbe: ProcessProbe = { isAlive: () => true }
-const deadProbe: ProcessProbe = { isAlive: () => false }
+// A ProcessProbe-nak `imageName`-je is van a Task 3 óta: a lock fájlok nem
+// tárolnak `procStart`-ot, így csak az image név árulja el, ha egy elárvult lock
+// pidjét időközben egy másik processz kapta meg.
+const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code' }
+const deadProbe: ProcessProbe = { isAlive: () => false, imageName: () => undefined }
 
 async function fixture(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'cs-scan-'))
@@ -2539,7 +2542,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { startDaemon, type Daemon } from './daemon.js'
 
-const aliveProbe: ProcessProbe = { isAlive: () => true }
+const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code' }
 let running: Daemon | undefined
 
 afterEach(async () => {
