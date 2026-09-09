@@ -1042,6 +1042,13 @@ describe('tailLines', () => {
     expect(await tailLines(path.join(tmpdir(), 'cs-nope', 'missing.jsonl'))).toEqual([])
   })
 
+  it('returns nothing when the path is a directory', async () => {
+    // Windowson a stat 0 méretet ad, máshol a read EISDIR-rel dob. Egyik sem
+    // szivároghat ki a hívóhoz.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-tail-'))
+    expect(await tailLines(dir)).toEqual([])
+  })
+
   it('returns every line when the file is smaller than the window', async () => {
     expect(await tailLines(await fileWith('a\nb\nc'))).toEqual(['a', 'b', 'c'])
   })
@@ -1192,6 +1199,12 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
     const lines = buffer.toString('utf8').split('\n')
     if (start > 0) lines.shift()
     return lines
+  } catch {
+    // A megnyitás után is elszállhat az olvasás: lemezhiba, vírusirtó zárolása,
+    // hálózati meghajtó, jogosultságváltás olvasás közben, vagy egy könyvtár
+    // nem-Windows platformon (EISDIR). Egy transcript tartalma nem ér annyit,
+    // hogy a hívó egész szkennelését megbuktassa — ez a függvény best-effort.
+    return []
   } finally {
     await handle.close()
   }
@@ -1201,8 +1214,8 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
 - [ ] **Step 4: Futtasd a teszteket**
 
 Run: `pnpm --filter @claudeswitcher/core test transcript`
-Expected: PASS, 18 teszt (10 a `readActivityFromLines`-ra, 4 a `findTranscriptPath`-ra,
-4 a `tailLines`-ra).
+Expected: PASS, 19 teszt (10 a `readActivityFromLines`-ra, 4 a `findTranscriptPath`-ra,
+5 a `tailLines`-ra).
 
 - [ ] **Step 5: Commit**
 
@@ -2339,7 +2352,7 @@ export class RateLimitStore {
 
 `packages/daemon/src/scanner.test.ts`:
 ```ts
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ProcessProbe } from '@claudeswitcher/core'
@@ -2414,6 +2427,18 @@ describe('scanSessions', () => {
     const dir = await fixture()
     const { sessions } = await scanSessions(dir, aliveProbe)
     expect(sessions[0]!.window?.port).toBe(50269)
+  })
+
+  it('still returns the session when its transcript is unreadable', async () => {
+    // Egy olvashatatlan transcript nem tüntetheti el a sessiont a listáról.
+    const dir = await fixture()
+    const projectDir = path.join(dir, 'projects', 'encoded-alpha')
+    await rm(path.join(projectDir, 'sid-100.jsonl'))
+    await mkdir(path.join(projectDir, 'sid-100.jsonl'))
+
+    const { sessions, activities } = await scanSessions(dir, aliveProbe)
+    expect(sessions).toHaveLength(1)
+    expect(activities.get('sid-100')).toEqual({})
   })
 })
 ```
@@ -2493,9 +2518,18 @@ export async function scanSessions(
 
   const entries = await Promise.all(
     sessions.map(async ({ record }): Promise<[string, SessionActivity]> => {
-      const transcript = await findTranscriptPath(claudeDir, record.sessionId)
-      if (transcript === undefined) return [record.sessionId, {}]
-      return [record.sessionId, readActivityFromLines(await tailLines(transcript))]
+      try {
+        const transcript = await findTranscriptPath(claudeDir, record.sessionId)
+        if (transcript === undefined) return [record.sessionId, {}]
+        return [record.sessionId, readActivityFromLines(await tailLines(transcript))]
+      } catch (error) {
+        // Védelem mélységben. A `Promise.all` egyetlen elutasításra eldobná az
+        // egész szkennelést, vagyis MINDEN session eltűnne a listáról egy
+        // olvashatatlan transcript miatt. A hívottak már best-effortok; ez arra
+        // véd, ha egy későbbi módosítás behoz ide valami dobni képeset.
+        console.error(`[scan] activity read failed for ${record.sessionId}`, error)
+        return [record.sessionId, {}]
+      }
     }),
   )
 
