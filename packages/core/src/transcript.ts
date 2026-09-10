@@ -122,6 +122,8 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
     const lines = buffer.toString('utf8').split('\n')
     if (start > 0) lines.shift()
     return lines
+  } catch {
+    return []
   } finally {
     await handle.close()
   }

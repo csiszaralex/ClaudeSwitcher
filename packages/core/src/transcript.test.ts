@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -165,5 +165,10 @@ describe('tailLines', () => {
     expect(tail.length).toBeGreaterThan(0)
     expect(tail.every((line) => !line.includes('�'))).toBe(true)
     expect(tail[tail.length - 1]).toBe('hűtőházi rendszer')
+  })
+
+  it('returns nothing when asked to read a directory', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-tail-'))
+    expect(await tailLines(dir)).toEqual([])
   })
 })

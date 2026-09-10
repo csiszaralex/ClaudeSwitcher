@@ -64,9 +64,18 @@ export async function scanSessions(
 
   const entries = await Promise.all(
     sessions.map(async ({ record }): Promise<[string, SessionActivity]> => {
-      const transcript = await findTranscriptPath(claudeDir, record.sessionId)
-      if (transcript === undefined) return [record.sessionId, {}]
-      return [record.sessionId, readActivityFromLines(await tailLines(transcript))]
+      try {
+        const transcript = await findTranscriptPath(claudeDir, record.sessionId)
+        if (transcript === undefined) return [record.sessionId, {}]
+        return [record.sessionId, readActivityFromLines(await tailLines(transcript))]
+      } catch (error) {
+        // Védelem mélységben. A `Promise.all` egyetlen elutasításra eldobná az
+        // egész szkennelést, vagyis MINDEN session eltűnne a listáról egy
+        // olvashatatlan transcript miatt. A hívottak már best-effortok; ez arra
+        // véd, ha egy későbbi módosítás behoz ide valami dobni képeset.
+        console.error(`[scan] activity read failed for ${record.sessionId}`, error)
+        return [record.sessionId, {}]
+      }
     }),
   )
 

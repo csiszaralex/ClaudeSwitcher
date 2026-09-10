@@ -1,10 +1,13 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ProcessProbe } from '@claudeswitcher/core'
 import { describe, expect, it } from 'vitest'
 import { scanSessions } from './scanner.js'
 
+// A ProcessProbe-nak `imageName`-je is van a Task 3 óta: a lock fájlok nem
+// tárolnak `procStart`-ot, így csak az image név árulja el, ha egy elárvult lock
+// pidjét időközben egy másik processz kapta meg.
 const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code' }
 const deadProbe: ProcessProbe = { isAlive: () => false, imageName: () => undefined }
 
@@ -70,5 +73,17 @@ describe('scanSessions', () => {
     const dir = await fixture()
     const { sessions } = await scanSessions(dir, aliveProbe)
     expect(sessions[0]!.window?.port).toBe(50269)
+  })
+
+  it('still returns the session when its transcript is unreadable', async () => {
+    // Egy olvashatatlan transcript nem tüntetheti el a sessiont a listáról.
+    const dir = await fixture()
+    const projectDir = path.join(dir, 'projects', 'encoded-alpha')
+    await rm(path.join(projectDir, 'sid-100.jsonl'))
+    await mkdir(path.join(projectDir, 'sid-100.jsonl'))
+
+    const { sessions, activities } = await scanSessions(dir, aliveProbe)
+    expect(sessions).toHaveLength(1)
+    expect(activities.get('sid-100')).toEqual({})
   })
 })
