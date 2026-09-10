@@ -1,0 +1,97 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import type { ProcessProbe } from '@claudeswitcher/core'
+import { afterEach, describe, expect, it } from 'vitest'
+import { WebSocket } from 'ws'
+import { startDaemon, type Daemon } from './daemon.js'
+
+const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code' }
+let running: Daemon | undefined
+
+afterEach(async () => {
+  await running?.stop()
+  running = undefined
+})
+
+async function fixture(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'cs-daemon-'))
+  await mkdir(path.join(dir, 'sessions'), { recursive: true })
+  await writeFile(
+    path.join(dir, 'sessions', '100.json'),
+    JSON.stringify({
+      pid: 100, sessionId: 'sid-100', cwd: 'p:\\proj\\alpha',
+      startedAt: 1, procStart: 'ps-100', name: 'alpha-01',
+    }),
+  )
+  return dir
+}
+
+describe('startDaemon', () => {
+  it('binds to loopback on an ephemeral port and exposes a token', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    expect(running.port).toBeGreaterThan(0)
+    expect(running.token).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('serves the scanned sessions', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    await running.refresh()
+    expect(running.state().sessions.map((s) => s.sessionId)).toEqual(['sid-100'])
+  })
+
+  it('marks a session waiting when a notification hook posts', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    await running.refresh()
+
+    const res = await fetch(`http://127.0.0.1:${running.port}/hooks/notification`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${running.token}` },
+      body: JSON.stringify({
+        session_id: 'sid-100',
+        cwd: 'p:\\proj\\alpha',
+        notification_type: 'permission_prompt',
+        notification_text: 'run pnpm test?',
+      }),
+    })
+    expect(res.status).toBe(200)
+    expect(running.state().sessions[0]!.status).toBe('waiting')
+  })
+
+  it('rejects an unauthenticated hook post', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const res = await fetch(`http://127.0.0.1:${running.port}/hooks/notification`, {
+      method: 'POST', body: '{}',
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('does not re-broadcast an unchanged state', async () => {
+    // A poll másodpercenként fut; azonos pillanatképet nem küldünk újra.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    await running.refresh()
+
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
+    const messages: string[] = []
+    socket.on('message', (data) => messages.push(String(data)))
+    await new Promise((resolve) => socket.on('open', resolve))
+
+    await running.refresh()
+    await running.refresh()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    socket.close()
+
+    expect(messages).toHaveLength(0)
+  })
+
+  it('stores rate limits posted by the status line', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600
+    await fetch(`http://127.0.0.1:${running.port}/statusline`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${running.token}` },
+      body: JSON.stringify({ rate_limits: { five_hour: { used_percentage: 23.5, resets_at: resetsAt } } }),
+    })
+    expect(running.state().rateLimits.five_hour?.used_percentage).toBe(23.5)
+  })
+})
