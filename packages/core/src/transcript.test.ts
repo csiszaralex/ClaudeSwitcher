@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { findTranscriptPath, readActivityFromLines, tailLines } from './transcript.js'
 
 const assistantText = JSON.stringify({
@@ -167,8 +167,26 @@ describe('tailLines', () => {
     expect(tail[tail.length - 1]).toBe('hűtőházi rendszer')
   })
 
-  it('returns nothing when asked to read a directory', async () => {
+  it('returns nothing when file size is zero (early return before buffer allocation)', async () => {
+    // A Windows-on `open()` egy könyvtárra is működik, és az stat().size nulla.
+    // Az `if (length === 0)` korai visszatérés ezt kezeli, nem a catch blokk.
+    // Ez a test azt bizonyítja, hogy a korai return működik.
     const dir = await mkdtemp(path.join(tmpdir(), 'cs-tail-'))
     expect(await tailLines(dir)).toEqual([])
+  })
+
+  it('catches and logs buffer allocation failure', async () => {
+    // Szintetikus kiváltó: a maxBytes = -1 miatt length < 0 lesz, és
+    // Buffer.alloc(negative) RangeError-t dob. Ez az egyetlen módja annak, hogy
+    // az I/O catch blokkot minden platformon ki tudjuk váltani a tesztből.
+    const file = await fileWith('content')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await tailLines(file, -1)).toEqual([])
+      expect(errorSpy).toHaveBeenCalledOnce()
+      expect(errorSpy.mock.calls[0]![0]).toMatch(/\[transcript\] tailLines failed/)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 })

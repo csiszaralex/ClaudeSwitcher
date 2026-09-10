@@ -122,7 +122,11 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
     const lines = buffer.toString('utf8').split('\n')
     if (start > 0) lines.shift()
     return lines
-  } catch {
+  } catch (error) {
+    // Egy I/O hiba vagy allocation failure-t nem szabad feldobni: a hívó
+    // (pl. scanSessions) helyzete az, hogy best-effort-ként működjön. Az
+    // allocationt csak szintetikus tesztből tudjuk kiváltani.
+    console.error(`[transcript] tailLines failed for ${filePath}`, error)
     return []
   } finally {
     await handle.close()

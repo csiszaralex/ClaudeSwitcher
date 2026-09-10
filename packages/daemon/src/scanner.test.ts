@@ -75,8 +75,11 @@ describe('scanSessions', () => {
     expect(sessions[0]!.window?.port).toBe(50269)
   })
 
-  it('still returns the session when its transcript is unreadable', async () => {
-    // Egy olvashatatlan transcript nem tüntetheti el a sessiont a listáról.
+  it('still returns the session when its transcript is not a readable file', async () => {
+    // Figyelem: ez a `findTranscriptPath` isFile() védőágán megy át, nem a
+    // scanner catch blokkján — az utóbbi védelem mélységben, és nincs rá
+    // platformfüggetlen kiváltó. Amit ez bizonyít, az önmagában is fontos: egy
+    // hiányzó vagy hibás transcript nem tünteti el a sessiont a listáról.
     const dir = await fixture()
     const projectDir = path.join(dir, 'projects', 'encoded-alpha')
     await rm(path.join(projectDir, 'sid-100.jsonl'))
