@@ -891,7 +891,7 @@ git commit -m "feat(core): liveness check with process start time and session/wi
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { findTranscriptPath, readActivityFromLines, tailLines } from './transcript.js'
 
 const assistantText = JSON.stringify({
@@ -1043,10 +1043,27 @@ describe('tailLines', () => {
   })
 
   it('returns nothing when the path is a directory', async () => {
-    // Windowson a stat 0 méretet ad, máshol a read EISDIR-rel dob. Egyik sem
-    // szivároghat ki a hívóhoz.
+    // Figyelem: ez NEM a catch ágat bizonyítja. Windowson a stat 0 méretet ad,
+    // így a `length === 0` korai visszatérés fut le, és a catch szóba sem kerül;
+    // csak POSIX-on dob a read EISDIR-rel. A teszt attól még ér valamit — a
+    // hívóhoz egyik platformon sem szivároghat ki hiba —, de a hibakezelés
+    // regressziós fedezetét a következő teszt adja.
     const dir = await mkdtemp(path.join(tmpdir(), 'cs-tail-'))
     expect(await tailLines(dir)).toEqual([])
+  })
+
+  it('returns nothing, and logs, when the read itself fails', async () => {
+    // Egy megnyitás utáni olvasási hibát platformfüggetlenül nehéz előidézni.
+    // Negatív ablakmérettel a `length` negatív lesz, és a `Buffer.alloc` dob —
+    // a catch ágon belül, pontosan úgy, ahogy egy lemezhiba tenné. Ez az
+    // egyetlen teszt, ami a hibakezelést ténylegesen végigfuttatja Windowson is.
+    const file = await fileWith('egy\nkét\nhárom')
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(await tailLines(file, -1)).toEqual([])
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('read failed'), expect.anything())
+
+    logged.mockRestore()
   })
 
   it('returns every line when the file is smaller than the window', async () => {
@@ -1199,11 +1216,14 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
     const lines = buffer.toString('utf8').split('\n')
     if (start > 0) lines.shift()
     return lines
-  } catch {
+  } catch (error) {
     // A megnyitás után is elszállhat az olvasás: lemezhiba, vírusirtó zárolása,
     // hálózati meghajtó, jogosultságváltás olvasás közben, vagy egy könyvtár
     // nem-Windows platformon (EISDIR). Egy transcript tartalma nem ér annyit,
     // hogy a hívó egész szkennelését megbuktassa — ez a függvény best-effort.
+    // Naplózunk, mert ezt az ágat éles hibán kívül nehéz kiváltani: ha egyszer
+    // lefut, legyen nyoma.
+    console.error(`[transcript] read failed for ${filePath}`, error)
     return []
   } finally {
     await handle.close()
@@ -1214,8 +1234,8 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
 - [ ] **Step 4: Futtasd a teszteket**
 
 Run: `pnpm --filter @claudeswitcher/core test transcript`
-Expected: PASS, 19 teszt (10 a `readActivityFromLines`-ra, 4 a `findTranscriptPath`-ra,
-5 a `tailLines`-ra).
+Expected: PASS, 20 teszt (10 a `readActivityFromLines`-ra, 4 a `findTranscriptPath`-ra,
+6 a `tailLines`-ra).
 
 - [ ] **Step 5: Commit**
 
@@ -2429,8 +2449,11 @@ describe('scanSessions', () => {
     expect(sessions[0]!.window?.port).toBe(50269)
   })
 
-  it('still returns the session when its transcript is unreadable', async () => {
-    // Egy olvashatatlan transcript nem tüntetheti el a sessiont a listáról.
+  it('still returns the session when its transcript is not a readable file', async () => {
+    // Figyelem: ez a `findTranscriptPath` isFile() védőágán megy át, nem a
+    // scanner catch blokkján — az utóbbi védelem mélységben, és nincs rá
+    // platformfüggetlen kiváltó. Amit ez bizonyít, az önmagában is fontos: egy
+    // hiányzó vagy hibás transcript nem tünteti el a sessiont a listáról.
     const dir = await fixture()
     const projectDir = path.join(dir, 'projects', 'encoded-alpha')
     await rm(path.join(projectDir, 'sid-100.jsonl'))
