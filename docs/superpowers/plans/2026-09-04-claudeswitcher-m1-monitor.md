@@ -2585,6 +2585,7 @@ git commit -m "feat(daemon): rate limit store and filesystem session scanner"
 - Produces:
   - `interface DaemonState { sessions: SessionView[]; rateLimits: RateLimits }`
   - `interface Daemon { readonly port: number; readonly token: string; state(): DaemonState; refresh(): Promise<void>; stop(): Promise<void> }`
+  - `class Hub` with `broadcastRaw(message: string): void` and `close(): Promise<void>`
   - `startDaemon(options: { claudeDir: string; probe: ProcessProbe; pollMs?: number }): Promise<Daemon>`
 
 - [ ] **Step 1: Írd meg a failing tesztet**
@@ -2659,6 +2660,36 @@ describe('startDaemon', () => {
     expect(res.status).toBe(401)
   })
 
+  it('accepts a websocket connection carrying the right token', async () => {
+    // Pozitív kontroll. Enélkül a két elutasítós teszt akkor is átmenne, ha a
+    // kapcsolat valami tőlünk független okból hiúsulna meg.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
+
+    await new Promise((resolve) => socket.on('open', resolve))
+    expect(socket.readyState).toBe(WebSocket.OPEN)
+    socket.close()
+  })
+
+  it('closes a websocket connection presenting the wrong token', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=wrong`)
+    const messages: string[] = []
+    socket.on('message', (data) => messages.push(String(data)))
+
+    const code = await new Promise<number>((resolve) => socket.on('close', resolve))
+    expect(code).toBe(1008)
+    expect(messages).toHaveLength(0)
+  })
+
+  it('closes a websocket connection presenting no token', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws`)
+
+    const code = await new Promise<number>((resolve) => socket.on('close', resolve))
+    expect(code).toBe(1008)
+  })
+
   it('does not re-broadcast an unchanged state', async () => {
     // A poll másodpercenként fut; azonos pillanatképet nem küldünk újra.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
@@ -2721,11 +2752,14 @@ export class Hub {
     })
   }
 
-  broadcast(payload: unknown): void {
-    this.broadcastRaw(JSON.stringify(payload))
-  }
-
-  /** Már szerializált üzenet küldése — a hívó így ki tudja szűrni az ismétlést. */
+  /**
+   * Már szerializált üzenetet küld.
+   *
+   * Szándékosan nincs `broadcast(payload: unknown)` kényelmi változat: a daemon
+   * maga szerializál, hogy az azonos pillanatképeket ki tudja szűrni, tehát egy
+   * ilyen metódusnak nem lenne hívója. Egy hívó nélküli, teszteletlen második
+   * belépési pont rosszabb, mint a hiánya — ha később kell, egy sor visszatenni.
+   */
   broadcastRaw(message: string): void {
     for (const client of this.#clients) {
       if (client.readyState === client.OPEN) {
@@ -2855,6 +2889,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     refresh,
     async stop() {
       if (timer !== undefined) clearInterval(timer)
+      // Megvárjuk a futó szkennelést: leállás után ne maradjon dolgozó ígéret,
+      // ami a processzt életben tartja vagy egy már lezárt hubba írna.
+      await refreshing?.catch(() => undefined)
       await hub.close()
       await new Promise<void>((resolve) => server.close(() => resolve()))
     },
