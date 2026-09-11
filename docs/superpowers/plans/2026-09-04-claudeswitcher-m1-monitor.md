@@ -3260,6 +3260,7 @@ git commit -m "feat(statusline): status line renderer that reports rate limits t
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "start": "electron-vite preview",
     "build": "electron-vite build",
     "check-types": "tsc -p tsconfig.json --noEmit"
   },
@@ -3338,6 +3339,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('daemon:connection', () => ({ port: daemon!.port, token: daemon!.token }))
   ipcMain.handle('daemon:state', () => daemon!.state())
 
+  // Indulási összegzés a főprocessz stdoutjára. Ez teszi a Step 5 ellenőrzését
+  // automatizálhatóvá: nem kell DevTools-konzolba gépelni ahhoz, hogy lássuk,
+  // a daemon elindult és tényleg megtalálta a futó sessionöket.
+  console.log(
+    `[claudeswitcher] daemon on 127.0.0.1:${daemon.port}, ` +
+      `${daemon.state().sessions.length} session(s) discovered`,
+  )
+
   overlay = createOverlay()
   overlay.showInactive()
 })
@@ -3404,10 +3413,31 @@ createRoot(document.getElementById('root')!).render(<App />)
 
 A `desktop` a `core`-t és a `daemon`-t a lefordított `dist/`-en át éri el.
 
-Run: `pnpm build && pnpm --filter @claudeswitcher/desktop dev`
-Expected: megnyílik egy keret nélküli ablak "ClaudeSwitcher" felirattal, és a
-konzolon nincs hiba. Ellenőrizd, hogy a daemon elindult: a DevTools konzolján
-`await window.claudeswitcher.state()` visszaadja a futó sessionjeidet.
+Először a fordítás:
+
+Run: `pnpm build && pnpm --filter @claudeswitcher/desktop build`
+Expected: mindkettő hibátlan, és létrejön az `apps/desktop/out/main/index.js`.
+
+Aztán egy **korlátos** futtatás. Az Electron nem lép ki magától, ezért háttérben
+indítjuk, hagyunk neki időt, elmentjük a kimenetét, és megöljük:
+
+```powershell
+$p = Start-Process pnpm -ArgumentList '--filter','@claudeswitcher/desktop','start' `
+  -PassThru -RedirectStandardOutput out.log -RedirectStandardError err.log -NoNewWindow
+Start-Sleep -Seconds 20
+Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+Get-Content out.log, err.log
+```
+
+Expected: az `out.log` tartalmaz egy sort `[claudeswitcher] daemon on 127.0.0.1:<port>,
+N session(s) discovered` formában, ahol **N a gépen épp futó Claude Code sessionök
+száma** — ha nulla, miközben futnak sessionök, a felderítés nem működik, és ezt
+jelezni kell, nem továbbmenni. Az `err.log`-ban nincs stack trace.
+
+Egy keret nélküli ablak rövid időre megjelenik a képernyőn; ez várható.
+
+Ehhez a `apps/desktop/package.json` kap egy `"start": "electron-vite preview"`
+scriptet a `dev` mellé.
 
 - [ ] **Step 6: Commit**
 
