@@ -103,6 +103,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     refresh,
     async stop() {
       if (timer !== undefined) clearInterval(timer)
+      // Megvárjuk a futó szkennelést: leállás után ne maradjon dolgozó ígéret,
+      // ami a processzt életben tartja vagy egy már lezárt hubba írna.
+      await refreshing?.catch(() => undefined)
       await hub.close()
       await new Promise<void>((resolve) => server.close(() => resolve()))
     },

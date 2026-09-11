@@ -66,6 +66,36 @@ describe('startDaemon', () => {
     expect(res.status).toBe(401)
   })
 
+  it('accepts a websocket connection carrying the right token', async () => {
+    // Pozitív kontroll. Enélkül a két elutasítós teszt akkor is átmenne, ha a
+    // kapcsolat valami tőlünk független okból hiúsulna meg.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
+
+    await new Promise((resolve) => socket.on('open', resolve))
+    expect(socket.readyState).toBe(WebSocket.OPEN)
+    socket.close()
+  })
+
+  it('closes a websocket connection presenting the wrong token', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=wrong`)
+    const messages: string[] = []
+    socket.on('message', (data) => messages.push(String(data)))
+
+    const code = await new Promise<number>((resolve) => socket.on('close', resolve))
+    expect(code).toBe(1008)
+    expect(messages).toHaveLength(0)
+  })
+
+  it('closes a websocket connection presenting no token', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws`)
+
+    const code = await new Promise<number>((resolve) => socket.on('close', resolve))
+    expect(code).toBe(1008)
+  })
+
   it('does not re-broadcast an unchanged state', async () => {
     // A poll másodpercenként fut; azonos pillanatképet nem küldünk újra.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })

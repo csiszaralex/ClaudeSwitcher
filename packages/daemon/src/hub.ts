@@ -20,11 +20,14 @@ export class Hub {
     })
   }
 
-  broadcast(payload: unknown): void {
-    this.broadcastRaw(JSON.stringify(payload))
-  }
-
-  /** Már szerializált üzenet küldése — a hívó így ki tudja szűrni az ismétlést. */
+  /**
+   * Már szerializált üzenetet küld.
+   *
+   * Szándékosan nincs `broadcast(payload: unknown)` kényelmi változat: a daemon
+   * maga szerializál, hogy az azonos pillanatképeket ki tudja szűrni, tehát egy
+   * ilyen metódusnak nem lenne hívója. Egy hívó nélküli, teszteletlen második
+   * belépési pont rosszabb, mint a hiánya — ha később kell, egy sor visszatenni.
+   */
   broadcastRaw(message: string): void {
     for (const client of this.#clients) {
       if (client.readyState === client.OPEN) {
