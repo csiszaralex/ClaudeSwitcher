@@ -1,0 +1,13 @@
+{
+  "name": "@claudeswitcher/statusline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "claudeswitcher-statusline": "./dist/main.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check-types": "tsc -p tsconfig.check.json --noEmit"
+  },
+  "devDependencies": { "@types/node": "^22.0.0" }
+}
