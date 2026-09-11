@@ -2941,9 +2941,14 @@ git commit -m "feat(daemon): websocket hub and daemon assembly with polling refr
     "test": "vitest run",
     "check-types": "tsc -p tsconfig.check.json --noEmit"
   },
-  "dependencies": { "@claudeswitcher/core": "workspace:*" }
+  "devDependencies": { "@types/node": "^22.0.0" }
 }
 ```
+
+Szándékosan **nincs** `@claudeswitcher/core` függőség: ez a csomag nem importál
+belőle semmit. A rate limit alakját a `renderStatusLine` a bemenetből olvassa ki
+saját típusvizsgálattal, mert a Claude Code stdin JSON-ja amúgy sem a mi
+típusunk. Ha később mégis kell, egy sor visszatenni.
 
 `packages/statusline/tsconfig.json`:
 ```json
