@@ -2,5 +2,7 @@ packages:
   - "packages/*"
   - "apps/*"
 allowBuilds:
+  electron: true
   esbuild: true
+  koffi: true
   nx: true
