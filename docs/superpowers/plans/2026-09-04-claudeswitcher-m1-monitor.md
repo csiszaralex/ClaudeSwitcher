@@ -33,6 +33,11 @@
   { "extends": "./tsconfig.json", "include": ["src/**/*"], "exclude": [] }
   ```
   `"check-types": "tsc -p tsconfig.check.json --noEmit"`
+- **Electron indítása VSCode-ból vagy Claude Code-ból:** az `ELECTRON_RUN_AS_NODE=1`
+  öröklődik a VSCode-ból, és az `electron.exe`-t sima Node-dá teszi. **Minden**
+  Electron-indítás előtt törölni kell (`Remove-Item Env:ELECTRON_RUN_AS_NODE`), a
+  Task 11–15 összes kézi ellenőrzésében. A felhasználó gépén, normál indításnál ez a
+  változó nincs beállítva — ez a fejlesztői környezet csapdája, nem az appé.
 - **Platform:** Windows-only. A kód futtatható más platformon (tesztek miatt), de nem támogatott.
 - **Node:** 22+. **pnpm:** 11+.
 - **TypeScript:** `strict: true`, `noUncheckedIndexedAccess: true` minden csomagban.
@@ -3270,6 +3275,7 @@ git commit -m "feat(statusline): status line renderer that reports rate limits t
     "koffi": "^2.10.0"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -3286,8 +3292,25 @@ git commit -m "feat(statusline): status line renderer that reports rate limits t
 import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
+/**
+ * A főprocessz CommonJS, és ez nem opcionális: az Electron 33 Node 20-at hoz, ahol a
+ * CJS `require()` nem tud ES modult betölteni. A saját workspace csomagjaink viszont
+ * ESM-only-k, ezért egy externalizált `require("@claudeswitcher/core")` induláskor
+ * `ERR_REQUIRE_ESM`-mel hal meg. Ezt valódi Electron főprocesszben mértük le.
+ *
+ * Megoldás: a workspace csomagokat kizárjuk az externalizálásból, így beépülnek a
+ * bundle-be, a tranzitív függőségeikkel (hono, ws, chokidar) együtt — azok nem
+ * szerepelnek ennek az appnak a `dependencies`-ében, tehát nem externalizálódnak.
+ *
+ * Az ESM főprocessz nem járható alternatíva: az Electron 33 ESM-loadere elhasal, ha
+ * egy ESM main CJS függőséget tölt be. Ezt is lemértük.
+ */
+const BUNDLED_WORKSPACE_PACKAGES = ['@claudeswitcher/core', '@claudeswitcher/daemon']
+
 export default defineConfig({
-  main: { plugins: [externalizeDepsPlugin()] },
+  main: {
+    plugins: [externalizeDepsPlugin({ exclude: BUNDLED_WORKSPACE_PACKAGES })],
+  },
   preload: { plugins: [externalizeDepsPlugin()] },
   renderer: { plugins: [react()] },
 })
@@ -3418,16 +3441,38 @@ Először a fordítás:
 Run: `pnpm build && pnpm --filter @claudeswitcher/desktop build`
 Expected: mindkettő hibátlan, és létrejön az `apps/desktop/out/main/index.js`.
 
-Aztán egy **korlátos** futtatás. Az Electron nem lép ki magától, ezért háttérben
-indítjuk, hagyunk neki időt, elmentjük a kimenetét, és megöljük:
+Aztán egy **korlátos** futtatás. Az Electron nem lép ki magától, ezért elindítjuk,
+hagyunk neki időt, elmentjük a kimenetét, és megöljük. Három részlet mind mért
+hibán alapul, egyik sem elhagyható:
+
+- **Az `electron.exe`-t közvetlenül indítjuk**, nem a `pnpm`-en át: a `pnpm` egy
+  `.cmd`/`.ps1` shim, amit a `Start-Process` nem tud futtatni ("not a valid Win32
+  application"). Az izolált pnpm linker miatt az `apps/desktop/node_modules` alatt van.
+- **Az `ELECTRON_RUN_AS_NODE` változót töröljük.** A VSCode maga is Electron, és
+  ezt a változót örökíti minden gyerekfolyamatra — így a Claude Code-ra és minden
+  általa indított parancsra is. Beállítva az `electron.exe` sima Node-ként fut, a
+  `require("electron")` az npm csomag útvonal-stringjét adja vissza, és az app
+  `Cannot read properties of undefined (reading 'whenReady')`-del hal meg.
+- **`$ErrorActionPreference = 'Continue'`**, nem `SilentlyContinue` — utóbbi elnyeli
+  a hibás útvonalat, és a két log üresen marad magyarázat nélkül.
 
 ```powershell
-$p = Start-Process pnpm -ArgumentList '--filter','@claudeswitcher/desktop','start' `
-  -PassThru -RedirectStandardOutput out.log -RedirectStandardError err.log -NoNewWindow
+Set-Location apps\desktop
+$exe = 'node_modules\electron\dist\electron.exe'
+if (-not (Test-Path $exe)) { throw "electron.exe not found at $exe" }
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+
+$p = Start-Process -FilePath $exe -ArgumentList '.' -PassThru -NoNewWindow `
+  -RedirectStandardOutput out.log -RedirectStandardError err.log
 Start-Sleep -Seconds 20
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-Content out.log, err.log
 ```
+
+A stderr-ben megjelenő `Electron Security Warning (Insecure Content-Security-Policy)`
+fejlesztői figyelmeztetés, nem hiba — maga írja, hogy csomagolt appban nem jelenik
+meg. A Task 14 CSP-t ad a rendererhez.
 
 Expected: az `out.log` tartalmaz egy sort `[claudeswitcher] daemon on 127.0.0.1:<port>,
 N session(s) discovered` formában, ahol **N a gépen épp futó Claude Code sessionök
