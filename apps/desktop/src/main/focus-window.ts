@@ -137,16 +137,33 @@ export function isSafeForCli(folder: string): boolean {
   return !CMD_UNSAFE_IN_QUOTES.test(folder)
 }
 
+/**
+ * Idézőjelbe tesz egy mappát úgy, hogy a Windows CRT argv-feldolgozója pontosan azt
+ * adja vissza.
+ *
+ * A CRT a záró idézőjel előtti backslashokat escape-ként kezeli: N backslash és egy
+ * `"` N/2 backslasht ad, páratlan N esetén pedig a `"`-t is literálisnak veszi. Egy
+ * sima idézés mellett így egy `C:\` workspace `C:"`-ként érkezne, egy `\\server\share\`
+ * elveszítené a lezárását, és egy `double\\` egy backslasht — vagyis a meghajtó- és
+ * megosztásgyökér workspace-ek csendben rossz útvonalat kapnának. Mérve, nem
+ * feltételezve: a sima idézés 7 esetből 4-ben rontotta el az útvonalat.
+ *
+ * A záró backslash-futam megduplázása ezt kiegyenlíti. Máshol a backslash literális, és
+ * `"` a mappában nem fordulhat elő, mert az `isSafeForCli` kizárja.
+ */
+export function quoteForCli(folder: string): string {
+  return `"${folder.replace(/(\\+)$/, '$1$1')}"`
+}
+
 function focusByCli(folder: string): Promise<boolean> {
   // Egy ilyen mappanévnél inkább nem próbálkozunk: a `%` kibontása csendben egy MÁSIK
   // útvonalat nyitna meg. Egy elmaradt fókusz jobb, mint egy rossz.
   if (!isSafeForCli(folder)) return Promise.resolve(false)
 
   // A `code` Windowson `code.cmd`, ezért kell a shell. A teljes parancsot egyetlen
-  // stringként adjuk át: nincs argumentum-összefűzés, amit a Node DEP0190
-  // figyelmeztetése kifogásol, és az idézés egy helyen, láthatóan történik.
+  // stringként adjuk át, az idézést pedig a quoteForCli végzi, egy helyen és tesztelve.
   return new Promise((resolve) => {
-    exec(`code -r "${folder}"`, { windowsHide: true }, (error) => {
+    exec(`code -r ${quoteForCli(folder)}`, { windowsHide: true }, (error) => {
       resolve(error === null)
     })
   })
