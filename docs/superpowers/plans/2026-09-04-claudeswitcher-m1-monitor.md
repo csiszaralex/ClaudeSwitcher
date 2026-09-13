@@ -3324,7 +3324,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
-import { BrowserWindow, app, ipcMain } from 'electron'
+import { BrowserWindow, app, dialog, ipcMain } from 'electron'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -3340,7 +3340,16 @@ function createOverlay(): BrowserWindow {
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    webPreferences: { preload: path.join(dirname, '../preload/index.js') },
+    webPreferences: {
+      preload: path.join(dirname, '../preload/index.js'),
+      // Ezek az Electron 33 alapértelmezései. Szándékosan kiírjuk őket: így a
+      // biztonsági állás önmagát dokumentálja, és egy jövőbeli Electron-verzió
+      // megváltozott alapértéke sem tudja csendben meggyengíteni. A preload csak
+      // contextBridge-et és ipcRenderer-t használ, ami sandboxban is működik.
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   })
 
   if (process.env.ELECTRON_RENDERER_URL !== undefined) {
@@ -3372,6 +3381,17 @@ app.whenReady().then(async () => {
 
   overlay = createOverlay()
   overlay.showInactive()
+}).catch((error: unknown) => {
+  // Tálcaikonos app: ha az indulás elbukik — tipikusan a daemon —, nincs ablak és
+  // nincs tálcaikon, a processz csendben halott maradna, a felhasználó pedig csak
+  // azt látná, hogy „nem csinál semmit". A showErrorBox szinkron és ablak nélkül
+  // is működik, tehát ez az egyetlen hely, ahol a hiba biztosan eljut hozzá.
+  console.error('[claudeswitcher] startup failed', error)
+  dialog.showErrorBox(
+    'A ClaudeSwitcher nem tudott elindulni',
+    error instanceof Error ? error.message : String(error),
+  )
+  app.quit()
 })
 
 app.on('window-all-closed', () => {
