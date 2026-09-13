@@ -3529,6 +3529,8 @@ git commit -m "feat(desktop): electron shell hosting the daemon in the main proc
   - `findMainWindow(targetPid: number): number` — exportálva, hogy tesztelhető legyen
   - `foregroundWindow(): number` — csak olvas; a fókuszváltás ellenőrzéséhez
   - `isSafeForCli(folder: string): boolean` — a `code -r` tartalék védőfeltétele
+  - `quoteForCli(folder: string): string` — CRT-helyes idézés a `code -r`-hez
+  - `isFastFocusAvailable(): boolean` — a lusta koffi-betöltés eredménye
 
 **Mit NEM ellenőriz ez a task, és miért.** A valódi ablakváltást egy háttérben futó
 ágens nem végezheti el: elrántaná a fókuszt a felhasználó elől, és ha épp gépel, a
@@ -3684,16 +3686,33 @@ export function isSafeForCli(folder: string): boolean {
   return !CMD_UNSAFE_IN_QUOTES.test(folder)
 }
 
+/**
+ * Idézőjelbe tesz egy mappát úgy, hogy a Windows CRT argv-feldolgozója pontosan azt
+ * adja vissza.
+ *
+ * A CRT a záró idézőjel előtti backslashokat escape-ként kezeli: N backslash és egy
+ * `"` N/2 backslasht ad, páratlan N esetén pedig a `"`-t is literálisnak veszi. Egy
+ * sima idézés mellett így egy `C:\` workspace `C:"`-ként érkezne, egy `\\server\share\`
+ * elveszítené a lezárását, és egy `double\\` egy backslasht — vagyis a meghajtó- és
+ * megosztásgyökér workspace-ek csendben rossz útvonalat kapnának. Mérve, nem
+ * feltételezve: a sima idézés 7 esetből 4-ben rontotta el az útvonalat.
+ *
+ * A záró backslash-futam megduplázása ezt kiegyenlíti. Máshol a backslash literális, és
+ * `"` a mappában nem fordulhat elő, mert az `isSafeForCli` kizárja.
+ */
+export function quoteForCli(folder: string): string {
+  return `"${folder.replace(/(\\+)$/, '$1$1')}"`
+}
+
 function focusByCli(folder: string): Promise<boolean> {
   // Egy ilyen mappanévnél inkább nem próbálkozunk: a `%` kibontása csendben egy MÁSIK
   // útvonalat nyitna meg. Egy elmaradt fókusz jobb, mint egy rossz.
   if (!isSafeForCli(folder)) return Promise.resolve(false)
 
   // A `code` Windowson `code.cmd`, ezért kell a shell. A teljes parancsot egyetlen
-  // stringként adjuk át: nincs argumentum-összefűzés, amit a Node DEP0190
-  // figyelmeztetése kifogásol, és az idézés egy helyen, láthatóan történik.
+  // stringként adjuk át, az idézést pedig a quoteForCli végzi, egy helyen és tesztelve.
   return new Promise((resolve) => {
-    exec(`code -r "${folder}"`, { windowsHide: true }, (error) => {
+    exec(`code -r ${quoteForCli(folder)}`, { windowsHide: true }, (error) => {
       resolve(error === null)
     })
   })
@@ -3766,9 +3785,15 @@ export default defineConfig({
 
 `apps/desktop/src/main/focus-window.test.ts`:
 ```ts
-import { execFileSync } from 'node:child_process'
+import { exec, execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { findMainWindow, foregroundWindow, isSafeForCli } from './focus-window.js'
+import {
+  findMainWindow,
+  foregroundWindow,
+  isFastFocusAvailable,
+  isSafeForCli,
+  quoteForCli,
+} from './focus-window.js'
 
 const onWindows = process.platform === 'win32'
 
@@ -3819,13 +3844,45 @@ describe('findMainWindow', () => {
 })
 
 describe('foregroundWindow', () => {
-  it.skipIf(!onWindows)('reads the foreground handle as a plain number without changing it', () => {
-    // A focusByPid ezzel ellenőrzi, hogy a fókuszváltás ténylegesen megtörtént-e. A
-    // teszt csak olvas. Nem követel nullánál nagyobb értéket: zárolt képernyőn vagy
-    // fókuszváltás közben a Windows jogosan adhat 0-t.
+  it.skipIf(!onWindows)('reads the foreground handle through loaded bindings, without changing it', () => {
+    // A focusByPid ezzel ellenőrzi, hogy a fókuszváltás ténylegesen megtörtént-e.
+    // Az isFastFocusAvailable nélkül ez a teszt akkor is átmenne, ha a kötések el sem
+    // töltődtek — a foregroundWindow ilyenkor 0-t ad, ami szintén véges szám. A
+    // teszt csak olvas; nullánál nagyobb értéket nem követel, mert zárolt képernyőn
+    // vagy fókuszváltás közben a Windows jogosan adhat 0-t.
+    expect(isFastFocusAvailable()).toBe(true)
     const hwnd = foregroundWindow()
     expect(typeof hwnd).toBe('number')
     expect(Number.isFinite(hwnd)).toBe(true)
+  })
+})
+
+describe('quoteForCli', () => {
+  /** Átküldi az idézett tokent a valódi cmd.exe + CRT argv láncon, és visszaolvassa. */
+  function roundTrip(folder: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      exec(
+        `node -e "process.stdout.write(process.argv[1])" ${quoteForCli(folder)}`,
+        { windowsHide: true },
+        (error, stdout) => (error ? reject(error) : resolve(stdout)),
+      )
+    })
+  }
+
+  it.skipIf(!onWindows)('survives the real CRT argv parser unchanged', async () => {
+    // Nem a string alakját állítja, hanem hogy a valódi feldolgozó ugyanazt adja
+    // vissza. A javítás előtti sima idézés ezek közül négyet elrontott.
+    const folders = [
+      'C:\\work\\normal-folder',
+      'C:\\',
+      'C:\\work\\trailing\\',
+      'C:\\work\\double\\\\',
+      '\\\\server\\share\\',
+      'C:\\My Projects\\R&D (old)',
+    ]
+    for (const folder of folders) {
+      expect(await roundTrip(folder)).toBe(folder)
+    }
   })
 })
 
@@ -3844,7 +3901,7 @@ describe('isSafeForCli', () => {
 ```
 
 Run: `pnpm --filter @claudeswitcher/desktop test`
-Expected: 6 teszt PASS. **A „finds the main window of a running VSCode instance"
+Expected: 7 teszt PASS. **A „finds the main window of a running VSCode instance"
 tesztnek ténylegesen le kell futnia, nem kihagyva** — ezen a gépen fut VSCode. Ha a
 kimenet `skipped`-et mutat rá, azt jelenteni kell: akkor a kimeneti paraméter
 egyáltalán nincs igazolva.
