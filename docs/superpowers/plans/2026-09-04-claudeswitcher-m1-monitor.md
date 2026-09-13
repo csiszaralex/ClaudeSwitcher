@@ -3638,6 +3638,16 @@ export function findMainWindow(targetPid: number): number {
   return 0
 }
 
+/**
+ * Igaz, ha a gyors, pid-alapú fókuszút elérhető, azaz a user32 kötések betöltődtek.
+ * Az indulási naplóhoz: a lusta betöltés miatt a `koffi` különben csak az első
+ * fókuszkérésnél töltődne be, és addig semmi nem bizonyítaná, hogy az Electron
+ * főprocesszben működik.
+ */
+export function isFastFocusAvailable(): boolean {
+  return loadUser32() !== null
+}
+
 /** Az aktuálisan előtérben lévő ablak, vagy 0. Csak olvas, semmit nem hoz előre. */
 export function foregroundWindow(): number {
   const api = loadUser32()
@@ -3723,7 +3733,21 @@ export async function focusSessionWindow(view: SessionView): Promise<boolean> {
   })
 ```
 
-És a fájl tetejére: `import { focusSessionWindow } from './focus-window.js'`
+És a fájl tetejére: `import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'`
+
+Valamint bővítsd a meglévő indulási naplósort, hogy a `koffi` betöltését induláskor
+ténylegesen végrehajtsa és jelentse — csak olvas, ablakot nem hoz előre:
+
+```ts
+  console.log(
+    `[claudeswitcher] daemon on 127.0.0.1:${daemon.port}, ` +
+      `${daemon.state().sessions.length} session(s) discovered, ` +
+      `fast focus ${isFastFocusAvailable() ? 'available' : 'UNAVAILABLE'}`,
+  )
+```
+
+Enélkül a lusta betöltés miatt semmi nem bizonyítaná, hogy a `koffi` az Electron
+főprocesszben is betöltődik — a Vitest a rendszer Node-ján fut, az Electron a sajátján.
 
 - [ ] **Step 3: A koffi kötések tesztje**
 
