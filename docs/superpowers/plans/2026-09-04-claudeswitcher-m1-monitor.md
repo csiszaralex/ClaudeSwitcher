@@ -3517,11 +3517,23 @@ git commit -m "feat(desktop): electron shell hosting the daemon in the main proc
 
 **Files:**
 - Create: `apps/desktop/src/main/focus-window.ts`
+- Create: `apps/desktop/vitest.config.ts` (az `apps/desktop` első tesztje ez)
+- Test: `apps/desktop/src/main/focus-window.test.ts`
 - Modify: `apps/desktop/src/main/index.ts` — az `ipcMain.handle('session:focus', …)` regisztrálása
+- Modify: `apps/desktop/package.json` — `"test": "vitest run"` script
 
 **Interfaces:**
 - Consumes: `SessionView` (core)
-- Produces: `focusSessionWindow(view: SessionView): Promise<boolean>`
+- Produces:
+  - `focusSessionWindow(view: SessionView): Promise<boolean>`
+  - `findMainWindow(targetPid: number): number` — exportálva, hogy tesztelhető legyen
+
+**Mit NEM ellenőriz ez a task, és miért.** A valódi ablakváltást egy háttérben futó
+ágens nem végezheti el: elrántaná a fókuszt a felhasználó elől, és ha épp gépel, a
+billentyűi egy másik ablakba — akár egy Claude Code chatbe — kerülnének. Ezt a
+felhasználó ellenőrzi a Task 15 elfogadási tesztjében. Ez a task azt méri, ami
+ablakváltás nélkül mérhető, és ami a legkockázatosabb: hogy a `koffi` kötések egyáltalán
+betöltődnek és helyes típusokat adnak, és hogy az ablakkereső ciklus leáll.
 
 - [ ] **Step 1: Írd meg a fókuszmodult**
 
@@ -3551,6 +3563,15 @@ const SW_RESTORE = 9
 const GW_HWNDNEXT = 2
 
 /**
+ * Felső korlát a bejárt ablakok számára. Egy Windows asztalon jellemzően néhány száz
+ * top-level ablak van. A korlát azt védi ki, hogy egy váratlan típus — például ha a
+ * `koffi` az `intptr`-t BigInt-ként adná vissza, amitől a `hwnd !== 0` sosem lenne
+ * hamis — végtelen ciklusba ejtse az Electron főprocesszt, ami az egész appot
+ * lefagyasztaná.
+ */
+const MAX_WINDOWS_SCANNED = 10_000
+
+/**
  * A megadott processz első látható, címmel rendelkező top-level ablaka, vagy 0.
  *
  * Szándékosan a GetTopWindow + GetWindow láncot járjuk be, nem az EnumWindows-t:
@@ -3558,16 +3579,16 @@ const GW_HWNDNEXT = 2
  * regisztrált callback élettartama Electron main processzben könnyen elszáll.
  * A lánc bejárása ugyanazt adja, csak sima skalár hívásokkal.
  */
-function findMainWindow(targetPid: number): number {
+export function findMainWindow(targetPid: number): number {
   const pidOut: [number] = [0]
-  let hwnd = GetTopWindow(0)
+  let hwnd = Number(GetTopWindow(0))
 
-  while (hwnd !== 0) {
+  for (let scanned = 0; hwnd !== 0 && scanned < MAX_WINDOWS_SCANNED; scanned++) {
     if (IsWindowVisible(hwnd) && GetWindowTextLengthW(hwnd) > 0) {
       GetWindowThreadProcessId(hwnd, pidOut)
       if (pidOut[0] === targetPid) return hwnd
     }
-    hwnd = GetWindow(hwnd, GW_HWNDNEXT)
+    hwnd = Number(GetWindow(hwnd, GW_HWNDNEXT))
   }
   return 0
 }
@@ -3580,8 +3601,12 @@ function focusByPid(pid: number): boolean {
 }
 
 function focusByCli(folder: string): Promise<boolean> {
+  // A `code` Windowson `code.cmd`, ezért kell a shell. A shell viszont egy
+  // stringgé fűzi össze az argumentumokat idézés nélkül, így egy szóközt
+  // tartalmazó útvonal két argumentumra esne szét. Ezért idézzük.
+  const quoted = `"${folder.replace(/"/g, '')}"`
   return new Promise((resolve) => {
-    execFile('code', ['-r', folder], { shell: true, windowsHide: true }, (error) => {
+    execFile('code', ['-r', quoted], { shell: true, windowsHide: true }, (error) => {
       resolve(error === null)
     })
   })
@@ -3607,8 +3632,13 @@ export async function focusSessionWindow(view: SessionView): Promise<boolean> {
   ipcMain.handle('session:focus', async (_event, sessionId: string) => {
     const view = daemon!.state().sessions.find((s) => s.sessionId === sessionId)
     if (view === undefined) return false
+    // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
+    // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van —
+    // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
+    // tálcagombot villogtatná. Ha így is elbukik, a `code -r` tartalék megoldja.
+    const focused = await focusSessionWindow(view)
     overlay?.hide()
-    return focusSessionWindow(view)
+    return focused
   })
 
   ipcMain.handle('overlay:hide', () => {
@@ -3618,23 +3648,96 @@ export async function focusSessionWindow(view: SessionView): Promise<boolean> {
 
 És a fájl tetejére: `import { focusSessionWindow } from './focus-window.js'`
 
-- [ ] **Step 3: Kézi ellenőrzés**
+- [ ] **Step 3: A koffi kötések tesztje**
 
-Nyiss meg legalább két VSCode ablakot Claude Code sessionnel. Indítsd az appot
-(`pnpm --filter @claudeswitcher/desktop dev`), majd a DevTools konzolján:
+Ez az `apps/desktop` első tesztje, ezért itt jön létre a Vitest beállítás is.
 
-```js
-const state = await window.claudeswitcher.state()
-await window.claudeswitcher.focusSession(state.sessions[1].sessionId)
+`apps/desktop/vitest.config.ts`:
+```ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: { include: ['src/**/*.test.{ts,tsx}'] },
+})
 ```
-Expected: a második session VSCode ablaka előtérbe kerül, minimalizált állapotból
-is. Mérd meg: a fókusz 100 ms alatt legyen meg. Ha a `windowPid` ág nem működik
-és mindig a `code -r`-re esik vissza, jelezd — az a párosítás hibájára utal.
 
-- [ ] **Step 4: Commit**
+És az `apps/desktop/package.json` `scripts` blokkjába: `"test": "vitest run"`.
+
+`apps/desktop/src/main/focus-window.test.ts`:
+```ts
+import { execFileSync } from 'node:child_process'
+import { describe, expect, it } from 'vitest'
+import { findMainWindow } from './focus-window.js'
+
+const onWindows = process.platform === 'win32'
+
+/** Egy futó, látható főablakkal rendelkező VSCode processz pidje, vagy undefined. */
+function runningVSCodeWindowPid(): number | undefined {
+  const out = execFileSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Get-Process Code -ErrorAction SilentlyContinue | ' +
+        'Where-Object { $_.MainWindowHandle -ne 0 } | ' +
+        'Select-Object -First 1 -ExpandProperty Id',
+    ],
+    { encoding: 'utf8', windowsHide: true, timeout: 10_000 },
+  ).trim()
+  const pid = Number.parseInt(out, 10)
+  return Number.isNaN(pid) ? undefined : pid
+}
+
+describe('findMainWindow', () => {
+  it.skipIf(!onWindows)('loads the koffi bindings and returns 0 for a pid owning no window', () => {
+    // Bizonyítja, hogy a user32 kötések betöltődnek a deklarált szignatúrákkal, és
+    // hogy a bejáró ciklus leáll. FIGYELEM: önmagában NEM bizonyítja, hogy a
+    // GetWindowThreadProcessId kimeneti paramétere működik — ha a pid sosem íródna
+    // ki, ez a teszt akkor is 0-t kapna és átmenne. Azt a harmadik teszt fedi.
+    expect(findMainWindow(999_999_998)).toBe(0)
+  })
+
+  it.skipIf(!onWindows)('returns a plain number rather than a BigInt', () => {
+    // Egy BigInt HWND-vel a `hwnd !== 0` sosem lenne hamis.
+    expect(typeof findMainWindow(999_999_998)).toBe('number')
+  })
+
+  it.skipIf(!onWindows)('finds the main window of a running VSCode instance', (ctx) => {
+    // Ez az a teszt, ami ténylegesen igazolja a kimeneti paramétert: nullánál
+    // nagyobb értéket csak akkor kaphatunk, ha a GetWindowThreadProcessId kiírta a
+    // pidet, és az egyezett. Ablakot NEM hoz előtérbe — csak megkeresi.
+    const pid = runningVSCodeWindowPid()
+    if (pid === undefined) {
+      // Látható kihagyás, nem csendes átmenet: a futtatás kimenetében látszania kell.
+      ctx.skip()
+      return
+    }
+    expect(findMainWindow(pid)).toBeGreaterThan(0)
+  })
+})
+```
+
+Run: `pnpm --filter @claudeswitcher/desktop test`
+Expected: 3 teszt PASS. **A harmadiknak ténylegesen le kell futnia, nem kihagyva** —
+ezen a gépen fut VSCode. Ha a kimenet `skipped`-et mutat a harmadikra, azt jelenteni
+kell: akkor a kimeneti paraméter egyáltalán nincs igazolva.
+
+- [ ] **Step 4: Build és típusellenőrzés**
+
+Run: `pnpm build && pnpm --filter @claudeswitcher/desktop build && pnpm --filter @claudeswitcher/desktop check-types`
+Expected: mindhárom exit 0.
+
+Ezután egy korlátos indítás a Task 11 Step 5 mintájára (az `ELECTRON_RUN_AS_NODE`
+törlésével), ami azt igazolja, hogy a `koffi` **az Electron főprocesszben is**
+betöltődik — nem csak a Vitest Node-jában. Egy natív modul, ami a tesztben működik,
+az Electronban még elhasalhat. Expected: a `daemon on 127.0.0.1:<port>, N session(s)
+discovered` sor megjelenik, és az `err.log`-ban nincs `koffi`-t említő hiba.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add apps/desktop/src/main/focus-window.ts apps/desktop/src/main/index.ts
+git add apps/desktop/src/main/focus-window.ts apps/desktop/src/main/focus-window.test.ts apps/desktop/src/main/index.ts apps/desktop/vitest.config.ts apps/desktop/package.json
 git commit -m "feat(desktop): focus a session's VSCode window via Win32 with a code -r fallback"
 ```
 
@@ -3893,24 +3996,15 @@ describe('summarize', () => {
 
 - [ ] **Step 2: Futtasd, hogy lásd a hibát**
 
-Vedd fel a `"test": "vitest run"` scriptet az `apps/desktop/package.json`
-`scripts` blokkjába, és hozd létre a config fájlt:
-
-`apps/desktop/vitest.config.ts`:
-```ts
-import { defineConfig } from 'vitest/config'
-
-export default defineConfig({
-  test: { include: ['src/**/*.test.{ts,tsx}'] },
-})
-```
+A Vitest beállítás és a `test` script már létezik — a Task 12 hozta létre az
+`apps/desktop` első tesztjével (`focus-window.test.ts`). Ne hozd létre újra.
 
 Az `apps/desktop` `check-types`-ja az `electron-vite` miatt nem külön `tsconfig`
 párra épül, hanem az egyetlen `tsconfig.json`-ra, ami a teszteket is tartalmazza
 (nincs `tsc` build lépése, amiből ki kellene hagyni őket).
 
-Run: `pnpm --filter @claudeswitcher/desktop test`
-Expected: FAIL — `Failed to resolve import "./format.js"`
+Run: `pnpm --filter @claudeswitcher/desktop test format`
+Expected: FAIL — `Cannot find module './format.js'`, `Caused by: … Does the file exist?`
 
 - [ ] **Step 3: Írd meg a formázókat**
 
