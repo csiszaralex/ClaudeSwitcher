@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
+import { focusSessionWindow } from './focus-window.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -48,6 +49,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('daemon:connection', () => ({ port: daemon!.port, token: daemon!.token }))
   ipcMain.handle('daemon:state', () => daemon!.state())
+
+  ipcMain.handle('session:focus', async (_event, sessionId: string) => {
+    const view = daemon!.state().sessions.find((s) => s.sessionId === sessionId)
+    if (view === undefined) return false
+    // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
+    // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van —
+    // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
+    // tálcagombot villogtatná. Ha így is elbukik, a `code -r` tartalék megoldja.
+    const focused = await focusSessionWindow(view)
+    overlay?.hide()
+    return focused
+  })
+
+  ipcMain.handle('overlay:hide', () => {
+    overlay?.hide()
+  })
 
   // Indulási összegzés a főprocessz stdoutjára. Ez teszi a Step 5 ellenőrzését
   // automatizálhatóvá: nem kell DevTools-konzolba gépelni ahhoz, hogy lássuk,
