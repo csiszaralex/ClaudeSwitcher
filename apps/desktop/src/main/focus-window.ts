@@ -1,21 +1,61 @@
-import { execFile } from 'node:child_process'
+import { exec } from 'node:child_process'
+import { createRequire } from 'node:module'
 import type { SessionView } from '@claudeswitcher/core'
-import koffi from 'koffi'
 
-const user32 = koffi.load('user32.dll')
-
-const GetTopWindow = user32.func('intptr GetTopWindow(intptr hWnd)')
-const GetWindow = user32.func('intptr GetWindow(intptr hWnd, uint32 uCmd)')
-const GetWindowThreadProcessId = user32.func(
-  'uint32 GetWindowThreadProcessId(intptr hWnd, _Out_ uint32 *pid)',
-)
-const IsWindowVisible = user32.func('bool IsWindowVisible(intptr hWnd)')
-const GetWindowTextLengthW = user32.func('int GetWindowTextLengthW(intptr hWnd)')
-const SetForegroundWindow = user32.func('bool SetForegroundWindow(intptr hWnd)')
-const ShowWindow = user32.func('int ShowWindow(intptr hWnd, int nCmdShow)')
+// Nem `require`-nek nevezzük: a CJS bundle modulburkolójában a `require` már
+// paraméterként létezik, és egy azonos nevű `const` ütközne vele.
+const requireNative = createRequire(import.meta.url)
 
 const SW_RESTORE = 9
 const GW_HWNDNEXT = 2
+
+interface User32 {
+  GetTopWindow(hWnd: number): number
+  GetWindow(hWnd: number, uCmd: number): number
+  GetWindowThreadProcessId(hWnd: number, pid: [number]): number
+  IsWindowVisible(hWnd: number): number
+  GetWindowTextLengthW(hWnd: number): number
+  GetForegroundWindow(): number
+  SetForegroundWindow(hWnd: number): number
+  ShowWindow(hWnd: number, nCmdShow: number): number
+}
+
+/** `undefined`: még nem próbáltuk. `null`: a betöltés elbukott. */
+let user32: User32 | null | undefined
+
+/**
+ * Lustán tölti be a user32 kötéseket, és egy hibát elnyel.
+ *
+ * Szándékosan nem modulszinten: a `focus-window.ts`-t az `index.ts` importálja még az
+ * `app.whenReady()` előtt, így egy modulszintű koffi-hiba az indulási hibadialógus
+ * bekötése ELŐTT dobna — és az app dialógus nélkül, csendben halna meg. Így egy
+ * elérhetetlen natív modul csak a gyors fókuszutat kapcsolja ki; a `code -r` tartalék
+ * tovább működik.
+ */
+function loadUser32(): User32 | null {
+  if (user32 !== undefined) return user32
+  try {
+    const koffi = requireNative('koffi') as typeof import('koffi')
+    const lib = koffi.load('user32.dll')
+    user32 = {
+      GetTopWindow: lib.func('intptr GetTopWindow(intptr hWnd)'),
+      GetWindow: lib.func('intptr GetWindow(intptr hWnd, uint32 uCmd)'),
+      GetWindowThreadProcessId: lib.func(
+        'uint32 GetWindowThreadProcessId(intptr hWnd, _Out_ uint32 *pid)',
+      ),
+      // A Win32 BOOL egy 4 bájtos int, nem az 1 bájtos C bool.
+      IsWindowVisible: lib.func('int IsWindowVisible(intptr hWnd)'),
+      GetWindowTextLengthW: lib.func('int GetWindowTextLengthW(intptr hWnd)'),
+      GetForegroundWindow: lib.func('intptr GetForegroundWindow()'),
+      SetForegroundWindow: lib.func('int SetForegroundWindow(intptr hWnd)'),
+      ShowWindow: lib.func('int ShowWindow(intptr hWnd, int nCmdShow)'),
+    }
+  } catch (error) {
+    console.error('[focus] user32 bindings unavailable; falling back to code -r only', error)
+    user32 = null
+  }
+  return user32
+}
 
 /**
  * Felső korlát a bejárt ablakok számára. Egy Windows asztalon jellemzően néhány száz
@@ -35,33 +75,78 @@ const MAX_WINDOWS_SCANNED = 10_000
  * A lánc bejárása ugyanazt adja, csak sima skalár hívásokkal.
  */
 export function findMainWindow(targetPid: number): number {
+  const api = loadUser32()
+  if (api === null) return 0
+
   const pidOut: [number] = [0]
-  let hwnd = Number(GetTopWindow(0))
+  let hwnd = Number(api.GetTopWindow(0))
 
   for (let scanned = 0; hwnd !== 0 && scanned < MAX_WINDOWS_SCANNED; scanned++) {
-    if (IsWindowVisible(hwnd) && GetWindowTextLengthW(hwnd) > 0) {
-      GetWindowThreadProcessId(hwnd, pidOut)
+    if (api.IsWindowVisible(hwnd) !== 0 && api.GetWindowTextLengthW(hwnd) > 0) {
+      api.GetWindowThreadProcessId(hwnd, pidOut)
       if (pidOut[0] === targetPid) return hwnd
     }
-    hwnd = Number(GetWindow(hwnd, GW_HWNDNEXT))
+    hwnd = Number(api.GetWindow(hwnd, GW_HWNDNEXT))
   }
   return 0
 }
 
+/**
+ * Igaz, ha a gyors, pid-alapú fókuszút elérhető, azaz a user32 kötések betöltődtek.
+ * Az indulási naplóhoz: a lusta betöltés miatt a `koffi` különben csak az első
+ * fókuszkérésnél töltődne be, és addig semmi nem bizonyítaná, hogy az Electron
+ * főprocesszben működik.
+ */
+export function isFastFocusAvailable(): boolean {
+  return loadUser32() !== null
+}
+
+/** Az aktuálisan előtérben lévő ablak, vagy 0. Csak olvas, semmit nem hoz előre. */
+export function foregroundWindow(): number {
+  const api = loadUser32()
+  return api === null ? 0 : Number(api.GetForegroundWindow())
+}
+
 function focusByPid(pid: number): boolean {
+  const api = loadUser32()
+  if (api === null) return false
   const hwnd = findMainWindow(pid)
   if (hwnd === 0) return false
-  ShowWindow(hwnd, SW_RESTORE)
-  return Boolean(SetForegroundWindow(hwnd))
+
+  api.ShowWindow(hwnd, SW_RESTORE)
+  api.SetForegroundWindow(hwnd)
+
+  // A SetForegroundWindow visszatérési értéke nem megbízható. A Windows előtér-
+  // zárolása mellett „sikert" jelenthet, miközben csak a tálcagombot villogtatja. Ha
+  // ezt elhinnénk, a `code -r` tartalék sosem futna le, a felhasználó pedig azt
+  // látná, hogy az overlay eltűnik, és semmi nem történik. Ezért megnézzük, mi
+  // került ténylegesen előtérbe.
+  return foregroundWindow() === hwnd
+}
+
+/**
+ * Karakterek, amiket a cmd.exe idézőjelen belül is értelmez: a `%` környezeti
+ * változóként bontódik ki, egy `"` pedig magát az idézést törné meg. Az `&`, `^`,
+ * `|`, `<`, `>`, `(`, `)` idézőjelen belül ártalmatlan — ezt a review empirikusan
+ * lemérte.
+ */
+const CMD_UNSAFE_IN_QUOTES = /[%"]/
+
+/** Igaz, ha a mappa biztonságosan átadható a `code -r`-nek egy cmd.exe shellen át. */
+export function isSafeForCli(folder: string): boolean {
+  return !CMD_UNSAFE_IN_QUOTES.test(folder)
 }
 
 function focusByCli(folder: string): Promise<boolean> {
-  // A `code` Windowson `code.cmd`, ezért kell a shell. A shell viszont egy
-  // stringgé fűzi össze az argumentumokat idézés nélkül, így egy szóközt
-  // tartalmazó útvonal két argumentumra esne szét. Ezért idézzük.
-  const quoted = `"${folder.replace(/"/g, '')}"`
+  // Egy ilyen mappanévnél inkább nem próbálkozunk: a `%` kibontása csendben egy MÁSIK
+  // útvonalat nyitna meg. Egy elmaradt fókusz jobb, mint egy rossz.
+  if (!isSafeForCli(folder)) return Promise.resolve(false)
+
+  // A `code` Windowson `code.cmd`, ezért kell a shell. A teljes parancsot egyetlen
+  // stringként adjuk át: nincs argumentum-összefűzés, amit a Node DEP0190
+  // figyelmeztetése kifogásol, és az idézés egy helyen, láthatóan történik.
   return new Promise((resolve) => {
-    execFile('code', ['-r', quoted], { shell: true, windowsHide: true }, (error) => {
+    exec(`code -r "${folder}"`, { windowsHide: true }, (error) => {
       resolve(error === null)
     })
   })

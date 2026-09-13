@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { findMainWindow } from './focus-window.js'
+import { findMainWindow, foregroundWindow, isSafeForCli } from './focus-window.js'
 
 const onWindows = process.platform === 'win32'
 
@@ -47,5 +47,29 @@ describe('findMainWindow', () => {
       return
     }
     expect(findMainWindow(pid)).toBeGreaterThan(0)
+  })
+})
+
+describe('foregroundWindow', () => {
+  it.skipIf(!onWindows)('reads the foreground handle as a plain number without changing it', () => {
+    // A focusByPid ezzel ellenőrzi, hogy a fókuszváltás ténylegesen megtörtént-e. A
+    // teszt csak olvas. Nem követel nullánál nagyobb értéket: zárolt képernyőn vagy
+    // fókuszváltás közben a Windows jogosan adhat 0-t.
+    const hwnd = foregroundWindow()
+    expect(typeof hwnd).toBe('number')
+    expect(Number.isFinite(hwnd)).toBe(true)
+  })
+})
+
+describe('isSafeForCli', () => {
+  it('accepts ordinary folders, including spaces, ampersands and parentheses', () => {
+    expect(isSafeForCli('p:\\08_Apps\\ClaudeSwitcher')).toBe(true)
+    expect(isSafeForCli('C:\\My Projects\\R&D (old)')).toBe(true)
+  })
+
+  it('rejects folders cmd.exe would reinterpret even inside quotes', () => {
+    // A `%TEMP%` a review mérése szerint csendben egy MÁSIK útvonalra bontódik ki.
+    expect(isSafeForCli('C:\\work\\%TEMP%')).toBe(false)
+    expect(isSafeForCli('C:\\work\\a"b')).toBe(false)
   })
 })

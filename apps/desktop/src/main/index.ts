@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
 import { BrowserWindow, app, dialog, ipcMain } from 'electron'
-import { focusSessionWindow } from './focus-window.js'
+import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -71,7 +71,8 @@ app.whenReady().then(async () => {
   // a daemon elindult és tényleg megtalálta a futó sessionöket.
   console.log(
     `[claudeswitcher] daemon on 127.0.0.1:${daemon.port}, ` +
-      `${daemon.state().sessions.length} session(s) discovered`,
+      `${daemon.state().sessions.length} session(s) discovered, ` +
+      `fast focus ${isFastFocusAvailable() ? 'available' : 'UNAVAILABLE'}`,
   )
 
   overlay = createOverlay()
