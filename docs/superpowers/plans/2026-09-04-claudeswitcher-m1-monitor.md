@@ -3931,13 +3931,15 @@ git commit -m "feat(desktop): focus a session's VSCode window via Win32 with a c
 **Files:**
 - Create: `apps/desktop/src/main/tray.ts`, `apps/desktop/src/main/hotkey.ts`
 - Create: `apps/desktop/resources/tray.png`, `apps/desktop/resources/tray-waiting.png`
+- Test: `apps/desktop/src/main/tray-icons.test.ts`
 - Modify: `apps/desktop/src/main/index.ts`
 
 **Interfaces:**
 - Consumes: `Daemon` (Task 9)
 - Produces:
-  - `createTray(options: { onOpen(): void; onQuit(): void }): { setWaiting(count: number): void; destroy(): void }`
+  - `createTray(options: { onOpen(): void; onQuit(): void }): { setWaiting(count: number): void; destroy(): void }` — üres ikonnál dob
   - `registerHotkey(accelerator: string, handler: () => void): boolean`
+  - `OVERLAY_HOTKEY: string` — a gyorsbillentyű egyetlen forrása
 
 - [ ] **Step 1: Írd meg a tray modult**
 
@@ -3979,9 +3981,25 @@ export interface TrayHandle {
   destroy(): void
 }
 
+/**
+ * Betölt egy ikont, és hangosan elbukik, ha üres.
+ *
+ * A `nativeImage.createFromPath` hiányzó vagy hibás fájlnál NEM dob, hanem üres képet
+ * ad vissza, és egy üres képpel létrehozott tálcaikon Windowson láthatatlan. Az app
+ * így futna, a felhasználó pedig nem találná meg — csendes hiba egy olyan appban, aminek
+ * a tálcaikon az egyetlen belépési pontja. A dobás az `app.whenReady()` hibakezelőjéhez
+ * jut, ami hibadialógust mutat.
+ */
+function loadIcon(file: string): Electron.NativeImage {
+  const iconPath = path.join(resources, file)
+  const image = nativeImage.createFromPath(iconPath)
+  if (image.isEmpty()) throw new Error(`Tray icon missing or unreadable: ${iconPath}`)
+  return image
+}
+
 export function createTray(options: { onOpen(): void; onQuit(): void }): TrayHandle {
-  const idle = nativeImage.createFromPath(path.join(resources, 'tray.png'))
-  const waiting = nativeImage.createFromPath(path.join(resources, 'tray-waiting.png'))
+  const idle = loadIcon('tray.png')
+  const waiting = loadIcon('tray-waiting.png')
 
   const tray = new Tray(idle)
   tray.setContextMenu(
@@ -4017,6 +4035,18 @@ export function createTray(options: { onOpen(): void; onQuit(): void }): TrayHan
 import { globalShortcut } from 'electron'
 
 /**
+ * Az overlay globális gyorsbillentyűje. Egyetlen helyen, hogy egy sorral cserélhető
+ * legyen.
+ *
+ * FIGYELEM: a `Control+Alt` Windowson azonos az `AltGr`-rel. Magyar és sok más európai
+ * billentyűzetkiosztáson ez a kombináció globálisan elnyeli az `AltGr+Space`-t: ha
+ * valaki `@`-t ír (`AltGr+V`), és még nyomva tartja az AltGr-t, amikor szóközt üt, az
+ * overlay felugrik, a szóköz pedig elvész. A spec „pl."-ként említette, a felhasználó
+ * ezt választotta — a Task 15 elfogadási tesztjénél döntsön róla.
+ */
+export const OVERLAY_HOTKEY = 'Control+Alt+Space'
+
+/**
  * Igaz, ha sikerült regisztrálni. Egy másik alkalmazás elveheti a
  * kombinációt — ilyenkor az app fut tovább, csak a hotkey nem él.
  */
@@ -4034,7 +4064,10 @@ export function registerHotkey(accelerator: string, handler: () => void): boolea
 `apps/desktop/src/main/index.ts` — cseréld le az `app.whenReady()` végén lévő
 `overlay.showInactive()` sort erre. A hiányzó importok: `screen` és
 `globalShortcut` az `electron`-ból, `createTray` a `./tray.js`-ből,
-`registerHotkey` a `./hotkey.js`-ből:
+`OVERLAY_HOTKEY` és `registerHotkey` a `./hotkey.js`-ből.
+
+Az overlay mostantól **nem** jelenik meg induláskor — csak a gyorsbillentyűre vagy a
+tálcaikonra kattintva.
 
 ```ts
   overlay = createOverlay()
@@ -4062,9 +4095,15 @@ export function registerHotkey(accelerator: string, handler: () => void): boolea
     else showOverlay()
   }
 
-  if (!registerHotkey('Control+Alt+Space', toggleOverlay)) {
-    console.warn('[hotkey] Control+Alt+Space is taken by another application')
-  }
+  const hotkeyRegistered = registerHotkey(OVERLAY_HOTKEY, toggleOverlay)
+
+  // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
+  // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
+  // megjelenik, a tálcaikon látható képet kapott.
+  console.log(
+    `[claudeswitcher] tray ready, hotkey ${OVERLAY_HOTKEY} ` +
+      (hotkeyRegistered ? 'registered' : 'NOT registered (taken by another application)'),
+  )
 
   const syncTray = (): void => {
     tray.setWaiting(daemon!.state().sessions.filter((s) => s.status === 'waiting').length)
@@ -4078,22 +4117,70 @@ export function registerHotkey(accelerator: string, handler: () => void): boolea
   })
 ```
 
-- [ ] **Step 4: Kézi ellenőrzés**
+- [ ] **Step 4: Az ikonfájlok tesztje**
 
-Run: `pnpm --filter @claudeswitcher/desktop dev`
-Expected:
-- Megjelenik a tálcaikon, és az ablak **nem** látszik induláskor.
-- `Ctrl+Alt+Space` előhozza az ablakot a kurzor melletti kijelző közepére.
-- Újra megnyomva eltűnik; máshova kattintva (blur) is eltűnik.
-- A tray ikon tooltipje a várakozók számát mutatja. Teszteléshez indíts egy
-  Claude Code sessiont és kérj tőle valami engedélyköteles műveletet — az
-  ikonnak át kell váltania (a hookok csak a 15. taskban települnek, addig
-  kézzel POST-olhatsz a daemonnak, ahogy a Task 9 tesztje teszi).
+**Mit NEM ellenőriz ez a task, és miért.** A gyorsbillentyű lenyomását, az overlay
+pozícióját, az elrejtést fókuszvesztéskor és a tálca tooltipjének számát egy ágens nem
+tudja ellenőrizni — ehhez billentyűt kellene nyomni és ablakot figyelni a felhasználó
+gépén. A tálcaikon várakozó-állapotra váltásához pedig a daemonnak kellene POST-olni, a
+token viszont szándékosan sehol nem naplózódik. Ezeket a felhasználó ellenőrzi a Task 15
+elfogadási tesztjében. Ez a task azt méri, ami gombnyomás nélkül mérhető: hogy az
+ikonok érvényesek, és hogy a tálca és a gyorsbillentyű ténylegesen létrejön.
 
-- [ ] **Step 5: Commit**
+`apps/desktop/src/main/tray-icons.test.ts`:
+```ts
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+const resources = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../resources')
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+
+describe.each(['tray.png', 'tray-waiting.png'])('%s', (file) => {
+  it('is a 16x16 RGBA PNG', () => {
+    // A PNG szerkezetét ellenőrzi: szignatúra, IHDR méret és színtípus. A teljes
+    // dekódolást (CRC, IDAT) NEM — azt a futó app createTray-je méri, ami üres képnél
+    // dob, tehát a korlátos indítás tálca-sora azt fedi le.
+    const bytes = readFileSync(path.join(resources, file))
+    expect(bytes.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true)
+    expect(bytes.readUInt32BE(16)).toBe(16)
+    expect(bytes.readUInt32BE(20)).toBe(16)
+    expect(bytes[25]).toBe(6)
+  })
+})
+```
+
+Run: `pnpm --filter @claudeswitcher/desktop test`
+Expected: az eddigi 7 teszt mellett 2 új, összesen 9 PASS.
+
+- [ ] **Step 5: Build, típusellenőrzés és korlátos indítás**
+
+Run: `pnpm build && pnpm --filter @claudeswitcher/desktop build && pnpm --filter @claudeswitcher/desktop check-types`
+Expected: mindhárom exit 0.
+
+Aztán a korlátos indítás a Task 11 Step 5 mintájára, az `ELECTRON_RUN_AS_NODE`
+törlésével. Expected — **mindkét** sor megjelenik az `out.log`-ban:
+
+```
+[claudeswitcher] daemon on 127.0.0.1:<port>, N session(s) discovered, fast focus available
+[claudeswitcher] tray ready, hotkey Control+Alt+Space registered
+```
+
+A `tray ready` sor megjelenése bizonyítja, hogy **mindkét ikon nem üres képként**
+töltődött be az Electronban: a `createTray` üres ikonnál dob, a dobás pedig
+hibadialógushoz és kilépéshez vezet, a sor meg sem jelenne. A gyorsbillentyű
+`NOT registered` állapota nem a mi kódunk hibája — azt jelenti, hogy egy másik alkalmazás
+foglalja —, de jelenteni kell.
+
+Az indítás alatt **ablak nem jelenik meg** — az overlay mostantól csak gyorsbillentyűre
+nyílik. A tálcán ~20 másodpercre megjelenik az ikon, és a `Control+Alt+Space` addig
+globálisan regisztrálva van: ha a felhasználó épp megnyomja, az overlay felugrik.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add apps/desktop/src/main/tray.ts apps/desktop/src/main/hotkey.ts apps/desktop/src/main/index.ts apps/desktop/resources
+git add apps/desktop/src/main/tray.ts apps/desktop/src/main/hotkey.ts apps/desktop/src/main/index.ts apps/desktop/src/main/tray-icons.test.ts apps/desktop/resources
 git commit -m "feat(desktop): tray icon with waiting badge and global hotkey overlay toggle"
 ```
 
