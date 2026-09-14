@@ -2,8 +2,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
-import { BrowserWindow, app, dialog, ipcMain } from 'electron'
+import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen } from 'electron'
 import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'
+import { OVERLAY_HOTKEY, registerHotkey } from './hotkey.js'
+import { createTray } from './tray.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -76,7 +78,50 @@ app.whenReady().then(async () => {
   )
 
   overlay = createOverlay()
-  overlay.showInactive()
+
+  const tray = createTray({
+    onOpen: () => showOverlay(),
+    onQuit: () => app.quit(),
+  })
+
+  function showOverlay(): void {
+    if (overlay === undefined) return
+    const cursor = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(cursor)
+    const [width, height] = overlay.getSize() as [number, number]
+    overlay.setPosition(
+      Math.round(display.workArea.x + (display.workArea.width - width) / 2),
+      Math.round(display.workArea.y + (display.workArea.height - height) / 3),
+    )
+    overlay.show()
+    overlay.focus()
+  }
+
+  function toggleOverlay(): void {
+    if (overlay?.isVisible() === true) overlay.hide()
+    else showOverlay()
+  }
+
+  const hotkeyRegistered = registerHotkey(OVERLAY_HOTKEY, toggleOverlay)
+
+  // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
+  // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
+  // megjelenik, a tálcaikon látható képet kapott.
+  console.log(
+    `[claudeswitcher] tray ready, hotkey ${OVERLAY_HOTKEY} ` +
+      (hotkeyRegistered ? 'registered' : 'NOT registered (taken by another application)'),
+  )
+
+  const syncTray = (): void => {
+    tray.setWaiting(daemon!.state().sessions.filter((s) => s.status === 'waiting').length)
+  }
+  syncTray()
+  setInterval(syncTray, 1000).unref()
+
+  app.on('before-quit', () => {
+    globalShortcut.unregisterAll()
+    tray.destroy()
+  })
 }).catch((error: unknown) => {
   // Tálcaikonos app: ha az indulás elbukik — tipikusan a daemon —, nincs ablak és
   // nincs tálcaikon, a processz csendben halott maradna, a felhasználó pedig csak
