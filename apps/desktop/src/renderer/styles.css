@@ -1,0 +1,43 @@
+:root { color-scheme: dark; }
+
+body {
+  margin: 0;
+  font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+  color: #e8e6e3;
+  background: #1c1b1a;
+}
+
+.overlay { display: flex; flex-direction: column; height: 100vh; }
+.sessions { flex: 1; margin: 0; padding: 6px; list-style: none; overflow-y: auto; }
+
+.session {
+  display: grid;
+  grid-template-columns: 16px 130px 1fr 56px;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.session.selected { background: #2f2e2c; }
+.session.waiting .marker { color: #d97757; }
+.session.working .marker { color: #7aa2c4; }
+.session.idle .marker { color: #6b6a67; }
+
+.name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unbridged { color: #6b6a67; font-weight: 400; }
+.summary { color: #a8a6a2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.age { color: #6b6a67; text-align: right; font-variant-numeric: tabular-nums; }
+.empty { padding: 24px; text-align: center; color: #6b6a67; }
+
+.limits {
+  display: flex;
+  gap: 16px;
+  padding: 8px 14px;
+  border-top: 1px solid #2f2e2c;
+  color: #a8a6a2;
+  font-variant-numeric: tabular-nums;
+}
+
+.muted { color: #6b6a67; }

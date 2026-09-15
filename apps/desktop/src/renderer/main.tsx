@@ -1,8 +1,4 @@
-import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
-
-function App(): JSX.Element {
-  return <div>ClaudeSwitcher</div>
-}
+import { App } from './App.js'
 
 createRoot(document.getElementById('root')!).render(<App />)
