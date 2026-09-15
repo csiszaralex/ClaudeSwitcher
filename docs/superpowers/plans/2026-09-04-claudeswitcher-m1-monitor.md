@@ -4081,7 +4081,10 @@ tálcaikonra kattintva.
     if (overlay === undefined) return
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)
-    const [width, height] = overlay.getSize()
+    // Az Electron típusai a getSize()-t `number[]`-ként írják le, nem párként, így a
+    // `noUncheckedIndexedAccess` mellett a destrukturált elemek `number | undefined`-ek
+    // lennének. A getSize() mindig két elemet ad.
+    const [width, height] = overlay.getSize() as [number, number]
     overlay.setPosition(
       Math.round(display.workArea.x + (display.workArea.width - width) / 2),
       Math.round(display.workArea.y + (display.workArea.height - height) / 3),
