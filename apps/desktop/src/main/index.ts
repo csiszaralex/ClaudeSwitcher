@@ -88,7 +88,10 @@ app.whenReady().then(async () => {
     if (overlay === undefined) return
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)
-    const [width, height] = overlay.getSize() as [number, number]
+    // getBounds(), nem getSize(): az Electron a getSize()-t `number[]`-ként típusozza,
+    // amiből `noUncheckedIndexedAccess` mellett csak típus-kényszerítéssel lehetne
+    // szélességet és magasságot kivenni. A getBounds() elnevezett mezőket ad.
+    const { width, height } = overlay.getBounds()
     overlay.setPosition(
       Math.round(display.workArea.x + (display.workArea.width - width) / 2),
       Math.round(display.workArea.y + (display.workArea.height - height) / 3),
