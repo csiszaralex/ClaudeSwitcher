@@ -4196,13 +4196,33 @@ git commit -m "feat(desktop): tray icon with waiting badge and global hotkey ove
 
 **Files:**
 - Create: `apps/desktop/src/renderer/App.tsx`, `apps/desktop/src/renderer/useDaemonState.ts`, `apps/desktop/src/renderer/styles.css`
-- Modify: `apps/desktop/src/renderer/main.tsx`
-- Create: `apps/desktop/src/renderer/format.ts`
-- Test: `apps/desktop/src/renderer/format.test.ts`
+- Create: `apps/desktop/src/renderer/format.ts`, `apps/desktop/src/renderer/selection.ts`, `apps/desktop/src/renderer/state-message.ts`
+- Modify: `apps/desktop/src/renderer/main.tsx`, `apps/desktop/src/renderer/index.html`
+- Test: `apps/desktop/src/renderer/format.test.ts`, `selection.test.ts`, `state-message.test.ts`
 
 **Interfaces:**
 - Consumes: `DaemonState` (Task 9), a preload `window.claudeswitcher` API-ja (Task 11)
-- Produces: működő overlay lista billentyűnavigációval
+- Produces:
+  - `resolveSelectedIndex(ids, selectedId): number` és `moveSelection(ids, selectedId, delta): string | undefined`
+  - `parseStateMessage(data: unknown): DaemonState | undefined` — soha nem dob
+  - működő overlay lista billentyűnavigációval
+
+**Három hiba, amit ez a task a tervhez képest kijavít:**
+- **Index szerinti kiválasztás.** A lista rendezett, a várakozó sessionök felülre ugranak.
+  Egy index-alapú kiválasztás egy átrendeződéskor csendben egy MÁSIK sessionre mutatna,
+  és az Enter rossz ablakra ugrana. A kiválasztás session-azonosító szerint követ.
+- **Elveszett frissítés.** Az állapot IPC-n jön, a WebSocket csak utána nyílik. A kettő
+  között érkező változás elveszne, és mivel a daemon az azonos pillanatképeket nem küldi
+  újra, az overlay addig állott maradna, amíg valami újra meg nem változik. Kapcsolódáskor
+  ezért újra lekérjük az állapotot.
+- **Beragadó kiválasztás.** Üres listán a lefelé nyíl `-1`-re állította a kiválasztást.
+
+**Mit NEM ellenőriz ez a task, és miért.** A gyorsbillentyűt, a nyilakat, az Entert és az
+Esc-et egy ágens nem nyomhatja meg a felhasználó gépén. Ezeket a Task 15 elfogadási
+tesztje ellenőrzi. Ez a task a tiszta logikát egységteszteli, a renderert pedig egy
+korlátos indítással méri, ablak megjelenítése nélkül: a rejtett overlay is betölti az
+oldalát, tehát a konzolkimenete bizonyítja, hogy a React lefutott, az IPC válaszolt, és
+a WebSocket a tokennel kapcsolódott.
 
 - [ ] **Step 1: Írd meg a formázók failing tesztjét**
 
@@ -4325,20 +4345,156 @@ export function summarize(view: {
 
 - [ ] **Step 4: Futtasd a teszteket**
 
-Run: `pnpm --filter @claudeswitcher/desktop test`
-Expected: PASS, 11 teszt.
+Run: `pnpm --filter @claudeswitcher/desktop test format`
+Expected: PASS, 11 teszt a `format.test.ts`-ben.
 
-- [ ] **Step 5: Írd meg az állapot-hookot**
+- [ ] **Step 4b: A kiválasztás és az üzenetfeldolgozás — teszt előbb**
 
-`apps/desktop/src/renderer/useDaemonState.ts`:
+`apps/desktop/src/renderer/selection.test.ts`:
 ```ts
-import { useEffect, useState } from 'react'
+import { describe, expect, it } from 'vitest'
+import { moveSelection, resolveSelectedIndex } from './selection.js'
+
+describe('resolveSelectedIndex', () => {
+  it('returns -1 for an empty list', () => {
+    expect(resolveSelectedIndex([], 'a')).toBe(-1)
+  })
+
+  it('defaults to the first session when nothing is selected', () => {
+    expect(resolveSelectedIndex(['a', 'b'], undefined)).toBe(0)
+  })
+
+  it('follows the selected session when the list re-sorts', () => {
+    // A `b` az 1-es indexen volt; egy várakozni kezdő `c` felülre ugrik. Index
+    // szerinti követéssel az Enter most az `a` ablakára ugrana.
+    expect(resolveSelectedIndex(['c', 'a', 'b'], 'b')).toBe(2)
+  })
+
+  it('falls back to the first session when the selected one disappears', () => {
+    expect(resolveSelectedIndex(['a', 'c'], 'b')).toBe(0)
+  })
+})
+
+describe('moveSelection', () => {
+  it('moves down and up by session, not by stale index', () => {
+    expect(moveSelection(['a', 'b', 'c'], 'a', 1)).toBe('b')
+    expect(moveSelection(['a', 'b', 'c'], 'c', -1)).toBe('b')
+  })
+
+  it('stops at both ends of the list', () => {
+    expect(moveSelection(['a', 'b'], 'b', 1)).toBe('b')
+    expect(moveSelection(['a', 'b'], 'a', -1)).toBe('a')
+  })
+
+  it('returns undefined for an empty list rather than an invalid position', () => {
+    // A javítás előtt ez a kiválasztást -1-re állította, ahol beragadt.
+    expect(moveSelection([], undefined, 1)).toBeUndefined()
+  })
+})
+```
+
+`apps/desktop/src/renderer/state-message.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { parseStateMessage } from './state-message.js'
+
+describe('parseStateMessage', () => {
+  it('returns the state carried by a well-formed state message', () => {
+    const message = JSON.stringify({ type: 'state', payload: { sessions: [], rateLimits: {} } })
+    expect(parseStateMessage(message)).toEqual({ sessions: [], rateLimits: {} })
+  })
+
+  it('ignores messages that are not state updates', () => {
+    expect(parseStateMessage(JSON.stringify({ type: 'other', payload: {} }))).toBeUndefined()
+    expect(parseStateMessage(JSON.stringify({ type: 'state', payload: { sessions: 'no' } }))).toBeUndefined()
+  })
+
+  it('never throws on garbage', () => {
+    for (const garbage of ['not json', '', 'null', '42', '[]', undefined]) {
+      expect(() => parseStateMessage(garbage)).not.toThrow()
+      expect(parseStateMessage(garbage)).toBeUndefined()
+    }
+  })
+})
+```
+
+Run: `pnpm --filter @claudeswitcher/desktop test selection state-message`
+Expected: FAIL — `Cannot find module './selection.js'` és `'./state-message.js'`.
+
+- [ ] **Step 4c: Írd meg a két tiszta modult**
+
+`apps/desktop/src/renderer/selection.ts`:
+```ts
+/**
+ * A kiválasztott session indexe a jelenlegi listában, vagy -1, ha a lista üres.
+ *
+ * A kiválasztást session-azonosító szerint követjük, nem index szerint. A lista
+ * rendezett — a várakozó sessionök felülre ugranak —, így egy index-alapú kiválasztás
+ * egy átrendeződéskor csendben egy MÁSIK sessionre mutatna, és az Enter rossz ablakra
+ * ugrana. Ha a kiválasztott session eltűnt, az elsőre esünk vissza.
+ */
+export function resolveSelectedIndex(
+  ids: readonly string[],
+  selectedId: string | undefined,
+): number {
+  if (ids.length === 0) return -1
+  const index = selectedId === undefined ? -1 : ids.indexOf(selectedId)
+  return index === -1 ? 0 : index
+}
+
+/** A kiválasztás mozgatása `delta` lépéssel, a lista végein megállva. */
+export function moveSelection(
+  ids: readonly string[],
+  selectedId: string | undefined,
+  delta: number,
+): string | undefined {
+  if (ids.length === 0) return undefined
+  const current = resolveSelectedIndex(ids, selectedId)
+  const next = Math.min(Math.max(current + delta, 0), ids.length - 1)
+  return ids[next]
+}
+```
+
+`apps/desktop/src/renderer/state-message.ts`:
+```ts
 import type { RateLimits, SessionView } from '@claudeswitcher/core'
 
 export interface DaemonState {
   sessions: SessionView[]
   rateLimits: RateLimits
 }
+
+/** Egy WebSocket üzenetből kiolvassa az állapotot, vagy `undefined`-ot ad. Soha nem dob. */
+export function parseStateMessage(data: unknown): DaemonState | undefined {
+  let message: unknown
+  try {
+    message = JSON.parse(String(data))
+  } catch {
+    return undefined
+  }
+  if (typeof message !== 'object' || message === null) return undefined
+
+  const { type, payload } = message as { type?: unknown; payload?: unknown }
+  if (type !== 'state' || typeof payload !== 'object' || payload === null) return undefined
+
+  const { sessions, rateLimits } = payload as { sessions?: unknown; rateLimits?: unknown }
+  if (!Array.isArray(sessions)) return undefined
+  if (typeof rateLimits !== 'object' || rateLimits === null) return undefined
+
+  return payload as DaemonState
+}
+```
+
+Run: `pnpm --filter @claudeswitcher/desktop test`
+Expected: PASS. A `format` (11), `selection` (7) és `state-message` (3) mellett a korábbi
+`focus-window` (7) és `tray-icons` (2) — összesen 30 teszt.
+
+- [ ] **Step 5: Írd meg az állapot-hookot**
+
+`apps/desktop/src/renderer/useDaemonState.ts`:
+```ts
+import { useEffect, useState } from 'react'
+import { parseStateMessage, type DaemonState } from './state-message.js'
 
 declare global {
   interface Window {
@@ -4359,26 +4515,37 @@ export function useDaemonState(): DaemonState {
     let socket: WebSocket | undefined
     let closed = false
 
-    void (async () => {
+    const connect = async (): Promise<void> => {
       setState(await window.claudeswitcher.state())
       const { port, token } = await window.claudeswitcher.connection()
       if (closed) return
 
       socket = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
-      socket.onmessage = (event) => {
-        try {
-          const message: unknown = JSON.parse(String(event.data))
-          if (
-            typeof message === 'object' && message !== null &&
-            (message as { type?: unknown }).type === 'state'
-          ) {
-            setState((message as { payload: DaemonState }).payload)
-          }
-        } catch {
-          // Rossz üzenet — a következő broadcast úgyis felülírja.
-        }
+
+      socket.onopen = () => {
+        // Újralekérés, amikor a kapcsolat már él. A kezdeti lekérés és a megnyílás
+        // között érkezett változás különben elveszne — és mivel a daemon az azonos
+        // pillanatképeket nem küldi újra, az overlay addig állott maradna, amíg valami
+        // ÚJRA meg nem változik.
+        void window.claudeswitcher.state().then((fresh) => {
+          if (!closed) setState(fresh)
+        })
+        // A korlátos indítás ezt a sort keresi: a rejtett overlay is betölti az oldalát,
+        // így ez bizonyítja, hogy a React lefutott, az IPC válaszolt, és a WebSocket a
+        // tokennel kapcsolódott. Tokent nem ír ki.
+        console.info('[overlay] live updates connected')
       }
-    })()
+
+      socket.onmessage = (event) => {
+        const next = parseStateMessage(event.data)
+        if (next !== undefined) setState(next)
+      }
+    }
+
+    connect().catch((error: unknown) => {
+      // Elkapatlan elutasítás helyett látható hiba — a korlátos indítás ezt is figyeli.
+      console.error('[overlay] could not reach the daemon', error)
+    })
 
     return () => {
       closed = true
@@ -4396,6 +4563,7 @@ export function useDaemonState(): DaemonState {
 ```tsx
 import { useEffect, useState, type JSX } from 'react'
 import { formatDuration, formatResetsIn, summarize } from './format.js'
+import { moveSelection, resolveSelectedIndex } from './selection.js'
 import { useDaemonState } from './useDaemonState.js'
 import './styles.css'
 
@@ -4408,8 +4576,15 @@ const STATUS_LABEL = {
 
 export function App(): JSX.Element {
   const { sessions, rateLimits } = useDaemonState()
-  const [selected, setSelected] = useState(0)
+  // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
+  // együtt mozog. Lásd a selection.ts dokumentációját.
+  const [selectedId, setSelectedId] = useState<string | undefined>()
   const [now, setNow] = useState(Date.now())
+
+  const selected = resolveSelectedIndex(
+    sessions.map((s) => s.sessionId),
+    selectedId,
+  )
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000)
@@ -4417,23 +4592,20 @@ export function App(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (selected >= sessions.length) setSelected(Math.max(0, sessions.length - 1))
-  }, [sessions.length, selected])
-
-  useEffect(() => {
     function onKey(event: KeyboardEvent): void {
+      const ids = sessions.map((s) => s.sessionId)
       if (event.key === 'Escape') void window.claudeswitcher.hide()
-      if (event.key === 'ArrowDown') setSelected((i) => Math.min(i + 1, sessions.length - 1))
-      if (event.key === 'ArrowUp') setSelected((i) => Math.max(i - 1, 0))
+      if (event.key === 'ArrowDown') setSelectedId(moveSelection(ids, selectedId, 1))
+      if (event.key === 'ArrowUp') setSelectedId(moveSelection(ids, selectedId, -1))
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
-        const view = sessions[selected]
+        const view = sessions[resolveSelectedIndex(ids, selectedId)]
         if (view !== undefined) void window.claudeswitcher.focusSession(view.sessionId)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sessions, selected])
+  }, [sessions, selectedId])
 
   return (
     <div className="overlay">
@@ -4532,7 +4704,7 @@ body {
 .muted { color: #6b6a67; }
 ```
 
-- [ ] **Step 7: Kösd be a renderert**
+- [ ] **Step 7: Kösd be a renderert, és adj neki Content-Security-Policy-t**
 
 `apps/desktop/src/renderer/main.tsx`:
 ```tsx
@@ -4542,12 +4714,46 @@ import { App } from './App.js'
 createRoot(document.getElementById('root')!).render(<App />)
 ```
 
-- [ ] **Step 8: Kézi ellenőrzés**
+`apps/desktop/src/renderer/index.html` — a Task 11 óta nincs CSP-je, amire az Electron
+fejlesztői figyelmeztetést ír. A `<head>`-be, a `charset` után:
 
-Run: `pnpm --filter @claudeswitcher/desktop dev`
-Expected: `Ctrl+Alt+Space` után megjelenik az összes futó sessionöd. Nyíllal
-navigálható, Enter a kiválasztott session VSCode ablakára ugrik és elrejti az
-overlayt, Esc bezár. A státuszjelölő a futó sessionöknél `◐`, a tétleneknél `○`.
+```html
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:*"
+    />
+```
+
+A `connect-src ws://127.0.0.1:*` nélkül a böngésző megtagadná a WebSocketet a daemon
+felé, és az overlay némán állott maradna. A port wildcard kötelező, mert a daemon
+ideiglenes portot kap. A `script-src 'self'` a `file://`-ról betöltött bundle-t is
+lefedi — ugyanezt a szabályt használja az electron-vite React sablonja.
+
+- [ ] **Step 8: Build, típusellenőrzés és a renderer korlátos ellenőrzése**
+
+Run: `pnpm build && pnpm --filter @claudeswitcher/desktop build && pnpm --filter @claudeswitcher/desktop check-types`
+Expected: mindhárom exit 0.
+
+Aztán a korlátos indítás a Task 11 Step 5 mintájára, **egy kiegészítéssel**: az indítás
+előtt `$env:ELECTRON_ENABLE_LOGGING = '1'`. Enélkül a renderer konzolkimenete nem jut el
+a főprocessz stderr-jére, és a lenti sorok egyike sem látszana.
+
+Expected:
+- Az `out.log`-ban a két ismert sor: `daemon on …, N session(s) discovered, fast focus
+  available` és `tray ready, hotkey Control+Alt+Space registered`.
+- Az `err.log`-ban **szerepel** a `[overlay] live updates connected` sor. Ez bizonyítja,
+  hogy a rejtett overlay oldala betöltődött, a React lefutott, az IPC válaszolt, a CSP
+  engedte a WebSocketet, és az a tokennel kapcsolódott.
+- Az `err.log`-ban **nem szerepel** `Insecure Content-Security-Policy` — ez bizonyítja,
+  hogy a CSP érvényesül.
+- Az `err.log`-ban **nem szerepel** `[overlay] could not reach the daemon`, és nincs
+  `Refused to connect` vagy `Refused to load` CSP-elutasítás.
+
+Ha a `live updates connected` sor hiányzik, az a legfontosabb jelentendő eredmény — azt
+jelenti, hogy az overlay élesben üres vagy állott lenne.
+
+Az indítás alatt ablak nem jelenik meg. A billentyűnavigáció, az Enter és az Esc
+viselkedése a Task 15 elfogadási tesztjében ellenőrződik.
 
 - [ ] **Step 9: Commit**
 
