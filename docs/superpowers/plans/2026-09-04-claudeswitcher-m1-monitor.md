@@ -4047,15 +4047,18 @@ import { globalShortcut } from 'electron'
 export const OVERLAY_HOTKEY = 'Control+Alt+Space'
 
 /**
- * Igaz, ha sikerült regisztrálni. Egy másik alkalmazás elveheti a
- * kombinációt — ilyenkor az app fut tovább, csak a hotkey nem él.
+ * Igaz, ha sikerült regisztrálni.
+ *
+ * Ha egy másik alkalmazás foglalja a kombinációt, az Electron dokumentáltan NEM dob,
+ * hanem `false`-t ad — ilyenkor az app fut tovább, csak a gyorsbillentyű nem él.
+ *
+ * Szándékosan nincs try/catch. Mivel a „foglalt" eset nem dob, egy kivétel itt csak
+ * programozási hibát jelenthet, például egy elgépelt billentyűkombinációt. Ha azt
+ * elnyelnénk, a hívó azt naplózná, hogy „egy másik alkalmazás foglalja", ami hamis
+ * nyomra vinne. Így a hiba az `app.whenReady()` hibakezelőjéhez jut, és hibadialógust ad.
  */
 export function registerHotkey(accelerator: string, handler: () => void): boolean {
-  try {
-    return globalShortcut.register(accelerator, handler)
-  } catch {
-    return false
-  }
+  return globalShortcut.register(accelerator, handler)
 }
 ```
 
@@ -4081,10 +4084,10 @@ tálcaikonra kattintva.
     if (overlay === undefined) return
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)
-    // Az Electron típusai a getSize()-t `number[]`-ként írják le, nem párként, így a
-    // `noUncheckedIndexedAccess` mellett a destrukturált elemek `number | undefined`-ek
-    // lennének. A getSize() mindig két elemet ad.
-    const [width, height] = overlay.getSize() as [number, number]
+    // getBounds(), nem getSize(): az Electron a getSize()-t `number[]`-ként típusozza,
+    // amiből `noUncheckedIndexedAccess` mellett csak típus-kényszerítéssel lehetne
+    // szélességet és magasságot kivenni. A getBounds() elnevezett mezőket ad.
+    const { width, height } = overlay.getBounds()
     overlay.setPosition(
       Math.round(display.workArea.x + (display.workArea.width - width) / 2),
       Math.round(display.workArea.y + (display.workArea.height - height) / 3),
