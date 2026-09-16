@@ -4892,87 +4892,501 @@ git commit -m "feat(desktop): overlay session list with keyboard navigation and 
 
 ---
 
-### Task 15: setup — hookok és statusLine telepítése
+### Task 15: setup — a telepítés tiszta, veszteségmentes logikája
 
 **Files:**
-- Create: `apps/desktop/src/main/setup.ts`
-- Test: `apps/desktop/src/main/setup.test.ts`
-- Modify: `apps/desktop/src/main/index.ts`
+- Modify: `packages/core/src/settings-writer.ts` — `transformSettingsFile`; az `updateSettingsFile` erre épül
+- Test: `packages/core/src/settings-writer.test.ts`
+- Modify: `packages/daemon/src/daemon.ts` — `port` és `token` opció
+- Test: `packages/daemon/src/daemon.test.ts`
+- Create: `apps/desktop/src/main/setup.ts`, `apps/desktop/src/main/token.ts`
+- Test: `apps/desktop/src/main/setup.test.ts`, `apps/desktop/src/main/token.test.ts`
 
 **Interfaces:**
-- Consumes: `updateSettingsFile`, `userSettingsPath` (core)
+- Consumes: `mergeSettings`, `userSettingsPath` (core); `startDaemon` (daemon)
 - Produces:
-  - `buildHookSettings(options: { port: number; token: string; statusLineCommand: string }): Record<string, unknown>`
-  - `installIntegration(claudeDir: string, options: { port: number; token: string; statusLineCommand: string }): Promise<void>`
+  - `transformSettingsFile(filePath, transform): Promise<void>` (core)
+  - `DaemonOptions.port?: number` és `DaemonOptions.token?: string` (daemon)
+  - `DAEMON_PORT: number`
+  - `applyIntegration(existing, options): { settings; conflicts }`
+  - `removeIntegration(existing): Record<string, unknown>`
+  - `installIntegration(claudeDir, options): Promise<string[]>` — az ütközéseket adja vissza
+  - `uninstallIntegration(claudeDir): Promise<void>`
+  - `loadOrCreateToken(dir): Promise<string>`
 
-- [ ] **Step 1: Írd meg a failing tesztet**
+**Miért tér el ez a task az eredeti tervtől.** Az eredeti Task 15 öt hibát hordozott:
 
-`apps/desktop/src/main/setup.test.ts`:
+1. **Ideiglenes port a telepített beállításokban.** A daemon minden induláskor új portot
+   kapott, a telepítés pedig ezt írta a `settings.json`-ba. Az app újraindítása után
+   minden session hookja egy halott portra mutatott volna, és egyetlen várakozás-jelzés
+   sem érkezett volna. **Ez a funkciót törte volna, nem csak kockázatos volt.**
+   Megoldás: fix port és tartós token.
+2. **Telepítés minden induláskor.** Minden app-indítás — és minden ágens korlátos
+   indítása — átírta volna a felhasználó globális Claude Code beállításait. Megoldás: a
+   telepítés kifejezett, a tálcamenüből indított művelet (Task 16).
+3. **A hook-tömbök egészben felülírva.** A `mergeSettings` a tömböket cseréli, tehát egy
+   telepítés némán törölte volna a felhasználó saját `Notification`, `Stop`,
+   `SessionStart` és `SessionEnd` hookjait. Megoldás: a saját bejegyzéseinket azonosítjuk
+   és cseréljük, az idegeneket megtartjuk.
+4. **Egy saját status line felülírva.** Megoldás: idegen status line-t nem írunk felül,
+   hanem ütközésként jelentjük.
+5. **Nincs eltávolítás.** Megoldás: `removeIntegration`, ami csak a saját bejegyzéseinket
+   veszi ki. A telepítés és az eltávolítás együtt veszteségmentes — erre van teszt.
+
+**Saját bejegyzés azonosítása.** Egy hook akkor a mienk, ha az `allowedEnvVars`-ában
+szerepel a `CLAUDESWITCHER_TOKEN`. Ez portfüggetlen, tehát egy portváltás után is
+felismerjük a régi telepítést, és egy idegen hook szinte biztosan nem hivatkozik erre a
+változóra. Egy status line akkor a mienk, ha a parancsa a `packages/statusline/dist/main.js`-re
+mutat.
+
+**Ez a task semmit nem ír a felhasználó valódi `settings.json`-jába.** Minden teszt
+ideiglenes könyvtárban fut.
+
+- [ ] **Step 1: A core — transzformáló író, teszt előbb**
+
+`packages/core/src/settings-writer.test.ts` — az import bővül
+`import { mergeSettings, transformSettingsFile, updateSettingsFile } from './settings-writer.js'`,
+és a meglévő `describe` blokkok mellé:
+
 ```ts
-import { describe, expect, it } from 'vitest'
-import { buildHookSettings } from './setup.js'
+describe('transformSettingsFile', () => {
+  it('passes the parsed file to the transform and writes its result', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ keep: 1, drop: 2 }))
 
-const OPTIONS = { port: 41234, token: 'abc123', statusLineCommand: 'node C:\\cs\\statusline.js' }
-
-describe('buildHookSettings', () => {
-  it('registers only non-blocking hook events in M1', () => {
-    const settings = buildHookSettings(OPTIONS)
-    const hooks = settings.hooks as Record<string, unknown>
-    expect(Object.keys(hooks).sort()).toEqual(['Notification', 'SessionEnd', 'SessionStart', 'Stop'])
-    // A PermissionRequest az M2 hatásköre; az M1 semmit nem vesz el.
-    expect(hooks.PermissionRequest).toBeUndefined()
-  })
-
-  it('points hooks at the loopback daemon with the bearer token', () => {
-    const settings = buildHookSettings(OPTIONS)
-    const hooks = settings.hooks as Record<string, Array<Record<string, unknown>>>
-    const hook = (hooks.Notification![0]!.hooks as Array<Record<string, unknown>>)[0]!
-    expect(hook.type).toBe('http')
-    expect(hook.url).toBe('http://127.0.0.1:41234/hooks/notification')
-    expect((hook.headers as Record<string, string>).Authorization).toBe(
-      'Bearer $CLAUDESWITCHER_TOKEN',
-    )
-    expect(hook.allowedEnvVars).toEqual(['CLAUDESWITCHER_TOKEN'])
-  })
-
-  it('keeps hook timeouts short because these hooks cannot block', () => {
-    const settings = buildHookSettings(OPTIONS)
-    const hooks = settings.hooks as Record<string, Array<Record<string, unknown>>>
-    for (const entries of Object.values(hooks)) {
-      const hook = (entries[0]!.hooks as Array<Record<string, unknown>>)[0]!
-      expect(hook.timeout).toBe(5)
-    }
-  })
-
-  it('configures the status line and the env vars it needs', () => {
-    const settings = buildHookSettings(OPTIONS)
-    expect(settings.statusLine).toEqual({
-      type: 'command',
-      command: 'node C:\\cs\\statusline.js',
-      padding: 0,
+    await transformSettingsFile(file, (existing) => {
+      const { drop, ...rest } = existing
+      return rest
     })
-    expect(settings.env).toEqual({
-      CLAUDESWITCHER_PORT: '41234',
-      CLAUDESWITCHER_TOKEN: 'abc123',
-    })
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ keep: 1 })
   })
 
-  it('writes nothing outside hooks, statusLine and env', () => {
-    expect(Object.keys(buildHookSettings(OPTIONS)).sort()).toEqual(['env', 'hooks', 'statusLine'])
+  it('can remove nested keys, which a merge patch cannot express', async () => {
+    // Ezért kell egyáltalán: az eltávolítás kulcsokat töröl, a mergeSettings csak ad.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ env: { A: '1', B: '2' } }))
+    await transformSettingsFile(file, () => ({ env: { A: '1' } }))
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ env: { A: '1' } })
+  })
+
+  it('refuses to write an unparseable file and never calls the transform', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, '{ broken')
+    let called = false
+    await expect(
+      transformSettingsFile(file, (existing) => {
+        called = true
+        return existing
+      }),
+    ).rejects.toThrow(/parse/i)
+    expect(called).toBe(false)
+    expect(await readFile(file, 'utf8')).toBe('{ broken')
+  })
+
+  it('shares one write queue with updateSettingsFile', async () => {
+    // Közös sor nélkül egy telepítés és egy párhuzamos merge egymás írását dobná el.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({}))
+
+    await Promise.all([
+      updateSettingsFile(file, { a: 1 }),
+      transformSettingsFile(file, (existing) => ({ ...existing, b: 2 })),
+      updateSettingsFile(file, { c: 3 }),
+    ])
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ a: 1, b: 2, c: 3 })
   })
 })
 ```
 
-- [ ] **Step 2: Futtasd, hogy lásd a hibát**
+Run: `pnpm --filter @claudeswitcher/core test settings-writer`
+Expected: FAIL — a `transformSettingsFile` nem exportált.
 
-Run: `pnpm --filter @claudeswitcher/desktop test setup`
-Expected: FAIL — `Failed to resolve import "./setup.js"`
+- [ ] **Step 2: A core — implementáció**
 
-- [ ] **Step 3: Írd meg az implementációt**
+`packages/core/src/settings-writer.ts` — a meglévő `updateSettingsFile`-t és a privát
+`writeMerged`-et cseréld le erre a három függvényre. A `writeQueues`, a `mergeSettings` és
+az `isPlainObject` változatlan marad:
+
+```ts
+/**
+ * Atomikus, sorba állított, parse-biztos olvasás–transzformálás–írás. A `transform` a már
+ * beolvasott objektumot kapja, és a kiírandót adja vissza.
+ *
+ * Azért kell a merge-patch mellé, mert az integráció eltávolítása kulcsokat töröl, amit
+ * egy merge-patch nem tud kifejezni. Az `updateSettingsFile`-lal azonos sort használ, így
+ * a kettő ugyanarra a fájlra nem tudja egymás írását eldobni.
+ */
+export function transformSettingsFile(
+  filePath: string,
+  transform: (existing: Record<string, unknown>) => Record<string, unknown>,
+): Promise<void> {
+  const key = path.resolve(filePath)
+  const previous = writeQueues.get(key) ?? Promise.resolve()
+  // A következő hívónak arra kell várnia, hogy a fájlművelet *befejeződjön*, a
+  // sikerére nem — ezért fut a lánc hiba után is tovább.
+  const next = previous.then(
+    () => writeTransformed(filePath, transform),
+    () => writeTransformed(filePath, transform),
+  )
+  writeQueues.set(key, next.catch(() => undefined))
+  return next
+}
+
+export function updateSettingsFile(
+  filePath: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  return transformSettingsFile(filePath, (existing) => mergeSettings(existing, patch))
+}
+
+/**
+ * Parse-olhatatlan meglévő fájlnál dob, és NEM hívja a transzformációt és nem ír — inkább
+ * ne módosítsunk semmit, mint hogy elveszítsük a felhasználó beállításait.
+ */
+async function writeTransformed(
+  filePath: string,
+  transform: (existing: Record<string, unknown>) => Record<string, unknown>,
+): Promise<void> {
+  let existing: Record<string, unknown> = {}
+
+  let raw: string | undefined
+  try {
+    raw = await readFile(filePath, 'utf8')
+  } catch {
+    raw = undefined
+  }
+
+  if (raw !== undefined && raw.trim() !== '') {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (cause) {
+      throw new Error(`Cannot parse existing settings at ${filePath}; refusing to write`, { cause })
+    }
+    if (!isPlainObject(parsed)) {
+      throw new Error(`Settings at ${filePath} is not a JSON object; refusing to write`)
+    }
+    existing = parsed
+  }
+
+  const next = transform(existing)
+  // Egyedi név processzenként ÉS híváson belül: a pid önmagában nem elég.
+  const temp = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${randomUUID()}.tmp`,
+  )
+  try {
+    await writeFile(temp, JSON.stringify(next, null, 2) + '\n', 'utf8')
+    await rename(temp, filePath)
+  } catch (error) {
+    // Ne hagyjunk törmeléket a ~/.claude/-ban. A célfájl érintetlen — ez a lényeg.
+    await unlink(temp).catch(() => undefined)
+    throw error
+  }
+}
+```
+
+Run: `pnpm --filter @claudeswitcher/core test && pnpm --filter @claudeswitcher/core check-types && pnpm --filter @claudeswitcher/core build`
+Expected: minden korábbi core teszt és a 4 új PASS; a korábbi `updateSettingsFile` tesztek
+változatlanul átmennek, mert az viselkedésben azonos maradt.
+
+- [ ] **Step 3: A daemon — fix port és megadott token, teszt előbb**
+
+`packages/daemon/src/daemon.test.ts` — a meglévő `describe('startDaemon', …)` blokkba:
+
+```ts
+  it('uses the token it is given instead of generating one', async () => {
+    const token = 'a'.repeat(32)
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0, token })
+    expect(running.token).toBe(token)
+  })
+
+  it('binds the port it is given, and fails loudly when that port is taken', async () => {
+    // A desktop fix portot ad, hogy a telepített hookok az újraindítás után is élők
+    // maradjanak. Egy foglalt port ezért indulási HIBA, nem csendes átállás egy másik
+    // portra — az átállás pont a telepített hookokat tenné halottá.
+    const first = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    try {
+      await expect(
+        startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0, port: first.port }),
+      ).rejects.toThrow(/EADDRINUSE/)
+    } finally {
+      await first.stop()
+    }
+  })
+```
+
+Run: `pnpm --filter @claudeswitcher/daemon test daemon`
+Expected: FAIL — a token-teszt eltérő tokent lát, a port-teszt nem utasít el.
+
+- [ ] **Step 4: A daemon — implementáció**
+
+`packages/daemon/src/daemon.ts` — a `DaemonOptions` bővül, és a `startDaemon` eleje meg a
+szerverindítás változik:
+
+```ts
+export interface DaemonOptions {
+  claudeDir: string
+  probe: ProcessProbe
+  /** Poll periódus ms-ben. 0 kikapcsolja (tesztekhez). */
+  pollMs?: number
+  /**
+   * A port, amire a daemon köt. 0: ideiglenes (tesztekhez). A desktop fix portot ad, mert a
+   * telepített hookok és a statusLine egy rögzített URL-t kapnak a settings.json-ban.
+   */
+  port?: number
+  /** A daemon tokenje. Ha nincs megadva, véletlen. A desktop tartós tokent ad, ugyanezért. */
+  token?: string
+}
+```
+
+```ts
+export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
+  const { claudeDir, probe, pollMs = 3000, port: requestedPort = 0 } = options
+  const token = options.token ?? randomBytes(16).toString('hex')
+```
+
+```ts
+  const server: ServerType = await new Promise((resolve, reject) => {
+    const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: requestedPort }, () => resolve(s))
+    // Foglalt porton a listen `error` eseményt emittál. Kezelő nélkül ez elkapatlan kivétel
+    // lenne; így a startDaemon elutasít, a desktop pedig indulási hibadialógust mutat.
+    s.on('error', reject)
+  })
+```
+
+Run: `pnpm --filter @claudeswitcher/daemon test && pnpm check-types && pnpm build`
+Expected: minden daemon teszt PASS, a 2 új is.
+
+- [ ] **Step 5: A desktop — token és telepítési logika, teszt előbb**
+
+`apps/desktop/src/main/token.test.ts`:
+```ts
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { loadOrCreateToken } from './token.js'
+
+describe('loadOrCreateToken', () => {
+  it('creates a 32-hex-character token when none exists', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-token-'))
+    expect(await loadOrCreateToken(dir)).toMatch(/^[0-9a-f]{32}$/)
+  })
+
+  it('returns the same token on every later call', async () => {
+    // A telepített settings.json `env` blokkja ezt a tokent kapja. Ha újraindításonként
+    // változna, minden újraindítás elavulttá tenné a telepítést.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-token-'))
+    const first = await loadOrCreateToken(dir)
+    expect(await loadOrCreateToken(dir)).toBe(first)
+  })
+
+  it('replaces a token file that does not hold a valid token', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-token-'))
+    await writeFile(path.join(dir, 'daemon-token'), 'not a token')
+    const token = await loadOrCreateToken(dir)
+    expect(token).toMatch(/^[0-9a-f]{32}$/)
+    expect((await readFile(path.join(dir, 'daemon-token'), 'utf8')).trim()).toBe(token)
+  })
+})
+```
+
+`apps/desktop/src/main/setup.test.ts`:
+```ts
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
+import {
+  applyIntegration,
+  installIntegration,
+  removeIntegration,
+  uninstallIntegration,
+} from './setup.js'
+
+const OPTIONS = {
+  port: 47821,
+  token: 'abc123',
+  statusLineCommand: 'node "P:\\repo\\packages\\statusline\\dist\\main.js"',
+}
+
+/** A felhasználó valódi settings.json-jának alakja, a munkamenet elején lemérve. */
+const USER_SETTINGS: Record<string, unknown> = {
+  permissions: { allow: ['Bash(pnpm build *)', 'Read(//tmp/**)'] },
+  model: 'opus[1m]',
+  enabledPlugins: { 'superpowers@claude-plugins-official': true },
+  effortLevel: 'xhigh',
+  autoUpdatesChannel: 'latest',
+  switchModelsOnFlag: true,
+  tui: 'fullscreen',
+}
+
+const FOREIGN_NOTIFICATION = {
+  hooks: [{ type: 'command', command: 'powershell -c [console]::beep()' }],
+}
+
+const FOREIGN_STATUS_LINE = { type: 'command', command: 'bash ~/my-statusline.sh' }
+
+type HookGroups = Record<string, Array<{ hooks: Array<Record<string, unknown>> }>>
+
+describe('applyIntegration', () => {
+  it('leaves every existing key of the real settings untouched', () => {
+    const { settings } = applyIntegration(USER_SETTINGS, OPTIONS)
+    for (const [key, value] of Object.entries(USER_SETTINGS)) {
+      expect(settings[key]).toEqual(value)
+    }
+  })
+
+  it('installs only the four non-blocking hook events', () => {
+    const hooks = applyIntegration({}, OPTIONS).settings.hooks as Record<string, unknown>
+    expect(Object.keys(hooks).sort()).toEqual(['Notification', 'SessionEnd', 'SessionStart', 'Stop'])
+    // A PermissionRequest az M2 hatásköre; az M1 egyetlen döntést sem vesz el.
+    expect(hooks.PermissionRequest).toBeUndefined()
+  })
+
+  it('points each hook at the fixed loopback port with the token header', () => {
+    const hooks = applyIntegration({}, OPTIONS).settings.hooks as HookGroups
+    const hook = hooks.Notification![0]!.hooks[0]!
+    expect(hook.type).toBe('http')
+    expect(hook.url).toBe('http://127.0.0.1:47821/hooks/notification')
+    expect(hook.timeout).toBe(5)
+    expect((hook.headers as Record<string, string>).Authorization).toBe('Bearer $CLAUDESWITCHER_TOKEN')
+    expect(hook.allowedEnvVars).toEqual(['CLAUDESWITCHER_TOKEN'])
+  })
+
+  it('keeps a foreign hook on the same event instead of overwriting it', () => {
+    // Az eredeti terv a tömböt egészben cserélte, és ezt a hookot némán törölte volna.
+    const existing = { hooks: { Notification: [FOREIGN_NOTIFICATION] } }
+    const hooks = applyIntegration(existing, OPTIONS).settings.hooks as Record<string, unknown[]>
+    expect(hooks.Notification).toHaveLength(2)
+    expect(hooks.Notification![0]).toEqual(FOREIGN_NOTIFICATION)
+  })
+
+  it('is idempotent: installing twice changes nothing the second time', () => {
+    const once = applyIntegration(USER_SETTINGS, OPTIONS).settings
+    expect(applyIntegration(once, OPTIONS).settings).toEqual(once)
+  })
+
+  it('replaces our old entry when the port changes, rather than adding a second', () => {
+    const old = applyIntegration({}, { ...OPTIONS, port: 11111 }).settings
+    const hooks = applyIntegration(old, OPTIONS).settings.hooks as HookGroups
+    expect(hooks.Stop).toHaveLength(1)
+    expect(String(hooks.Stop![0]!.hooks[0]!.url)).toContain(':47821/')
+  })
+
+  it('installs the status line and adds the two env vars beside existing ones', () => {
+    const { settings } = applyIntegration({ env: { OTHER: 'x' } }, OPTIONS)
+    expect(settings.statusLine).toEqual({ type: 'command', command: OPTIONS.statusLineCommand, padding: 0 })
+    expect(settings.env).toEqual({
+      OTHER: 'x',
+      CLAUDESWITCHER_PORT: '47821',
+      CLAUDESWITCHER_TOKEN: 'abc123',
+    })
+  })
+
+  it('refuses to overwrite a foreign status line and reports it as a conflict', () => {
+    const { settings, conflicts } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
+    expect(settings.statusLine).toEqual(FOREIGN_STATUS_LINE)
+    expect(conflicts).toHaveLength(1)
+  })
+
+  it('leaves a malformed hooks value alone and reports it', () => {
+    const { settings, conflicts } = applyIntegration({ hooks: 'nonsense' }, OPTIONS)
+    expect(settings.hooks).toBe('nonsense')
+    expect(conflicts.length).toBeGreaterThan(0)
+  })
+})
+
+describe('removeIntegration', () => {
+  it('restores the real settings exactly after an install', () => {
+    // A legfontosabb tulajdonság: telepítés + eltávolítás együtt veszteségmentes.
+    const installed = applyIntegration(USER_SETTINGS, OPTIONS).settings
+    expect(removeIntegration(installed)).toEqual(USER_SETTINGS)
+  })
+
+  it('keeps foreign hooks, foreign env vars and a foreign status line', () => {
+    const existing = {
+      hooks: { Notification: [FOREIGN_NOTIFICATION] },
+      env: { OTHER: 'x' },
+      statusLine: FOREIGN_STATUS_LINE,
+    }
+    const installed = applyIntegration(existing, OPTIONS).settings
+    expect(removeIntegration(installed)).toEqual(existing)
+  })
+
+  it('is harmless on settings that never had the integration', () => {
+    expect(removeIntegration(USER_SETTINGS)).toEqual(USER_SETTINGS)
+  })
+})
+
+describe('installIntegration and uninstallIntegration on a real file', () => {
+  it('round-trips the real settings through the file system unchanged', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify(USER_SETTINGS, null, 2))
+
+    expect(await installIntegration(dir, OPTIONS)).toEqual([])
+    await uninstallIntegration(dir)
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(USER_SETTINGS)
+  })
+})
+```
+
+Run: `pnpm --filter @claudeswitcher/desktop test token setup`
+Expected: FAIL — `Cannot find module './token.js'` és `'./setup.js'`.
+
+- [ ] **Step 6: A desktop — implementáció**
+
+`apps/desktop/src/main/token.ts`:
+```ts
+import { randomBytes } from 'node:crypto'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+
+const TOKEN_PATTERN = /^[0-9a-f]{32}$/
+
+/**
+ * Tartós daemon-token. A telepített hookok és a statusLine a settings.json `env` blokkjából
+ * kapják, tehát az app újraindításai között azonosnak kell maradnia — különben minden
+ * újraindítás elavulttá tenné a telepítést. Egy nem érvényes tokent tartalmazó fájlt
+ * lecserélünk, nem hibázunk rajta.
+ */
+export async function loadOrCreateToken(dir: string): Promise<string> {
+  const file = path.join(dir, 'daemon-token')
+  try {
+    const existing = (await readFile(file, 'utf8')).trim()
+    if (TOKEN_PATTERN.test(existing)) return existing
+  } catch {
+    // Még nincs token — létrehozzuk.
+  }
+
+  const token = randomBytes(16).toString('hex')
+  await mkdir(dir, { recursive: true })
+  const temp = `${file}.${process.pid}.tmp`
+  await writeFile(temp, token, 'utf8')
+  await rename(temp, file)
+  return token
+}
+```
 
 `apps/desktop/src/main/setup.ts`:
 ```ts
-import { updateSettingsFile, userSettingsPath } from '@claudeswitcher/core'
+import { transformSettingsFile, userSettingsPath } from '@claudeswitcher/core'
+
+/**
+ * A daemon rögzített portja. Nem ideiglenes, mert a telepített hookok és a statusLine ezt
+ * az URL-t kapják a settings.json-ban: egy újraindításonként változó port minden
+ * újraindítás után halottá tenné őket.
+ */
+export const DAEMON_PORT = 47821
 
 export interface IntegrationOptions {
   port: number
@@ -4980,122 +5394,406 @@ export interface IntegrationOptions {
   statusLineCommand: string
 }
 
-function httpHook(url: string): Record<string, unknown> {
+export interface IntegrationResult {
+  settings: Record<string, unknown>
+  /** Emberi olvasásra szánt leírások arról, amit szándékosan nem írtunk felül. */
+  conflicts: string[]
+}
+
+const HOOK_ROUTES: Readonly<Record<string, string>> = {
+  Notification: 'notification',
+  SessionStart: 'lifecycle/start',
+  SessionEnd: 'lifecycle/end',
+  Stop: 'lifecycle/stop',
+}
+
+const TOKEN_ENV = 'CLAUDESWITCHER_TOKEN'
+const PORT_ENV = 'CLAUDESWITCHER_PORT'
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Igaz, ha egy matcher-csoport a mienk: van benne hook, aminek az `allowedEnvVars`-ában
+ * szerepel a `CLAUDESWITCHER_TOKEN`. Portfüggetlen, így egy portváltás után is felismerjük
+ * a régi telepítést.
+ */
+export function isOurHookEntry(entry: unknown): boolean {
+  if (!isPlainObject(entry) || !Array.isArray(entry.hooks)) return false
+  return entry.hooks.some(
+    (hook) =>
+      isPlainObject(hook) &&
+      Array.isArray(hook.allowedEnvVars) &&
+      hook.allowedEnvVars.includes(TOKEN_ENV),
+  )
+}
+
+/** Igaz, ha a status line a mi scriptünket futtatja. */
+export function isOurStatusLine(statusLine: unknown): boolean {
+  return (
+    isPlainObject(statusLine) &&
+    typeof statusLine.command === 'string' &&
+    /[\\/]packages[\\/]statusline[\\/]dist[\\/]main\.js/.test(statusLine.command)
+  )
+}
+
+function ourHookEntry(port: number, route: string): Record<string, unknown> {
   return {
     hooks: [
       {
         type: 'http',
-        url,
-        // Rövid timeout: ezek display-only hookok, nem tudnak és nem is
-        // akarnak blokkolni. A daemon lassulása ne fékezze a sessiont.
+        url: `http://127.0.0.1:${port}/hooks/${route}`,
+        // Rövid timeout: display-only hookok, nem tudnak és nem is akarnak blokkolni.
         timeout: 5,
-        headers: { Authorization: 'Bearer $CLAUDESWITCHER_TOKEN' },
-        allowedEnvVars: ['CLAUDESWITCHER_TOKEN'],
+        headers: { Authorization: `Bearer $${TOKEN_ENV}` },
+        allowedEnvVars: [TOKEN_ENV],
       },
     ],
   }
 }
 
 /**
- * Az M1 kizárólag nem blokkoló hookokat telepít. A PermissionRequest és az
- * Elicitation az M2 hatásköre — addig egyetlen döntést sem veszünk el a
- * Claude Code-tól, és a Remote Control is érintetlen marad.
+ * A telepítés tiszta transzformációja. Az M1 kizárólag nem blokkoló hookokat telepít — a
+ * PermissionRequest az M2 hatásköre, addig egyetlen döntést sem veszünk el.
+ *
+ * Semmit nem töröl és nem ír felül, ami nem a mienk: az idegen hookok megmaradnak az
+ * eseményük tömbjében, egy idegen vagy hibás alakú érték pedig ütközésként jelentődik.
  */
-export function buildHookSettings(options: IntegrationOptions): Record<string, unknown> {
-  const base = `http://127.0.0.1:${options.port}`
-  return {
-    hooks: {
-      Notification: [httpHook(`${base}/hooks/notification`)],
-      SessionStart: [httpHook(`${base}/hooks/lifecycle/start`)],
-      SessionEnd: [httpHook(`${base}/hooks/lifecycle/end`)],
-      Stop: [httpHook(`${base}/hooks/lifecycle/stop`)],
-    },
-    statusLine: {
-      type: 'command',
-      command: options.statusLineCommand,
-      padding: 0,
-    },
-    env: {
-      CLAUDESWITCHER_PORT: String(options.port),
-      CLAUDESWITCHER_TOKEN: options.token,
-    },
+export function applyIntegration(
+  existing: Record<string, unknown>,
+  options: IntegrationOptions,
+): IntegrationResult {
+  const settings: Record<string, unknown> = { ...existing }
+  const conflicts: string[] = []
+
+  const rawHooks = existing.hooks
+  if (rawHooks !== undefined && !isPlainObject(rawHooks)) {
+    conflicts.push('A "hooks" érték nem objektum, ezért a hookokat nem telepítettük.')
+  } else {
+    const hooks: Record<string, unknown> = isPlainObject(rawHooks) ? { ...rawHooks } : {}
+    for (const [event, route] of Object.entries(HOOK_ROUTES)) {
+      const current = hooks[event]
+      if (current !== undefined && !Array.isArray(current)) {
+        conflicts.push(`A "hooks.${event}" érték nem tömb, ezért ezt az eseményt kihagytuk.`)
+        continue
+      }
+      const list: unknown[] = Array.isArray(current) ? current : []
+      const foreign = list.filter((entry) => !isOurHookEntry(entry))
+      hooks[event] = [...foreign, ourHookEntry(options.port, route)]
+    }
+    settings.hooks = hooks
   }
+
+  if (existing.statusLine === undefined || isOurStatusLine(existing.statusLine)) {
+    settings.statusLine = { type: 'command', command: options.statusLineCommand, padding: 0 }
+  } else {
+    conflicts.push(
+      'Már van saját status line beállítva, ezt nem írtuk felül — a limitek így nem jelennek meg.',
+    )
+  }
+
+  const rawEnv = existing.env
+  if (rawEnv !== undefined && !isPlainObject(rawEnv)) {
+    conflicts.push('Az "env" érték nem objektum, ezért a portot és a tokent nem állítottuk be.')
+  } else {
+    settings.env = {
+      ...(isPlainObject(rawEnv) ? rawEnv : {}),
+      [PORT_ENV]: String(options.port),
+      [TOKEN_ENV]: options.token,
+    }
+  }
+
+  return { settings, conflicts }
 }
 
+/**
+ * Az eltávolítás tiszta transzformációja: csak a saját bejegyzéseinket veszi ki, és a
+ * kiürült `hooks` / `env` kulcsot is törli, így egy telepítés utáni eltávolítás pontosan az
+ * eredeti beállításokat adja vissza.
+ */
+export function removeIntegration(existing: Record<string, unknown>): Record<string, unknown> {
+  const settings: Record<string, unknown> = { ...existing }
+
+  const rawHooks = existing.hooks
+  if (isPlainObject(rawHooks)) {
+    const hooks: Record<string, unknown> = { ...rawHooks }
+    for (const event of Object.keys(HOOK_ROUTES)) {
+      const current = hooks[event]
+      if (!Array.isArray(current)) continue
+      const foreign = current.filter((entry) => !isOurHookEntry(entry))
+      if (foreign.length === 0) delete hooks[event]
+      else hooks[event] = foreign
+    }
+    if (Object.keys(hooks).length === 0) delete settings.hooks
+    else settings.hooks = hooks
+  }
+
+  if (isOurStatusLine(existing.statusLine)) delete settings.statusLine
+
+  const rawEnv = existing.env
+  if (isPlainObject(rawEnv)) {
+    const env: Record<string, unknown> = { ...rawEnv }
+    delete env[PORT_ENV]
+    delete env[TOKEN_ENV]
+    if (Object.keys(env).length === 0) delete settings.env
+    else settings.env = env
+  }
+
+  return settings
+}
+
+/** Telepít a felhasználó settings.json-jába. Az ütközések leírását adja vissza. */
 export async function installIntegration(
   claudeDir: string,
   options: IntegrationOptions,
-): Promise<void> {
-  await updateSettingsFile(userSettingsPath(claudeDir), buildHookSettings(options))
+): Promise<string[]> {
+  let conflicts: string[] = []
+  await transformSettingsFile(userSettingsPath(claudeDir), (existing) => {
+    const result = applyIntegration(existing, options)
+    conflicts = result.conflicts
+    return result.settings
+  })
+  return conflicts
+}
+
+/** Eltávolítja a saját bejegyzéseinket a felhasználó settings.json-jából. */
+export function uninstallIntegration(claudeDir: string): Promise<void> {
+  return transformSettingsFile(userSettingsPath(claudeDir), removeIntegration)
 }
 ```
 
-- [ ] **Step 4: Futtasd a teszteket**
-
-Run: `pnpm --filter @claudeswitcher/desktop test`
-Expected: PASS, minden teszt.
-
-- [ ] **Step 5: Hívd meg induláskor**
-
-`apps/desktop/src/main/index.ts` — a `daemon.refresh()` után:
-
-```ts
-  const statusLineCommand = `node "${path.join(dirname, '../../../../packages/statusline/dist/main.js')}"`
-  try {
-    await installIntegration(resolveClaudeDir(), {
-      port: daemon.port,
-      token: daemon.token,
-      statusLineCommand,
-    })
-  } catch (error) {
-    console.error('[setup] could not install integration', error)
-  }
-```
-
-És a tetejére: `import { installIntegration } from './setup.js'`
-
-- [ ] **Step 6: Kézi végpróba a valós rendszeren**
-
-Ez az M1 elfogadási tesztje.
-
-1. `pnpm build` a repo gyökerében.
-2. Készíts biztonsági másolatot: `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.bak"`
-3. Indítsd az appot: `pnpm --filter @claudeswitcher/desktop dev`
-4. Ellenőrizd a settings fájlt — a `model`, `effortLevel`, `enabledPlugins`,
-   `tui` és `permissions` kulcsoknak **változatlanul** ott kell lenniük, mellettük
-   az új `hooks`, `statusLine` és `env` kulcsokkal.
-5. Indíts egy **új** Claude Code sessiont (a hookok csak új sessionre érvényesek).
-   A statusLine-nak meg kell jelennie a TUI alján, és pár másodperc múlva a
-   limiteknek meg kell jelenniük az overlay alján.
-6. Kérj a sessiontől engedélyköteles műveletet (pl. `git status` helyett valami,
-   ami nincs az allow listádon). A tálcaikonnak át kell váltania, és a
-   `Ctrl+Alt+Space` overlayen a sessionnek a lista tetején kell lennie
-   `waiting` állapotban. **A VSCode-ban a natív prompt normálisan megjelenik** —
-   az M1 nem vesz el döntést.
-7. Enter az overlayen → a megfelelő VSCode ablak előtérbe kerül.
-
-Ha bármelyik lépés bukik, állítsd vissza a `settings.json.bak`-ot, mielőtt
-tovább keresed a hibát.
+Run: `pnpm --filter @claudeswitcher/desktop test && pnpm --filter @claudeswitcher/desktop check-types`
+Expected: PASS. Az eddigi 30 teszt mellett 3 token- és 13 setup-teszt, összesen 46.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add apps/desktop/src/main/setup.ts apps/desktop/src/main/setup.test.ts apps/desktop/src/main/index.ts
-git commit -m "feat(desktop): install non-blocking hooks and status line into user settings"
+git add packages/core/src/settings-writer.ts packages/core/src/settings-writer.test.ts packages/daemon/src/daemon.ts packages/daemon/src/daemon.test.ts apps/desktop/src/main/setup.ts apps/desktop/src/main/setup.test.ts apps/desktop/src/main/token.ts apps/desktop/src/main/token.test.ts
+git commit -m "feat: lossless, idempotent integration install and uninstall with a fixed daemon port"
 ```
+
+---
+
+### Task 16: desktop — telepítés a tálcamenüből, és az M1 elfogadási teszt
+
+**Files:**
+- Modify: `apps/desktop/src/main/tray.ts` — `onInstall` és `onUninstall` menüpontok
+- Modify: `apps/desktop/src/main/index.ts` — fix port, tartós token, telepítés-kezelők
+
+**Interfaces:**
+- Consumes: `DAEMON_PORT`, `installIntegration`, `uninstallIntegration`, `loadOrCreateToken` (Task 15)
+- Produces: `createTray(options: { onOpen; onQuit; onInstall; onUninstall })`
+
+**A telepítés kifejezett művelet, nem induláskori mellékhatás.** Az app indulása soha nem
+ír a felhasználó `settings.json`-jába. A telepítést és az eltávolítást a felhasználó
+indítja a tálcamenüből. Ez azt is jelenti, hogy a lenti korlátos indítás **nem módosíthatja**
+a valódi beállításokat — és ezt mérni is kell.
+
+- [ ] **Step 1: A tálcamenü két új pontja**
+
+`apps/desktop/src/main/tray.ts` — a `createTray` szignatúrája és a menü:
+
+```ts
+export function createTray(options: {
+  onOpen(): void
+  onQuit(): void
+  onInstall(): void
+  onUninstall(): void
+}): TrayHandle {
+```
+
+```ts
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Megnyitás', click: options.onOpen },
+      { type: 'separator' },
+      { label: 'Claude Code integráció telepítése', click: options.onInstall },
+      { label: 'Claude Code integráció eltávolítása', click: options.onUninstall },
+      { type: 'separator' },
+      { label: 'Kilépés', click: options.onQuit },
+    ]),
+  )
+```
+
+- [ ] **Step 2: Fix port, tartós token és a kezelők**
+
+`apps/desktop/src/main/index.ts` — új importok:
+`import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'` és
+`import { loadOrCreateToken } from './token.js'`.
+
+A `startDaemon` hívás cseréje az `app.whenReady()` elején:
+
+```ts
+  // A token tartós, a port rögzített: a telepített hookok és a statusLine ezeket kapják
+  // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
+  // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
+  const token = await loadOrCreateToken(app.getPath('userData'))
+  daemon = await startDaemon({
+    claudeDir: resolveClaudeDir(),
+    probe: createWin32ProcessProbe(),
+    port: DAEMON_PORT,
+    token,
+  })
+```
+
+A `createTray` hívás cseréje:
+
+```ts
+  // Csak fejlesztői build: abszolút útvonal ennek a repónak a lefordított statusline
+  // scriptjére. Ha a repó elköltözik vagy a dist törlődik, újra kell telepíteni.
+  const statusLineCommand = `node "${path.join(dirname, '../../../../packages/statusline/dist/main.js')}"`
+
+  const describeError = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error)
+
+  const tray = createTray({
+    onOpen: () => showOverlay(),
+    onQuit: () => app.quit(),
+    onInstall: () => {
+      installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token, statusLineCommand })
+        .then((conflicts) => {
+          void dialog.showMessageBox({
+            type: conflicts.length === 0 ? 'info' : 'warning',
+            title: 'ClaudeSwitcher',
+            message:
+              conflicts.length === 0
+                ? 'A Claude Code integráció telepítve.'
+                : 'A Claude Code integráció csak részben települt.',
+            detail: [
+              ...conflicts,
+              'Az újonnan indított Claude Code sessionök már jelentenek. A már futó sessionöket lehet, hogy újra kell indítani.',
+            ].join('\n\n'),
+          })
+        })
+        .catch((error: unknown) => {
+          dialog.showErrorBox('A telepítés nem sikerült', describeError(error))
+        })
+    },
+    onUninstall: () => {
+      uninstallIntegration(resolveClaudeDir())
+        .then(() => {
+          void dialog.showMessageBox({
+            type: 'info',
+            title: 'ClaudeSwitcher',
+            message: 'A Claude Code integráció eltávolítva.',
+          })
+        })
+        .catch((error: unknown) => {
+          dialog.showErrorBox('Az eltávolítás nem sikerült', describeError(error))
+        })
+    },
+  })
+```
+
+- [ ] **Step 3: Build, típusellenőrzés, és bizonyíték, hogy az indítás nem ír a beállításokba**
+
+Run: `pnpm build && pnpm --filter @claudeswitcher/desktop build && pnpm --filter @claudeswitcher/desktop check-types && pnpm test`
+Expected: mind exit 0; a teljes workspace tesztcsomag zöld.
+
+A korlátos indítás a Task 14 Step 8 mintájára (`ELECTRON_RUN_AS_NODE` törölve,
+`ELECTRON_ENABLE_LOGGING=1`), **előtte és utána** a valódi beállítások ujjlenyomatával:
+
+```powershell
+$settings = "$env:USERPROFILE\.claude\settings.json"
+$before = (Get-FileHash $settings).Hash
+$keysBefore = ((Get-Content $settings -Raw | ConvertFrom-Json).PSObject.Properties.Name) -join ','
+# ... korlátos indítás ...
+$after = (Get-FileHash $settings).Hash
+$keysAfter = ((Get-Content $settings -Raw | ConvertFrom-Json).PSObject.Properties.Name) -join ','
+"hash unchanged: $($before -eq $after)"
+"keys before: $keysBefore"
+"keys after:  $keysAfter"
+```
+
+Expected:
+- A három ismert sor megjelenik (`daemon on 127.0.0.1:47821, … fast focus available`,
+  `tray ready, hotkey … registered`, `[overlay] live updates connected`). **A port most
+  47821** — ha más, a fix port nem érvényesült.
+- **A hash változatlan, és nincs új `hooks`, `statusLine` vagy `env` kulcs.** Ez bizonyítja,
+  hogy az indulás nem telepít. Ha a hash mégis eltér, de a kulcsok azonosak, a Claude Code
+  írhatott a fájlba az indítás alatt — ezt jelenteni kell, nem feltételezni.
+- A tokenfájl létrejött az Electron `userData` könyvtárában (`%APPDATA%\@claudeswitcher\desktop\daemon-token`).
+
+Ablak nem jelenik meg. A telepítést egy ágens **nem** indítja el — az a felhasználó dolga
+a Step 5-ben.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/desktop/src/main/tray.ts apps/desktop/src/main/index.ts
+git commit -m "feat(desktop): install and uninstall the Claude Code integration from the tray menu"
+```
+
+- [ ] **Step 5: Az M1 elfogadási teszt — a felhasználó végzi**
+
+Ez az egyetlen lépés, ami a valódi `~/.claude/settings.json`-ba ír, és minden olyat
+ellenőriz, amit ágens nem tudott: billentyűket, ablakváltást, és a hookok élő bekötését.
+
+1. A repo gyökerében: `pnpm build`.
+2. Biztonsági másolat:
+   `Copy-Item "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.bak"`
+3. Indítsd az appot **egy önálló PowerShell ablakból** — ne a VSCode beépített
+   termináljából, mert az `ELECTRON_RUN_AS_NODE`-ot örökít, és az app nem indul el:
+   `pnpm --filter @claudeswitcher/desktop start`
+4. Tálcaikon → **Claude Code integráció telepítése**. Várt: „telepítve" üzenet, ütközés nélkül.
+5. A `settings.json`-ban a `permissions`, `model`, `enabledPlugins`, `effortLevel`,
+   `autoUpdatesChannel`, `switchModelsOnFlag` és `tui` **változatlan**, mellettük új
+   `hooks`, `statusLine` és `env`.
+6. Indíts egy **új** Claude Code sessiont. A TUI alján megjelenik a status line
+   (modell · mappa · ág · 5h % · 7d %), és pár másodpercen belül a limitek az overlay alján.
+7. Kérj a sessiontől egy engedélyköteles műveletet. A tálcaikon narancsra vált; az overlayben
+   (`Ctrl+Alt+Space`) a session legfelül, `●` jelöléssel. **A natív prompt a VSCode-ban
+   ugyanúgy megjelenik** — az M1 semmit nem vesz el.
+8. **Válaszolj a promptra a VSCode-ban, sima „Yes"-szel** (ne „don't ask again"-nel, mert az
+   a 13. pont összevetését elrontaná). Pár másodpercen belül a session **kilép a várakozásból**.
+   Ha nem, a `Stop` hook bekötése hibás.
+9. Kattints egy másik alkalmazásba (pl. böngésző), és onnan nyomd meg a `Ctrl+Alt+Space`-t.
+   Az overlay a kurzor melletti kijelzőn jelenik meg, **és a nyilak mozgatják a kijelölést**.
+   Ha az overlay látszik, de a nyilakra nem reagál, a Windows megtagadta tőle a fókuszt.
+10. Válassz egy sessiont, aminek a VSCode ablaka más ablakok mögött van, és nyomj Entert. Az
+    ablak előre jön, az overlay eltűnik.
+11. Nyitott overlay mellett érj el, hogy egy **másik** session várakozni kezdjen. A kijelölés
+    **azon a sessionön marad**, amit előtte kiválasztottál, akkor is, ha a lista átrendeződik.
+12. **Döntés a gyorsbillentyűről.** Írj be egy `@`-t (`AltGr+V`), és az AltGr-t még nyomva
+    tartva üss szóközt. Ha az overlay felugrik és a szóköz elvész, döntsd el, cseréljük-e
+    az `OVERLAY_HOTKEY`-t.
+13. Tálcaikon → **Claude Code integráció eltávolítása**, majd hasonlítsd össze a mentéssel:
+    ```powershell
+    node -e "const fs=require('fs'),u=require('util');const r=p=>JSON.parse(fs.readFileSync(p,'utf8'));console.log(u.isDeepStrictEqual(r(process.argv[1]),r(process.argv[2]))?'EQUAL':'DIFFERENT')" "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.bak"
+    ```
+    Várt: `EQUAL`.
+
+Ha bármelyik lépés elbukik, állítsd vissza a mentést, mielőtt a hibát keresnéd:
+`Copy-Item "$env:USERPROFILE\.claude\settings.json.bak" "$env:USERPROFILE\.claude\settings.json" -Force`
 
 ---
 
 ## M1 elfogadási kritériumok
 
+Gépi ellenőrzések (ágens végzi):
+
 - [ ] `pnpm test` zöld a repo gyökerében.
-- [ ] `pnpm check-types` hibátlan.
+- [ ] `pnpm check-types` és `pnpm build` hibátlan.
+- [ ] A korlátos indítás három sora megjelenik: `daemon on 127.0.0.1:47821, N session(s)
+      discovered, fast focus available`, `tray ready, hotkey … registered`, és
+      `[overlay] live updates connected`.
+- [ ] Az `N` egyezik a `~/.claude/sessions/*.json` fájlok valódi számával.
+- [ ] Az indítás **nem** módosítja a `~/.claude/settings.json`-t.
+
+Emberi ellenőrzések (a Task 16 Step 5 elfogadási tesztje):
+
+- [ ] A telepítés után a `settings.json` minden korábbi kulcsa érintetlen.
+- [ ] A status line megjelenik egy új sessionben, és a limitek az overlay alján.
 - [ ] A tálcaikon a várakozó sessionök számát tükrözi.
-- [ ] `Ctrl+Alt+Space` egy másodpercen belül megmutatja az összes élő sessiont.
-- [ ] Enter a helyes VSCode ablakra ugrik, 100 ms alatt.
-- [ ] Az 5 órás és heti limit látszik, a reset idejével.
-- [ ] A `~/.claude/settings.json` minden korábbi kulcsa érintetlen.
+- [ ] `Ctrl+Alt+Space` megmutatja az élő sessionöket, **és a nyilak működnek** akkor is,
+      ha egy másik alkalmazásból nyitod.
+- [ ] Enter a helyes VSCode ablakra ugrik, akkor is, ha az más ablakok mögött van.
+- [ ] A kijelölés a kiválasztott sessionön marad, ha a lista közben átrendeződik.
 - [ ] Egyetlen permission prompt sem tűnt el a VSCode-ból — az M1 nem vesz el döntést.
+- [ ] A VSCode-ban megválaszolt prompt után a session kilép a várakozásból.
+- [ ] Az eltávolítás után a `settings.json` a mentéssel megegyezik.
+- [ ] Döntés a `Ctrl+Alt+Space` és az `AltGr+Space` ütközéséről.
 
 ## Szándékosan M2-be halasztva a spec §7-ből
 
