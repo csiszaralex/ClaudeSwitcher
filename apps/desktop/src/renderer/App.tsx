@@ -12,7 +12,7 @@ const STATUS_LABEL = {
 } as const
 
 export function App(): JSX.Element {
-  const { sessions, rateLimits } = useDaemonState()
+  const { sessions, rateLimits, connected } = useDaemonState()
   // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
   // együtt mozog. Lásd a selection.ts dokumentációját.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -47,7 +47,13 @@ export function App(): JSX.Element {
   return (
     <div className="overlay">
       <ul className="sessions">
-        {sessions.length === 0 && <li className="empty">Nincs futó session</li>}
+        {sessions.length === 0 && (
+          // „Nincs session" és „nem érjük el a daemont" nem ugyanaz — a felhasználónak
+          // látnia kell, melyikről van szó.
+          <li className="empty">
+            {connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
+          </li>
+        )}
         {sessions.map((view, index) => (
           <li
             key={view.sessionId}
@@ -88,6 +94,7 @@ export function App(): JSX.Element {
         {rateLimits.five_hour === undefined && rateLimits.seven_day === undefined && (
           <span className="muted">Limitadat még nincs</span>
         )}
+        {!connected && <span className="muted">kapcsolat megszakadt — újracsatlakozás…</span>}
       </div>
     </div>
   )

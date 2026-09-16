@@ -57,4 +57,12 @@ describe('summarize', () => {
   it('falls back when there is nothing to say', () => {
     expect(summarize({ status: 'idle', activity: {} })).toBe('—')
   })
+
+  it('survives a session whose activity is missing entirely', () => {
+    // A daemon a típus szerint mindig ad `activity`-t, de egy hibás üzenet nem. Ez
+    // renderelés közben dobna, és az egész overlay eltűnne.
+    const broken = { status: 'idle' } as unknown as Parameters<typeof summarize>[0]
+    expect(() => summarize(broken)).not.toThrow()
+    expect(summarize(broken)).toBe('—')
+  })
 })

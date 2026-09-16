@@ -24,11 +24,14 @@ export function summarize(view: {
   activity: SessionActivity
   notificationText?: string
 }): string {
+  // Az `activity` a típus szerint kötelező, de a daemon üzenete futásidőben bármi lehet.
+  // Egy hiányzó mező itt renderelési hibát dobna, ami az EGÉSZ overlayt leszedné — ezért
+  // itt is védekezünk, nem csak az ErrorBoundaryben.
   const raw =
     view.status === 'waiting' && view.notificationText !== undefined ? view.notificationText
-    : view.status === 'working' && view.activity.runningTool !== undefined
+    : view.status === 'working' && view.activity?.runningTool !== undefined
       ? `${view.activity.runningTool} fut`
-    : view.activity.lastAssistantText ?? '—'
+    : view.activity?.lastAssistantText ?? '—'
 
   const flat = raw.replace(/\s+/g, ' ').trim()
   return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat

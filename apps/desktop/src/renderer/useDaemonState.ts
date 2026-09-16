@@ -12,28 +12,58 @@ declare global {
   }
 }
 
-/** Kezdeti állapot IPC-n, utána élő frissítés a daemon WS hubjáról. */
-export function useDaemonState(): DaemonState {
+export interface OverlayState extends DaemonState {
+  /** Hamis, amíg nincs élő kapcsolat a daemonnal — a lista ilyenkor állott lehet. */
+  connected: boolean
+}
+
+/**
+ * Várakozás a hányadik újracsatlakozási próbálkozás előtt. Negyed másodpercről indul, és
+ * tíz másodpercnél megáll: egy alvásból ébredt gép gyorsan visszakapcsolódik, egy tartósan
+ * halott daemont viszont nem ostromlunk.
+ */
+export function retryDelayMs(attempt: number): number {
+  return Math.min(10_000, 250 * 2 ** Math.max(0, attempt - 1))
+}
+
+/** Élő állapot a daemon WebSocket hubjáról, újracsatlakozással. */
+export function useDaemonState(): OverlayState {
   const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {} })
+  const [connected, setConnected] = useState(false)
 
   useEffect(() => {
     let socket: WebSocket | undefined
     let closed = false
+    let attempt = 0
+    let retry: ReturnType<typeof setTimeout> | undefined
+    // Ha már érkezett élő üzenet, egy később befutó IPC-lekérés nem írhatja felül: a két
+    // csatorna külön utazik, és nincs köztük sorrendi garancia.
+    let receivedLive = false
+
+    const scheduleRetry = (): void => {
+      if (closed) return
+      attempt += 1
+      retry = setTimeout(() => void connect(), retryDelayMs(attempt))
+    }
 
     const connect = async (): Promise<void> => {
-      setState(await window.claudeswitcher.state())
+      if (closed) return
       const { port, token } = await window.claudeswitcher.connection()
       if (closed) return
 
-      socket = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+      const next = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+      socket = next
 
-      socket.onopen = () => {
-        // Újralekérés, amikor a kapcsolat már él. A kezdeti lekérés és a megnyílás
-        // között érkezett változás különben elveszne — és mivel a daemon az azonos
-        // pillanatképeket nem küldi újra, az overlay addig állott maradna, amíg valami
-        // ÚJRA meg nem változik.
+      next.onopen = () => {
+        attempt = 0
+        if (closed) return
+        setConnected(true)
+        // Az állapotot szándékosan CSAK a kapcsolat megnyílása után kérjük le. Egy
+        // megnyílás előtti lekérés és a socket élete között érkező változás elveszne, és
+        // mivel a daemon az azonos pillanatképeket nem küldi újra, az overlay addig
+        // állott maradna, amíg valami ÚJRA meg nem változik.
         void window.claudeswitcher.state().then((fresh) => {
-          if (!closed) setState(fresh)
+          if (!closed && !receivedLive) setState(fresh)
         })
         // A korlátos indítás ezt a sort keresi: a rejtett overlay is betölti az oldalát,
         // így ez bizonyítja, hogy a React lefutott, az IPC válaszolt, és a WebSocket a
@@ -41,22 +71,40 @@ export function useDaemonState(): DaemonState {
         console.info('[overlay] live updates connected')
       }
 
-      socket.onmessage = (event) => {
-        const next = parseStateMessage(event.data)
-        if (next !== undefined) setState(next)
+      next.onmessage = (event) => {
+        const parsed = parseStateMessage(event.data)
+        if (parsed === undefined || closed) return
+        receivedLive = true
+        setState(parsed)
+      }
+
+      next.onclose = () => {
+        if (closed) return
+        // Kapcsolatvesztés után az overlay némán állott maradna — egy monitorozó
+        // eszközben ez ugyanolyan rossz, mint a hibás adat. Újracsatlakozunk, és addig
+        // a felhasználó is látja, hogy nincs élő kapcsolat.
+        setConnected(false)
+        receivedLive = false
+        scheduleRetry()
+      }
+
+      next.onerror = () => {
+        // A `close` mindig követi; az újracsatlakozást ott ütemezzük.
+        next.close()
       }
     }
 
     connect().catch((error: unknown) => {
-      // Elkapatlan elutasítás helyett látható hiba — a korlátos indítás ezt is figyeli.
       console.error('[overlay] could not reach the daemon', error)
+      scheduleRetry()
     })
 
     return () => {
       closed = true
+      if (retry !== undefined) clearTimeout(retry)
       socket?.close()
     }
   }, [])
 
-  return state
+  return { ...state, connected }
 }
