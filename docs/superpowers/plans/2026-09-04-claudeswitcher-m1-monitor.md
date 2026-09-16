@@ -4287,6 +4287,14 @@ describe('summarize', () => {
   it('falls back when there is nothing to say', () => {
     expect(summarize({ status: 'idle', activity: {} })).toBe('—')
   })
+
+  it('survives a session whose activity is missing entirely', () => {
+    // A daemon a típus szerint mindig ad `activity`-t, de egy hibás üzenet nem. Ez
+    // renderelés közben dobna, és az egész overlay eltűnne.
+    const broken = { status: 'idle' } as unknown as Parameters<typeof summarize>[0]
+    expect(() => summarize(broken)).not.toThrow()
+    expect(summarize(broken)).toBe('—')
+  })
 })
 ```
 
@@ -4332,11 +4340,14 @@ export function summarize(view: {
   activity: SessionActivity
   notificationText?: string
 }): string {
+  // Az `activity` a típus szerint kötelező, de a daemon üzenete futásidőben bármi lehet.
+  // Egy hiányzó mező itt renderelési hibát dobna, ami az EGÉSZ overlayt leszedné — ezért
+  // itt is védekezünk, nem csak az ErrorBoundaryben.
   const raw =
     view.status === 'waiting' && view.notificationText !== undefined ? view.notificationText
-    : view.status === 'working' && view.activity.runningTool !== undefined
+    : view.status === 'working' && view.activity?.runningTool !== undefined
       ? `${view.activity.runningTool} fut`
-    : view.activity.lastAssistantText ?? '—'
+    : view.activity?.lastAssistantText ?? '—'
 
   const flat = raw.replace(/\s+/g, ' ').trim()
   return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat
@@ -4486,8 +4497,8 @@ export function parseStateMessage(data: unknown): DaemonState | undefined {
 ```
 
 Run: `pnpm --filter @claudeswitcher/desktop test`
-Expected: PASS. A `format` (11), `selection` (7) és `state-message` (3) mellett a korábbi
-`focus-window` (7) és `tray-icons` (2) — összesen 30 teszt.
+Expected: PASS. A `format` (12), `selection` (7) és `state-message` (3) mellett a korábbi
+`focus-window` (7) és `tray-icons` (2), plusz a `useDaemonState` (2) — összesen 33 teszt.
 
 - [ ] **Step 5: Írd meg az állapot-hookot**
 
@@ -4507,28 +4518,58 @@ declare global {
   }
 }
 
-/** Kezdeti állapot IPC-n, utána élő frissítés a daemon WS hubjáról. */
-export function useDaemonState(): DaemonState {
+export interface OverlayState extends DaemonState {
+  /** Hamis, amíg nincs élő kapcsolat a daemonnal — a lista ilyenkor állott lehet. */
+  connected: boolean
+}
+
+/**
+ * Várakozás a hányadik újracsatlakozási próbálkozás előtt. Negyed másodpercről indul, és
+ * tíz másodpercnél megáll: egy alvásból ébredt gép gyorsan visszakapcsolódik, egy tartósan
+ * halott daemont viszont nem ostromlunk.
+ */
+export function retryDelayMs(attempt: number): number {
+  return Math.min(10_000, 250 * 2 ** Math.max(0, attempt - 1))
+}
+
+/** Élő állapot a daemon WebSocket hubjáról, újracsatlakozással. */
+export function useDaemonState(): OverlayState {
   const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {} })
+  const [connected, setConnected] = useState(false)
 
   useEffect(() => {
     let socket: WebSocket | undefined
     let closed = false
+    let attempt = 0
+    let retry: ReturnType<typeof setTimeout> | undefined
+    // Ha már érkezett élő üzenet, egy később befutó IPC-lekérés nem írhatja felül: a két
+    // csatorna külön utazik, és nincs köztük sorrendi garancia.
+    let receivedLive = false
+
+    const scheduleRetry = (): void => {
+      if (closed) return
+      attempt += 1
+      retry = setTimeout(() => void connect(), retryDelayMs(attempt))
+    }
 
     const connect = async (): Promise<void> => {
-      setState(await window.claudeswitcher.state())
+      if (closed) return
       const { port, token } = await window.claudeswitcher.connection()
       if (closed) return
 
-      socket = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+      const next = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+      socket = next
 
-      socket.onopen = () => {
-        // Újralekérés, amikor a kapcsolat már él. A kezdeti lekérés és a megnyílás
-        // között érkezett változás különben elveszne — és mivel a daemon az azonos
-        // pillanatképeket nem küldi újra, az overlay addig állott maradna, amíg valami
-        // ÚJRA meg nem változik.
+      next.onopen = () => {
+        attempt = 0
+        if (closed) return
+        setConnected(true)
+        // Az állapotot szándékosan CSAK a kapcsolat megnyílása után kérjük le. Egy
+        // megnyílás előtti lekérés és a socket élete között érkező változás elveszne, és
+        // mivel a daemon az azonos pillanatképeket nem küldi újra, az overlay addig
+        // állott maradna, amíg valami ÚJRA meg nem változik.
         void window.claudeswitcher.state().then((fresh) => {
-          if (!closed) setState(fresh)
+          if (!closed && !receivedLive) setState(fresh)
         })
         // A korlátos indítás ezt a sort keresi: a rejtett overlay is betölti az oldalát,
         // így ez bizonyítja, hogy a React lefutott, az IPC válaszolt, és a WebSocket a
@@ -4536,24 +4577,42 @@ export function useDaemonState(): DaemonState {
         console.info('[overlay] live updates connected')
       }
 
-      socket.onmessage = (event) => {
-        const next = parseStateMessage(event.data)
-        if (next !== undefined) setState(next)
+      next.onmessage = (event) => {
+        const parsed = parseStateMessage(event.data)
+        if (parsed === undefined || closed) return
+        receivedLive = true
+        setState(parsed)
+      }
+
+      next.onclose = () => {
+        if (closed) return
+        // Kapcsolatvesztés után az overlay némán állott maradna — egy monitorozó
+        // eszközben ez ugyanolyan rossz, mint a hibás adat. Újracsatlakozunk, és addig
+        // a felhasználó is látja, hogy nincs élő kapcsolat.
+        setConnected(false)
+        receivedLive = false
+        scheduleRetry()
+      }
+
+      next.onerror = () => {
+        // A `close` mindig követi; az újracsatlakozást ott ütemezzük.
+        next.close()
       }
     }
 
     connect().catch((error: unknown) => {
-      // Elkapatlan elutasítás helyett látható hiba — a korlátos indítás ezt is figyeli.
       console.error('[overlay] could not reach the daemon', error)
+      scheduleRetry()
     })
 
     return () => {
       closed = true
+      if (retry !== undefined) clearTimeout(retry)
       socket?.close()
     }
   }, [])
 
-  return state
+  return { ...state, connected }
 }
 ```
 
@@ -4575,7 +4634,7 @@ const STATUS_LABEL = {
 } as const
 
 export function App(): JSX.Element {
-  const { sessions, rateLimits } = useDaemonState()
+  const { sessions, rateLimits, connected } = useDaemonState()
   // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
   // együtt mozog. Lásd a selection.ts dokumentációját.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -4610,7 +4669,13 @@ export function App(): JSX.Element {
   return (
     <div className="overlay">
       <ul className="sessions">
-        {sessions.length === 0 && <li className="empty">Nincs futó session</li>}
+        {sessions.length === 0 && (
+          // „Nincs session" és „nem érjük el a daemont" nem ugyanaz — a felhasználónak
+          // látnia kell, melyikről van szó.
+          <li className="empty">
+            {connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
+          </li>
+        )}
         {sessions.map((view, index) => (
           <li
             key={view.sessionId}
@@ -4651,6 +4716,7 @@ export function App(): JSX.Element {
         {rateLimits.five_hour === undefined && rateLimits.seven_day === undefined && (
           <span className="muted">Limitadat még nincs</span>
         )}
+        {!connected && <span className="muted">kapcsolat megszakadt — újracsatlakozás…</span>}
       </div>
     </div>
   )
@@ -4704,14 +4770,76 @@ body {
 .muted { color: #6b6a67; }
 ```
 
+- [ ] **Step 6b: Írd meg az újracsatlakozási késleltetés tesztjét és az ErrorBoundaryt**
+
+`apps/desktop/src/renderer/useDaemonState.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest'
+import { retryDelayMs } from './useDaemonState.js'
+
+describe('retryDelayMs', () => {
+  it('backs off exponentially from a quarter second', () => {
+    expect(retryDelayMs(1)).toBe(250)
+    expect(retryDelayMs(2)).toBe(500)
+    expect(retryDelayMs(3)).toBe(1000)
+  })
+
+  it('caps the wait at ten seconds so a dead daemon is not hammered', () => {
+    expect(retryDelayMs(99)).toBe(10_000)
+  })
+})
+```
+
+`apps/desktop/src/renderer/ErrorBoundary.tsx`:
+```tsx
+import { Component, type ErrorInfo, type ReactNode } from 'react'
+
+interface Props {
+  children: ReactNode
+}
+
+interface State {
+  message: string | undefined
+}
+
+/**
+ * Egy renderelési hiba különben az egész overlayt leszedné, és üres ablakot hagyna. Egy
+ * monitorozó eszközben ez a legrosszabb kimenet: pont akkor nem mutat semmit, amikor
+ * ránézel — és úgy néz ki, mintha nem lenne futó session.
+ */
+export class ErrorBoundary extends Component<Props, State> {
+  state: State = { message: undefined }
+
+  static getDerivedStateFromError(error: unknown): State {
+    return { message: error instanceof Error ? error.message : String(error) }
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo): void {
+    console.error('[overlay] render failed', error, info.componentStack)
+  }
+
+  render(): ReactNode {
+    if (this.state.message !== undefined) {
+      return <div className="empty">Az overlay hibába futott: {this.state.message}</div>
+    }
+    return this.props.children
+  }
+}
+```
+
 - [ ] **Step 7: Kösd be a renderert, és adj neki Content-Security-Policy-t**
 
 `apps/desktop/src/renderer/main.tsx`:
 ```tsx
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
+import { ErrorBoundary } from './ErrorBoundary.js'
 
-createRoot(document.getElementById('root')!).render(<App />)
+createRoot(document.getElementById('root')!).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>,
+)
 ```
 
 `apps/desktop/src/renderer/index.html` — a Task 11 óta nincs CSP-je, amire az Electron
