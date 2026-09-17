@@ -2,7 +2,7 @@ import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { mergeSettings, updateSettingsFile } from './settings-writer.js'
+import { mergeSettings, transformSettingsFile, updateSettingsFile } from './settings-writer.js'
 
 describe('mergeSettings', () => {
   it('preserves unrelated keys', () => {
@@ -116,5 +116,59 @@ describe('updateSettingsFile', () => {
     const file = path.join(dir, 'settings.json')
     await updateSettingsFile(file, { model: 'opus' })
     expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+})
+
+describe('transformSettingsFile', () => {
+  it('passes the parsed file to the transform and writes its result', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ keep: 1, drop: 2 }))
+
+    await transformSettingsFile(file, (existing) => {
+      const { drop, ...rest } = existing
+      return rest
+    })
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ keep: 1 })
+  })
+
+  it('can remove nested keys, which a merge patch cannot express', async () => {
+    // Ezért kell egyáltalán: az eltávolítás kulcsokat töröl, a mergeSettings csak ad.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ env: { A: '1', B: '2' } }))
+    await transformSettingsFile(file, () => ({ env: { A: '1' } }))
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ env: { A: '1' } })
+  })
+
+  it('refuses to write an unparseable file and never calls the transform', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, '{ broken')
+    let called = false
+    await expect(
+      transformSettingsFile(file, (existing) => {
+        called = true
+        return existing
+      }),
+    ).rejects.toThrow(/parse/i)
+    expect(called).toBe(false)
+    expect(await readFile(file, 'utf8')).toBe('{ broken')
+  })
+
+  it('shares one write queue with updateSettingsFile', async () => {
+    // Közös sor nélkül egy telepítés és egy párhuzamos merge egymás írását dobná el.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({}))
+
+    await Promise.all([
+      updateSettingsFile(file, { a: 1 }),
+      transformSettingsFile(file, (existing) => ({ ...existing, b: 2 })),
+      updateSettingsFile(file, { c: 3 }),
+    ])
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ a: 1, b: 2, c: 3 })
   })
 })

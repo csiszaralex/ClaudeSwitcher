@@ -124,4 +124,24 @@ describe('startDaemon', () => {
     })
     expect(running.state().rateLimits.five_hour?.used_percentage).toBe(23.5)
   })
+
+  it('uses the token it is given instead of generating one', async () => {
+    const token = 'a'.repeat(32)
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0, token })
+    expect(running.token).toBe(token)
+  })
+
+  it('binds the port it is given, and fails loudly when that port is taken', async () => {
+    // A desktop fix portot ad, hogy a telepített hookok az újraindítás után is élők
+    // maradjanak. Egy foglalt port ezért indulási HIBA, nem csendes átállás egy másik
+    // portra — az átállás pont a telepített hookokat tenné halottá.
+    const first = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    try {
+      await expect(
+        startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0, port: first.port }),
+      ).rejects.toThrow(/EADDRINUSE/)
+    } finally {
+      await first.stop()
+    }
+  })
 })

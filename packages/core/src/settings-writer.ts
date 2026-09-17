@@ -43,30 +43,44 @@ export function mergeSettings(
  */
 const writeQueues = new Map<string, Promise<unknown>>()
 
-export function updateSettingsFile(
+/**
+ * Atomikus, sorba állított, parse-biztos olvasás–transzformálás–írás. A `transform` a már
+ * beolvasott objektumot kapja, és a kiírandót adja vissza.
+ *
+ * Azért kell a merge-patch mellé, mert az integráció eltávolítása kulcsokat töröl, amit
+ * egy merge-patch nem tud kifejezni. Az `updateSettingsFile`-lal azonos sort használ, így
+ * a kettő ugyanarra a fájlra nem tudja egymás írását eldobni.
+ */
+export function transformSettingsFile(
   filePath: string,
-  patch: Record<string, unknown>,
+  transform: (existing: Record<string, unknown>) => Record<string, unknown>,
 ): Promise<void> {
   const key = path.resolve(filePath)
   const previous = writeQueues.get(key) ?? Promise.resolve()
   // A következő hívónak arra kell várnia, hogy a fájlművelet *befejeződjön*, a
   // sikerére nem — ezért fut a lánc hiba után is tovább.
   const next = previous.then(
-    () => writeMerged(filePath, patch),
-    () => writeMerged(filePath, patch),
+    () => writeTransformed(filePath, transform),
+    () => writeTransformed(filePath, transform),
   )
   writeQueues.set(key, next.catch(() => undefined))
   return next
 }
 
-/**
- * Atomikus merge-írás: temp fájl + rename. Parse-olhatatlan meglévő fájlnál
- * dob, és nem ír — inkább ne módosítsunk semmit, mint hogy elveszítsük a
- * felhasználó beállításait.
- */
-async function writeMerged(
+export function updateSettingsFile(
   filePath: string,
   patch: Record<string, unknown>,
+): Promise<void> {
+  return transformSettingsFile(filePath, (existing) => mergeSettings(existing, patch))
+}
+
+/**
+ * Parse-olhatatlan meglévő fájlnál dob, és NEM hívja a transzformációt és nem ír — inkább
+ * ne módosítsunk semmit, mint hogy elveszítsük a felhasználó beállításait.
+ */
+async function writeTransformed(
+  filePath: string,
+  transform: (existing: Record<string, unknown>) => Record<string, unknown>,
 ): Promise<void> {
   let existing: Record<string, unknown> = {}
 
@@ -90,15 +104,14 @@ async function writeMerged(
     existing = parsed
   }
 
-  const merged = mergeSettings(existing, patch)
-  // Egyedi név processzenként ÉS híváson belül: a pid önmagában nem elég, mert
-  // egy processzen belüli két írás ugyanarra a temp útvonalra esne.
+  const next = transform(existing)
+  // Egyedi név processzenként ÉS híváson belül: a pid önmagában nem elég.
   const temp = path.join(
     path.dirname(filePath),
     `.${path.basename(filePath)}.${randomUUID()}.tmp`,
   )
   try {
-    await writeFile(temp, JSON.stringify(merged, null, 2) + '\n', 'utf8')
+    await writeFile(temp, JSON.stringify(next, null, 2) + '\n', 'utf8')
     await rename(temp, filePath)
   } catch (error) {
     // Ne hagyjunk törmeléket a ~/.claude/-ban. A célfájl érintetlen — ez a lényeg.

@@ -27,11 +27,18 @@ export interface DaemonOptions {
   probe: ProcessProbe
   /** Poll periódus ms-ben. 0 kikapcsolja (tesztekhez). */
   pollMs?: number
+  /**
+   * A port, amire a daemon köt. 0: ideiglenes (tesztekhez). A desktop fix portot ad, mert a
+   * telepített hookok és a statusLine egy rögzített URL-t kapnak a settings.json-ban.
+   */
+  port?: number
+  /** A daemon tokenje. Ha nincs megadva, véletlen. A desktop tartós tokent ad, ugyanezért. */
+  token?: string
 }
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
-  const { claudeDir, probe, pollMs = 3000 } = options
-  const token = randomBytes(16).toString('hex')
+  const { claudeDir, probe, pollMs = 3000, port: requestedPort = 0 } = options
+  const token = options.token ?? randomBytes(16).toString('hex')
 
   const sessions = new SessionStore()
   const limits = new RateLimitStore()
@@ -48,8 +55,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     },
   })
 
-  const server: ServerType = await new Promise((resolve) => {
-    const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 }, () => resolve(s))
+  const server: ServerType = await new Promise((resolve, reject) => {
+    const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: requestedPort }, () => resolve(s))
+    // Foglalt porton a listen `error` eseményt emittál. Kezelő nélkül ez elkapatlan kivétel
+    // lenne; így a startDaemon elutasít, a desktop pedig indulási hibadialógust mutat.
+    s.on('error', reject)
   })
   const port = (server.address() as AddressInfo).port
   // A @hono/node-server `serve()` egy node:http Servert ad vissza a
