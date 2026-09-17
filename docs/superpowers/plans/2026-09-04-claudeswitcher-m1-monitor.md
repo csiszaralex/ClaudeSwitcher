@@ -5580,7 +5580,10 @@ export function uninstallIntegration(claudeDir: string): Promise<void> {
 ```
 
 Run: `pnpm --filter @claudeswitcher/desktop test && pnpm --filter @claudeswitcher/desktop check-types`
-Expected: PASS. Az eddigi 30 teszt mellett 3 token- és 13 setup-teszt, összesen 46.
+Expected: PASS. Az eddigi **33** desktop teszt mellett 3 token- és 13 setup-teszt, összesen
+**49**. (A terv korábban 46-ot mondott, mert még a Task 14 javítási körei előtt íródott: azok
+adták a `useDaemonState.test.ts` 2 tesztjét és a `format.test.ts` egy új esetét. Ha 49-től
+eltérőt látsz, azt jelentsd — ne igazíts hozzá semmit a számhoz.)
 
 - [ ] **Step 7: Commit**
 
@@ -5652,6 +5655,14 @@ A `startDaemon` hívás cseréje az `app.whenReady()` elején:
     token,
   })
 ```
+
+**Invariáns: a token EGYSZER töltődik be, és ugyanaz a `token` változó megy a `startDaemon`-nak,
+az `installIntegration`-nek és — a `daemon.token`-en keresztül — a renderernek.** Ne olvasd
+újra a tokenfájlt hívásonként, és ne generálj újat sehol. Azért fontos, mert a `hub.ts` a
+WebSocket-upgrade *után* ellenőrzi a tokent (`close(1008)`), a renderer pedig minden
+újracsatlakozási kísérletnél újra lekéri a `{port, token}` párt: ha a renderer valaha a
+daemonétól eltérő tokent kapna, az `onopen` → `attempt = 0` → `onclose` ciklus másodpercenként
+négy kísérlettel, végtelenül pörögne. Egyetlen forrásból származó tokennel ez elérhetetlen.
 
 A `createTray` hívás cseréje:
 
@@ -5762,7 +5773,7 @@ ellenőriz, amit ágens nem tudott: billentyűket, ablakváltást, és a hookok 
    (`Ctrl+Alt+Space`) a session legfelül, `●` jelöléssel. **A natív prompt a VSCode-ban
    ugyanúgy megjelenik** — az M1 semmit nem vesz el.
 8. **Válaszolj a promptra a VSCode-ban, sima „Yes"-szel** (ne „don't ask again"-nel, mert az
-   a 13. pont összevetését elrontaná). Pár másodpercen belül a session **kilép a várakozásból**.
+   a 14. pont összevetését elrontaná). Pár másodpercen belül a session **kilép a várakozásból**.
    Ha nem, a `Stop` hook bekötése hibás.
 9. Kattints egy másik alkalmazásba (pl. böngésző), és onnan nyomd meg a `Ctrl+Alt+Space`-t.
    Az overlay a kurzor melletti kijelzőn jelenik meg, **és a nyilak mozgatják a kijelölést**.
@@ -5771,10 +5782,20 @@ ellenőriz, amit ágens nem tudott: billentyűket, ablakváltást, és a hookok 
     ablak előre jön, az overlay eltűnik.
 11. Nyitott overlay mellett érj el, hogy egy **másik** session várakozni kezdjen. A kijelölés
     **azon a sessionön marad**, amit előtte kiválasztottál, akkor is, ha a lista átrendeződik.
-12. **Döntés a gyorsbillentyűről.** Írj be egy `@`-t (`AltGr+V`), és az AltGr-t még nyomva
+12. **Alvás és ébredés.** Altasd el a gépet (vagy csukd le a laptopot), majd ébreszd fel, és
+    nyisd meg az overlayt. A listának **élőnek kell lennie**: indíts egy új sessiont vagy
+    zárj be egyet, és az overlaynek pár másodpercen belül követnie kell.
+    Miért ez a lépés: a felülvizsgálat kimutatta, hogy a WebSocketet semmi nem pingeli, tehát
+    egy félig nyitva maradt kapcsolat esetén az overlay „kapcsolódva" állapotban ragadna egy
+    néma, elavult listával — épp az alvás/ébredés eset, amire az újracsatlakozás készült. A
+    kapcsolat egyetlen Electron-processzen belül, 127.0.0.1-en fut, ezért ezt nem tartom
+    elérhetőnek — de ez érvelés, nem mérés, és ez a lépés méri le. Ha a lista megáll, vagy a
+    lábléc „kapcsolat megszakadt — újracsatlakozás…" feliratban ragad, azt jelentsd: a javítás
+    egy periodikus ping, nem nagy munka.
+13. **Döntés a gyorsbillentyűről.** Írj be egy `@`-t (`AltGr+V`), és az AltGr-t még nyomva
     tartva üss szóközt. Ha az overlay felugrik és a szóköz elvész, döntsd el, cseréljük-e
     az `OVERLAY_HOTKEY`-t.
-13. Tálcaikon → **Claude Code integráció eltávolítása**, majd hasonlítsd össze a mentéssel:
+14. Tálcaikon → **Claude Code integráció eltávolítása**, majd hasonlítsd össze a mentéssel:
     ```powershell
     node -e "const fs=require('fs'),u=require('util');const r=p=>JSON.parse(fs.readFileSync(p,'utf8'));console.log(u.isDeepStrictEqual(r(process.argv[1]),r(process.argv[2]))?'EQUAL':'DIFFERENT')" "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.bak"
     ```
