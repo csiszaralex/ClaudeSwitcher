@@ -5592,6 +5592,210 @@ git add packages/core/src/settings-writer.ts packages/core/src/settings-writer.t
 git commit -m "feat: lossless, idempotent integration install and uninstall with a fixed daemon port"
 ```
 
+#### Task 15 — javítási kör 1
+
+A felülvizsgálat két Important hibát talált, és mindkettő ugyanabból ered: **a „ez a mienk"
+felismerés az egyik oldalon túl tág, a másikon túl durva.** A hookoknál a jelölő
+(`CLAUDESWITCHER_TOKEN`) egyedi, de a *granularitás* rossz; a status line-nál a granularitás
+jó, de a *jelölő* nem azonosít. A core és a daemon változásai minden próbát kiálltak — ez a
+kör csak a `setup.ts`-t és a tesztjeit érinti.
+
+Csak ez a két fájl változik: `apps/desktop/src/main/setup.ts`, `apps/desktop/src/main/setup.test.ts`.
+
+**1. hiba — egy idegen status line-t a sajátunknak nézünk, felülírjuk, majd töröljük.**
+Az `isOurStatusLine` egy horgonyozatlan útvonaltöredékre illeszt
+(`packages/statusline/dist/main.js`), amiben egy termék neve sem szerepel. Ez egy elterjedt
+elrendezés: bármely másik monorepo ugyanilyen status line-ja a mienknek látszik. A telepítés
+**nulla ütközést jelentve** felülírja, az eltávolítás pedig kitörli a kulcsot. Ugyanez az út
+nullázza a *saját* status line-unkon a felhasználó által beállított `padding`-et is.
+
+**2. hiba — egy csoport, amiben a mi hookunk és egy idegen is benne van, egészben elvész.**
+Az `isOurHookEntry` csoportszinten dönt („van benne a mi env-változónkra hivatkozó hook"), de
+az `applyIntegration` és a `removeIntegration` az **egész csoportot** dobja el. A telepített
+csoportunkon nincs `matcher`, tehát kézzel szerkesztve semmi nem jelzi, hogy az a mienk — és a
+saját parancsot épp abba a `hooks` tömbbe befűzni a természetes mozdulat, hiszen az olvasatban
+„az esemény hookjainak listája". A meglévő teszt a *testvér*-csoport esetét fedi; ez a beágyazott
+eset a rés.
+
+- [ ] **Fix Step 1: hook-szintű felismerés, URL-tartalékkal**
+
+`apps/desktop/src/main/setup.ts` — az `isOurHookEntry` helyére:
+
+```ts
+/** A saját hook-végpontjaink útvonalai. */
+const OUR_HOOK_PATHS = /^\/hooks\/(notification|lifecycle\/(start|end|stop))$/
+
+/**
+ * Igaz, ha EGY hook a mienk.
+ *
+ * Elsődleges jel: az `allowedEnvVars` hivatkozik a tokenünkre. Portfüggetlen, tehát egy
+ * portváltás után is felismeri a régi telepítést.
+ *
+ * Tartalék jel: a saját loopback-végpontunkra mutat. Azért kell, mert az `allowedEnvVars`
+ * nem feltétele annak, hogy a hook lefusson — csak az env-változó behelyettesítését
+ * engedélyezi. Ha valaki kiveszi, a bejegyzés felismerhetetlen árvává válna: minden újabb
+ * telepítés egy újabb duplikátumot tenne mellé, az eltávolítás pedig soha nem vinné el.
+ */
+export function isOurHook(hook: unknown): boolean {
+  if (!isPlainObject(hook)) return false
+  if (Array.isArray(hook.allowedEnvVars) && hook.allowedEnvVars.includes(TOKEN_ENV)) return true
+  if (typeof hook.url !== 'string') return false
+  try {
+    const url = new URL(hook.url)
+    return url.hostname === '127.0.0.1' && OUR_HOOK_PATHS.test(url.pathname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Kiveszi a saját hookjainkat egy esemény matcher-csoportjaiból.
+ *
+ * HOOK-szinten dolgozik, nem csoportszinten: ha a felhasználó a saját parancsát a mi
+ * csoportunk `hooks` tömbjébe fűzte be, a csoport egészének eldobása az ő hookját is
+ * elvinné. Egy csoport csak akkor tűnik el, ha kizárólag a mi hookjainkból állt.
+ */
+function stripOurHooks(list: unknown[]): unknown[] {
+  return list.flatMap((entry) => {
+    if (!isPlainObject(entry) || !Array.isArray(entry.hooks)) return [entry]
+    const foreign = entry.hooks.filter((hook) => !isOurHook(hook))
+    if (foreign.length === 0) return []
+    if (foreign.length === entry.hooks.length) return [entry]
+    return [{ ...entry, hooks: foreign }]
+  })
+}
+```
+
+Az `applyIntegration` hookágában a szűrés sora:
+```ts
+      const foreign = stripOurHooks(Array.isArray(current) ? current : [])
+      hooks[event] = [...foreign, ourHookEntry(options.port, route)]
+```
+(a `const list: unknown[] = …` sor elhagyható)
+
+A `removeIntegration` hookágában:
+```ts
+      const foreign = stripOurHooks(current)
+```
+
+- [ ] **Fix Step 2: a status line kifejezett jelölővel azonosítja magát**
+
+`apps/desktop/src/main/setup.ts` — az `isOurStatusLine` helyére:
+
+```ts
+/**
+ * Jelölő a status line parancsunk végén.
+ *
+ * Azért kell, mert az útvonal önmagában nem azonosít: a `packages/statusline/dist/main.js`
+ * elrendezés nem a miénk, hanem elterjedt, és egy másik repó ugyanilyen status line-ját a
+ * sajátunknak néznénk — ütközésjelzés nélkül felülírnánk, majd az eltávolításnál törölnénk.
+ * A statusline scriptünk az argumentumait nem olvassa (a bemenete stdin), így a jelölő
+ * ártalmatlan, viszont egyértelmű.
+ */
+export const STATUS_LINE_MARKER = '--claudeswitcher'
+
+/** Igaz, ha a status line a mienk — a jelölőnk alapján, nem az útvonala alapján. */
+export function isOurStatusLine(statusLine: unknown): boolean {
+  return (
+    isPlainObject(statusLine) &&
+    typeof statusLine.command === 'string' &&
+    statusLine.command.includes(STATUS_LINE_MARKER)
+  )
+}
+```
+
+Az `applyIntegration` status line ága:
+```ts
+  const previousStatusLine = existing.statusLine
+  if (previousStatusLine === undefined || isOurStatusLine(previousStatusLine)) {
+    const previousPadding = isPlainObject(previousStatusLine) ? previousStatusLine.padding : undefined
+    settings.statusLine = {
+      type: 'command',
+      command: `${options.statusLineCommand} ${STATUS_LINE_MARKER}`,
+      // A felhasználó által állított padding megmarad; enélkül minden újratelepítés
+      // visszaállítaná nullára.
+      padding: typeof previousPadding === 'number' ? previousPadding : 0,
+    }
+  } else {
+```
+
+- [ ] **Fix Step 3: tesztek — előbb RED**
+
+`apps/desktop/src/main/setup.test.ts` — a `FOREIGN_STATUS_LINE` konstans cseréje egy olyanra,
+ami a RÉGI felismerést becsapta volna, és négy új teszt.
+
+```ts
+/** Egy másik repó status line-ja, ugyanazzal az elterjedt útvonal-elrendezéssel. */
+const FOREIGN_STATUS_LINE = {
+  type: 'command',
+  command: 'node /home/u/otherrepo/packages/statusline/dist/main.js',
+  padding: 2,
+}
+```
+
+Az `applyIntegration` describe blokkba:
+```ts
+  it('does not mistake another repo\'s statusline for ours', () => {
+    // A régi felismerés puszta útvonaltöredékre illesztett, így ezt a sajátunknak nézte,
+    // ütközésjelzés nélkül felülírta, majd az eltávolításnál törölte volna.
+    const { settings, conflicts } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
+    expect(settings.statusLine).toEqual(FOREIGN_STATUS_LINE)
+    expect(conflicts).toHaveLength(1)
+  })
+
+  it('keeps the padding the user set on our own status line', () => {
+    const once = applyIntegration({}, OPTIONS).settings
+    const tuned = { ...(once.statusLine as Record<string, unknown>), padding: 3 }
+    const again = applyIntegration({ ...once, statusLine: tuned }, OPTIONS).settings
+    expect((again.statusLine as Record<string, unknown>).padding).toBe(3)
+  })
+
+  it('keeps a foreign hook that sits inside our own matcher group', () => {
+    // Kézzel szerkesztve ez a természetes mozdulat: a saját parancsot a meglévő `hooks`
+    // tömbbe fűzni. Csoportszintű eldobás ezt is elvinné.
+    const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
+    const theirs = { type: 'command', command: 'their-beep' }
+    installed.hooks.Stop![0]!.hooks.push(theirs)
+
+    const hooks = applyIntegration(installed, OPTIONS).settings.hooks as HookGroups
+    const survivors = hooks.Stop!.flatMap((group) => group.hooks)
+    expect(survivors).toContainEqual(theirs)
+    expect(removeIntegration({ hooks })).toEqual({ hooks: { Stop: [{ hooks: [theirs] }] } })
+  })
+
+  it('still recognises our hook after its allowedEnvVars is pruned', () => {
+    // Az allowedEnvVars nem feltétele a futásnak, tehát kieshet. Enélkül a bejegyzés
+    // felismerhetetlen árva lenne, és minden telepítés duplikálná.
+    const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
+    delete installed.hooks.Stop![0]!.hooks[0]!.allowedEnvVars
+
+    const hooks = applyIntegration(installed, OPTIONS).settings.hooks as HookGroups
+    expect(hooks.Stop).toHaveLength(1)
+    expect(removeIntegration({ hooks }).hooks).toBeUndefined()
+  })
+```
+
+Az `installs the status line and adds the two env vars beside existing ones` teszt elvárása
+a jelölővel bővül:
+```ts
+    expect(settings.statusLine).toEqual({
+      type: 'command',
+      command: `${OPTIONS.statusLineCommand} --claudeswitcher`,
+      padding: 0,
+    })
+```
+
+Run: `pnpm --filter @claudeswitcher/desktop test setup`
+Expected: **előbb RED** a négy új teszten és a módosított status line elváráson, majd a
+javítás után GREEN. A desktop összesen **53** teszt (49 + 4).
+
+- [ ] **Fix Step 4: Commit**
+
+```bash
+git add apps/desktop/src/main/setup.ts apps/desktop/src/main/setup.test.ts
+git commit -m "fix(desktop): identify our own entries precisely so an install cannot destroy foreign ones"
+```
+
 ---
 
 ### Task 16: desktop — telepítés a tálcamenüből, és az M1 elfogadási teszt
