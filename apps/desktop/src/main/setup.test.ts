@@ -30,7 +30,12 @@ const FOREIGN_NOTIFICATION = {
   hooks: [{ type: 'command', command: 'powershell -c [console]::beep()' }],
 }
 
-const FOREIGN_STATUS_LINE = { type: 'command', command: 'bash ~/my-statusline.sh' }
+/** Egy másik repó status line-ja, ugyanazzal az elterjedt útvonal-elrendezéssel. */
+const FOREIGN_STATUS_LINE = {
+  type: 'command',
+  command: 'node /home/u/otherrepo/packages/statusline/dist/main.js',
+  padding: 2,
+}
 
 type HookGroups = Record<string, Array<{ hooks: Array<Record<string, unknown>> }>>
 
@@ -81,7 +86,11 @@ describe('applyIntegration', () => {
 
   it('installs the status line and adds the two env vars beside existing ones', () => {
     const { settings } = applyIntegration({ env: { OTHER: 'x' } }, OPTIONS)
-    expect(settings.statusLine).toEqual({ type: 'command', command: OPTIONS.statusLineCommand, padding: 0 })
+    expect(settings.statusLine).toEqual({
+      type: 'command',
+      command: `${OPTIONS.statusLineCommand} --claudeswitcher`,
+      padding: 0,
+    })
     expect(settings.env).toEqual({
       OTHER: 'x',
       CLAUDESWITCHER_PORT: '47821',
@@ -99,6 +108,45 @@ describe('applyIntegration', () => {
     const { settings, conflicts } = applyIntegration({ hooks: 'nonsense' }, OPTIONS)
     expect(settings.hooks).toBe('nonsense')
     expect(conflicts.length).toBeGreaterThan(0)
+  })
+
+  it('does not mistake another repo\'s statusline for ours', () => {
+    // A régi felismerés puszta útvonaltöredékre illesztett, így ezt a sajátunknak nézte,
+    // ütközésjelzés nélkül felülírta, majd az eltávolításnál törölte volna.
+    const { settings, conflicts } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
+    expect(settings.statusLine).toEqual(FOREIGN_STATUS_LINE)
+    expect(conflicts).toHaveLength(1)
+  })
+
+  it('keeps the padding the user set on our own status line', () => {
+    const once = applyIntegration({}, OPTIONS).settings
+    const tuned = { ...(once.statusLine as Record<string, unknown>), padding: 3 }
+    const again = applyIntegration({ ...once, statusLine: tuned }, OPTIONS).settings
+    expect((again.statusLine as Record<string, unknown>).padding).toBe(3)
+  })
+
+  it('keeps a foreign hook that sits inside our own matcher group', () => {
+    // Kézzel szerkesztve ez a természetes mozdulat: a saját parancsot a meglévő `hooks`
+    // tömbbe fűzni. Csoportszintű eldobás ezt is elvinné.
+    const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
+    const theirs = { type: 'command', command: 'their-beep' }
+    installed.hooks.Stop![0]!.hooks.push(theirs)
+
+    const hooks = applyIntegration(installed, OPTIONS).settings.hooks as HookGroups
+    const survivors = hooks.Stop!.flatMap((group) => group.hooks)
+    expect(survivors).toContainEqual(theirs)
+    expect(removeIntegration({ hooks })).toEqual({ hooks: { Stop: [{ hooks: [theirs] }] } })
+  })
+
+  it('still recognises our hook after its allowedEnvVars is pruned', () => {
+    // Az allowedEnvVars nem feltétele a futásnak, tehát kieshet. Enélkül a bejegyzés
+    // felismerhetetlen árva lenne, és minden telepítés duplikálná.
+    const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
+    delete installed.hooks.Stop![0]!.hooks[0]!.allowedEnvVars
+
+    const hooks = applyIntegration(installed, OPTIONS).settings.hooks as HookGroups
+    expect(hooks.Stop).toHaveLength(1)
+    expect(removeIntegration({ hooks }).hooks).toBeUndefined()
   })
 })
 

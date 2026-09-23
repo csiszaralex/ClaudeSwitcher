@@ -33,27 +33,66 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** A saját hook-végpontjaink útvonalai. */
+const OUR_HOOK_PATHS = /^\/hooks\/(notification|lifecycle\/(start|end|stop))$/
+
 /**
- * Igaz, ha egy matcher-csoport a mienk: van benne hook, aminek az `allowedEnvVars`-ában
- * szerepel a `CLAUDESWITCHER_TOKEN`. Portfüggetlen, így egy portváltás után is felismerjük
- * a régi telepítést.
+ * Igaz, ha EGY hook a mienk.
+ *
+ * Elsődleges jel: az `allowedEnvVars` hivatkozik a tokenünkre. Portfüggetlen, tehát egy
+ * portváltás után is felismeri a régi telepítést.
+ *
+ * Tartalék jel: a saját loopback-végpontunkra mutat. Azért kell, mert az `allowedEnvVars`
+ * nem feltétele annak, hogy a hook lefusson — csak az env-változó behelyettesítését
+ * engedélyezi. Ha valaki kiveszi, a bejegyzés felismerhetetlen árvává válna: minden újabb
+ * telepítés egy újabb duplikátumot tenne mellé, az eltávolítás pedig soha nem vinné el.
  */
-export function isOurHookEntry(entry: unknown): boolean {
-  if (!isPlainObject(entry) || !Array.isArray(entry.hooks)) return false
-  return entry.hooks.some(
-    (hook) =>
-      isPlainObject(hook) &&
-      Array.isArray(hook.allowedEnvVars) &&
-      hook.allowedEnvVars.includes(TOKEN_ENV),
-  )
+export function isOurHook(hook: unknown): boolean {
+  if (!isPlainObject(hook)) return false
+  if (Array.isArray(hook.allowedEnvVars) && hook.allowedEnvVars.includes(TOKEN_ENV)) return true
+  if (typeof hook.url !== 'string') return false
+  try {
+    const url = new URL(hook.url)
+    return url.hostname === '127.0.0.1' && OUR_HOOK_PATHS.test(url.pathname)
+  } catch {
+    return false
+  }
 }
 
-/** Igaz, ha a status line a mi scriptünket futtatja. */
+/**
+ * Kiveszi a saját hookjainkat egy esemény matcher-csoportjaiból.
+ *
+ * HOOK-szinten dolgozik, nem csoportszinten: ha a felhasználó a saját parancsát a mi
+ * csoportunk `hooks` tömbjébe fűzte be, a csoport egészének eldobása az ő hookját is
+ * elvinné. Egy csoport csak akkor tűnik el, ha kizárólag a mi hookjainkból állt.
+ */
+function stripOurHooks(list: unknown[]): unknown[] {
+  return list.flatMap((entry) => {
+    if (!isPlainObject(entry) || !Array.isArray(entry.hooks)) return [entry]
+    const foreign = entry.hooks.filter((hook) => !isOurHook(hook))
+    if (foreign.length === 0) return []
+    if (foreign.length === entry.hooks.length) return [entry]
+    return [{ ...entry, hooks: foreign }]
+  })
+}
+
+/**
+ * Jelölő a status line parancsunk végén.
+ *
+ * Azért kell, mert az útvonal önmagában nem azonosít: a `packages/statusline/dist/main.js`
+ * elrendezés nem a miénk, hanem elterjedt, és egy másik repó ugyanilyen status line-ját a
+ * sajátunknak néznénk — ütközésjelzés nélkül felülírnánk, majd az eltávolításnál törölnénk.
+ * A statusline scriptünk az argumentumait nem olvassa (a bemenete stdin), így a jelölő
+ * ártalmatlan, viszont egyértelmű.
+ */
+export const STATUS_LINE_MARKER = '--claudeswitcher'
+
+/** Igaz, ha a status line a mienk — a jelölőnk alapján, nem az útvonala alapján. */
 export function isOurStatusLine(statusLine: unknown): boolean {
   return (
     isPlainObject(statusLine) &&
     typeof statusLine.command === 'string' &&
-    /[\\/]packages[\\/]statusline[\\/]dist[\\/]main\.js/.test(statusLine.command)
+    statusLine.command.includes(STATUS_LINE_MARKER)
   )
 }
 
@@ -97,15 +136,22 @@ export function applyIntegration(
         conflicts.push(`A "hooks.${event}" érték nem tömb, ezért ezt az eseményt kihagytuk.`)
         continue
       }
-      const list: unknown[] = Array.isArray(current) ? current : []
-      const foreign = list.filter((entry) => !isOurHookEntry(entry))
+      const foreign = stripOurHooks(Array.isArray(current) ? current : [])
       hooks[event] = [...foreign, ourHookEntry(options.port, route)]
     }
     settings.hooks = hooks
   }
 
-  if (existing.statusLine === undefined || isOurStatusLine(existing.statusLine)) {
-    settings.statusLine = { type: 'command', command: options.statusLineCommand, padding: 0 }
+  const previousStatusLine = existing.statusLine
+  if (previousStatusLine === undefined || isOurStatusLine(previousStatusLine)) {
+    const previousPadding = isPlainObject(previousStatusLine) ? previousStatusLine.padding : undefined
+    settings.statusLine = {
+      type: 'command',
+      command: `${options.statusLineCommand} ${STATUS_LINE_MARKER}`,
+      // A felhasználó által állított padding megmarad; enélkül minden újratelepítés
+      // visszaállítaná nullára.
+      padding: typeof previousPadding === 'number' ? previousPadding : 0,
+    }
   } else {
     conflicts.push(
       'Már van saját status line beállítva, ezt nem írtuk felül — a limitek így nem jelennek meg.',
@@ -140,7 +186,7 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
     for (const event of Object.keys(HOOK_ROUTES)) {
       const current = hooks[event]
       if (!Array.isArray(current)) continue
-      const foreign = current.filter((entry) => !isOurHookEntry(entry))
+      const foreign = stripOurHooks(current)
       if (foreign.length === 0) delete hooks[event]
       else hooks[event] = foreign
     }
