@@ -53,7 +53,11 @@ export function isOurHook(hook: unknown): boolean {
   if (typeof hook.url !== 'string') return false
   try {
     const url = new URL(hook.url)
-    return url.hostname === '127.0.0.1' && OUR_HOOK_PATHS.test(url.pathname)
+    // A protokollt is nézni kell. A `new URL` a hostot és az útvonalat bármilyen sémára
+    // kitölti, így e nélkül egy `file://127.0.0.1/hooks/notification` is a mienknek
+    // számítana — ugyanaz a túl tág azonosítás, amit ez a kör megszüntetett.
+    const isHttp = url.protocol === 'http:' || url.protocol === 'https:'
+    return isHttp && url.hostname === '127.0.0.1' && OUR_HOOK_PATHS.test(url.pathname)
   } catch {
     return false
   }

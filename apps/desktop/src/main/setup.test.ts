@@ -148,6 +148,18 @@ describe('applyIntegration', () => {
     expect(hooks.Stop).toHaveLength(1)
     expect(removeIntegration({ hooks }).hooks).toBeUndefined()
   })
+
+  it('does not claim a loopback hook that is not spoken over http', () => {
+    // A `new URL` a hostot és az útvonalat bármilyen sémára kitölti, tehát protokoll-
+    // ellenőrzés nélkül egy ilyen idegen bejegyzés is a mienknek számítana — és a
+    // telepítés némán elvinné.
+    const theirs = { type: 'command', url: 'file://127.0.0.1/hooks/notification' }
+    const existing = { hooks: { Notification: [{ hooks: [theirs] }] } }
+
+    const hooks = applyIntegration(existing, OPTIONS).settings.hooks as HookGroups
+    expect(hooks.Notification!.flatMap((group) => group.hooks)).toContainEqual(theirs)
+    expect(removeIntegration({ hooks })).toEqual(existing)
+  })
 })
 
 describe('removeIntegration', () => {
