@@ -26,7 +26,12 @@ function loadIcon(file: string): Electron.NativeImage {
   return image
 }
 
-export function createTray(options: { onOpen(): void; onQuit(): void }): TrayHandle {
+export function createTray(options: {
+  onOpen(): void
+  onQuit(): void
+  onInstall(): void
+  onUninstall(): void
+}): TrayHandle {
   const idle = loadIcon('tray.png')
   const waiting = loadIcon('tray-waiting.png')
 
@@ -34,6 +39,9 @@ export function createTray(options: { onOpen(): void; onQuit(): void }): TrayHan
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Megnyitás', click: options.onOpen },
+      { type: 'separator' },
+      { label: 'Claude Code integráció telepítése', click: options.onInstall },
+      { label: 'Claude Code integráció eltávolítása', click: options.onUninstall },
       { type: 'separator' },
       { label: 'Kilépés', click: options.onQuit },
     ]),

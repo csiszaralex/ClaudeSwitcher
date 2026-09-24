@@ -5,6 +5,8 @@ import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen } from 'electron'
 import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'
 import { OVERLAY_HOTKEY, registerHotkey } from './hotkey.js'
+import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
+import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -43,9 +45,15 @@ function createOverlay(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
+  // A token tartós, a port rögzített: a telepített hookok és a statusLine ezeket kapják
+  // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
+  // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
+  const token = await loadOrCreateToken(app.getPath('userData'))
   daemon = await startDaemon({
     claudeDir: resolveClaudeDir(),
     probe: createWin32ProcessProbe(),
+    port: DAEMON_PORT,
+    token,
   })
   await daemon.refresh()
 
@@ -79,9 +87,49 @@ app.whenReady().then(async () => {
 
   overlay = createOverlay()
 
+  // Csak fejlesztői build: abszolút útvonal ennek a repónak a lefordított statusline
+  // scriptjére. Ha a repó elköltözik vagy a dist törlődik, újra kell telepíteni.
+  const statusLineCommand = `node "${path.join(dirname, '../../../../packages/statusline/dist/main.js')}"`
+
+  const describeError = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error)
+
   const tray = createTray({
     onOpen: () => showOverlay(),
     onQuit: () => app.quit(),
+    onInstall: () => {
+      installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token, statusLineCommand })
+        .then((conflicts) => {
+          void dialog.showMessageBox({
+            type: conflicts.length === 0 ? 'info' : 'warning',
+            title: 'ClaudeSwitcher',
+            message:
+              conflicts.length === 0
+                ? 'A Claude Code integráció telepítve.'
+                : 'A Claude Code integráció csak részben települt.',
+            detail: [
+              ...conflicts,
+              'Az újonnan indított Claude Code sessionök már jelentenek. A már futó sessionöket lehet, hogy újra kell indítani.',
+            ].join('\n\n'),
+          })
+        })
+        .catch((error: unknown) => {
+          dialog.showErrorBox('A telepítés nem sikerült', describeError(error))
+        })
+    },
+    onUninstall: () => {
+      uninstallIntegration(resolveClaudeDir())
+        .then(() => {
+          void dialog.showMessageBox({
+            type: 'info',
+            title: 'ClaudeSwitcher',
+            message: 'A Claude Code integráció eltávolítva.',
+          })
+        })
+        .catch((error: unknown) => {
+          dialog.showErrorBox('Az eltávolítás nem sikerült', describeError(error))
+        })
+    },
   })
 
   function showOverlay(): void {
