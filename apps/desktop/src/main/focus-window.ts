@@ -66,29 +66,74 @@ function loadUser32(): User32 | null {
  */
 const MAX_WINDOWS_SCANNED = 10_000
 
+/** Az ablakbejáráshoz szükséges user32 részhalmaz, hogy tesztelhető legyen fake-kel. */
+export type WindowScanner = Pick<
+  User32,
+  'GetTopWindow' | 'GetWindow' | 'GetWindowThreadProcessId' | 'IsWindowVisible' | 'GetWindowTextLengthW'
+>
+
 /**
- * A megadott processz első látható, címmel rendelkező top-level ablaka, vagy 0.
+ * A megadott processz látható, címmel rendelkező top-level ablakai, legfeljebb `cap` darab.
  *
  * Szándékosan a GetTopWindow + GetWindow láncot járjuk be, nem az EnumWindows-t:
  * az EnumWindows callbacket vár, amit koffi-ban regisztrálni kell, és a
  * regisztrált callback élettartama Electron main processzben könnyen elszáll.
  * A lánc bejárása ugyanazt adja, csak sima skalár hívásokkal.
+ *
+ * A `cap` miatt nem kell az egész asztalt végigjárni: a hívóknak csak az érdekes, hogy
+ * nulla, egy, vagy több mint egy ablak van.
  */
-export function findMainWindow(targetPid: number): number {
-  const api = loadUser32()
-  if (api === null) return 0
-
+export function scanWindowsForPid(api: WindowScanner, targetPid: number, cap = 2): number[] {
+  const found: number[] = []
   const pidOut: [number] = [0]
   let hwnd = Number(api.GetTopWindow(0))
 
   for (let scanned = 0; hwnd !== 0 && scanned < MAX_WINDOWS_SCANNED; scanned++) {
     if (api.IsWindowVisible(hwnd) !== 0 && api.GetWindowTextLengthW(hwnd) > 0) {
       api.GetWindowThreadProcessId(hwnd, pidOut)
-      if (pidOut[0] === targetPid) return hwnd
+      if (pidOut[0] === targetPid) {
+        found.push(hwnd)
+        if (found.length >= cap) return found
+      }
     }
     hwnd = Number(api.GetWindow(hwnd, GW_HWNDNEXT))
   }
-  return 0
+  return found
+}
+
+/**
+ * A megadott processz ablaka, DE csak ha pontosan egy van. Különben 0.
+ *
+ * Miért nem elég az első találat — lemérve ezen a gépen, nem feltételezve: egy VSCode
+ * főprocessz az ÖSSZES ablakát birtokolja, és az `~/.claude/ide/*.lock` fájlokban egyetlen
+ * pid 8–12 KÜLÖNBÖZŐ workspace mappához tartozik (a 24092-es pid tíz mappához, miközben
+ * egyetlen ablaka van). A pid tehát nem azonosít ablakot. Az első Z-sorrendű találat a
+ * LEGFELSŐ ablak lenne, nem a sessionhöz tartozó — vagyis az Enter egy másik projekt
+ * ablakát hozná elő, és mivel a `SetForegroundWindow` sikeres, a `code -r` tartalék sem
+ * futna le, ami helyesen találná meg.
+ *
+ * Egyértelműség nélkül ezért inkább nem választunk: a hívó a mappa alapján dolgozó
+ * `code -r`-re esik vissza, ami a VSCode saját ablakfeloldását használja.
+ */
+export function findMainWindow(targetPid: number): number {
+  const api = loadUser32()
+  if (api === null) return 0
+  const windows = scanWindowsForPid(api, targetPid)
+  return windows.length === 1 ? windows[0]! : 0
+}
+
+/**
+ * Ahány látható ablaka a processznek van, kettőnél megállva.
+ *
+ * Azért van külön a `findMainWindow`-tól, mert a live teszt ezzel tudja igazolni, hogy a
+ * `GetWindowThreadProcessId` kimeneti paramétere tényleg ír — a `findMainWindow` egy több
+ * ablakot birtokló processznél helyesen 0-t ad, ami ugyanúgy néz ki, mint egy nem működő
+ * out-paraméter.
+ */
+export function countMainWindows(targetPid: number): number {
+  const api = loadUser32()
+  if (api === null) return 0
+  return scanWindowsForPid(api, targetPid).length
 }
 
 /**
@@ -170,8 +215,12 @@ function focusByCli(folder: string): Promise<boolean> {
 }
 
 /**
- * Előtérbe hozza a session VSCode ablakát. Elsőként a lock fájlból ismert pid
- * alapján, mert az azonnali; ha az nem megy, a `code -r` a tartalék.
+ * Előtérbe hozza a session VSCode ablakát.
+ *
+ * Elsőként a lock fájlból ismert pid alapján, mert az azonnali — de csak akkor, ha annak a
+ * pidnek pontosan egy ablaka van (lásd `findMainWindow`: egy VSCode főprocessz több ablakot
+ * is birtokolhat, és ilyenkor a pid nem azonosít ablakot). Több ablak esetén, és ha a gyors
+ * út bármiért nem vezet eredményre, a `code -r` dönt a mappa alapján.
  */
 export async function focusSessionWindow(view: SessionView): Promise<boolean> {
   if (view.windowPid !== undefined && focusByPid(view.windowPid)) return true

@@ -1,12 +1,36 @@
 import { exec, execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import {
+  countMainWindows,
   findMainWindow,
   foregroundWindow,
   isFastFocusAvailable,
   isSafeForCli,
   quoteForCli,
+  scanWindowsForPid,
+  type WindowScanner,
 } from './focus-window.js'
+
+/** Egy hamis asztal: a megadott ablakok Z-sorrendben, láncba kötve. */
+function fakeScanner(
+  windows: Array<{ hwnd: number; pid: number; visible?: boolean; titled?: boolean }>,
+): WindowScanner {
+  const byHwnd = new Map(windows.map((w) => [w.hwnd, w]))
+  const order = windows.map((w) => w.hwnd)
+  return {
+    GetTopWindow: () => order[0] ?? 0,
+    GetWindow: (hWnd: number) => {
+      const index = order.indexOf(hWnd)
+      return index === -1 ? 0 : (order[index + 1] ?? 0)
+    },
+    GetWindowThreadProcessId: (hWnd: number, pid: [number]) => {
+      pid[0] = byHwnd.get(hWnd)?.pid ?? 0
+      return 0
+    },
+    IsWindowVisible: (hWnd: number) => (byHwnd.get(hWnd)?.visible === false ? 0 : 1),
+    GetWindowTextLengthW: (hWnd: number) => (byHwnd.get(hWnd)?.titled === false ? 0 : 5),
+  }
+}
 
 const onWindows = process.platform === 'win32'
 
@@ -46,13 +70,51 @@ describe('findMainWindow', () => {
     // Ez az a teszt, ami ténylegesen igazolja a kimeneti paramétert: nullánál
     // nagyobb értéket csak akkor kaphatunk, ha a GetWindowThreadProcessId kiírta a
     // pidet, és az egyezett. Ablakot NEM hoz előtérbe — csak megkeresi.
+    //
+    // A `countMainWindows`-t használja, nem a `findMainWindow`-t: utóbbi egy több ablakot
+    // birtokló processznél helyesen 0-t ad, ami megkülönböztethetetlen lenne egy nem
+    // működő out-paramétertől — vagyis a teszt pont azt nem bizonyítaná, amiért létezik.
     const pid = runningVSCodeWindowPid()
     if (pid === undefined) {
       // Látható kihagyás, nem csendes átmenet: a futtatás kimenetében látszania kell.
       ctx.skip()
       return
     }
-    expect(findMainWindow(pid)).toBeGreaterThan(0)
+    expect(countMainWindows(pid)).toBeGreaterThan(0)
+  })
+})
+
+describe('scanWindowsForPid', () => {
+  it('returns the one window a process owns', () => {
+    const api = fakeScanner([
+      { hwnd: 10, pid: 111 },
+      { hwnd: 20, pid: 222 },
+    ])
+    expect(scanWindowsForPid(api, 222)).toEqual([20])
+  })
+
+  it('reports more than one window, so an ambiguous pid can be detected', () => {
+    // Ez a valódi eset: egy VSCode főprocessz az összes ablakát birtokolja, és egy
+    // lock-pid több workspace mappához tartozik. Ilyenkor a pid nem azonosít ablakot.
+    const api = fakeScanner([
+      { hwnd: 10, pid: 777 },
+      { hwnd: 20, pid: 999 },
+      { hwnd: 30, pid: 777 },
+    ])
+    expect(scanWindowsForPid(api, 777)).toHaveLength(2)
+  })
+
+  it('ignores invisible and untitled windows', () => {
+    const api = fakeScanner([
+      { hwnd: 10, pid: 555, visible: false },
+      { hwnd: 20, pid: 555, titled: false },
+      { hwnd: 30, pid: 555 },
+    ])
+    expect(scanWindowsForPid(api, 555)).toEqual([30])
+  })
+
+  it('returns nothing for a pid that owns no window', () => {
+    expect(scanWindowsForPid(fakeScanner([{ hwnd: 10, pid: 111 }]), 222)).toEqual([])
   })
 })
 
