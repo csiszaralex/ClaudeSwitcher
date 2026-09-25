@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { parseStateMessage, type DaemonState } from './state-message.js'
+import { parseStateMessage, sanitizeState, type DaemonState } from './state-message.js'
 
 declare global {
   interface Window {
@@ -69,9 +69,20 @@ export function useDaemonState(): OverlayState {
         // megnyílás előtti lekérés és a socket élete között érkező változás elveszne, és
         // mivel a daemon az azonos pillanatképeket nem küldi újra, az overlay addig
         // állott maradna, amíg valami ÚJRA meg nem változik.
-        void window.claudeswitcher.state().then((fresh) => {
-          if (!closed && myGeneration === generation && !receivedLive) setState(fresh)
-        })
+        // A sanitizeState itt sem hagyható el: az IPC-s út nem megy át a
+        // parseStateMessage-en, tehát e nélkül csak a WebSocket lenne védve a hibás
+        // alaktól. A `.catch` azért van, mert egy elkapatlan elutasítás a rendererben
+        // néma lenne.
+        void window.claudeswitcher
+          .state()
+          .then((fresh) => {
+            const clean = sanitizeState(fresh)
+            if (clean === undefined) return
+            if (!closed && myGeneration === generation && !receivedLive) setState(clean)
+          })
+          .catch((error: unknown) => {
+            console.error('[overlay] could not read the initial state', error)
+          })
         // A korlátos indítás ezt a sort keresi: a rejtett overlay is betölti az oldalát,
         // így ez bizonyítja, hogy a React lefutott, az IPC válaszolt, és a WebSocket a
         // tokennel kapcsolódott. Tokent nem ír ki.

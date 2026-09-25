@@ -31,6 +31,8 @@ export function createTray(options: {
   onQuit(): void
   onInstall(): void
   onUninstall(): void
+  /** A gyorsbillentyű, és hogy sikerült-e lefoglalni. */
+  hotkey: { accelerator: string; registered: boolean }
 }): TrayHandle {
   const idle = loadIcon('tray.png')
   const waiting = loadIcon('tray-waiting.png')
@@ -39,6 +41,16 @@ export function createTray(options: {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Megnyitás', click: options.onOpen },
+      // A gyorsbillentyű állapota látszik, nem csak a naplóban. Ha a foglalás nem sikerül —
+      // amit ezen a gépen le is mértünk —, a felhasználó különben csak azt tapasztalná,
+      // hogy megnyomja és nem történik semmi, magyarázat nélkül. A tálca ilyenkor az
+      // egyetlen megmaradt belépési pont, tehát itt kell megmondani.
+      {
+        label: options.hotkey.registered
+          ? `Gyorsbillentyű: ${options.hotkey.accelerator}`
+          : `Gyorsbillentyű: ${options.hotkey.accelerator} — FOGLALT, nem működik`,
+        enabled: false,
+      },
       { type: 'separator' },
       { label: 'Claude Code integráció telepítése', click: options.onInstall },
       { label: 'Claude Code integráció eltávolítása', click: options.onUninstall },

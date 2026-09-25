@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
@@ -41,6 +42,16 @@ function createOverlay(): BrowserWindow {
     void window.loadFile(path.join(dirname, '../renderer/index.html'))
   }
   window.on('blur', () => window.hide())
+
+  // Ha a renderer processz meghal (OOM, GPU- vagy V8-összeomlás), az Electron egy üres
+  // keretet hagy, és semmi nem tölti újra. Az overlay az egyetlen ablak, tehát a
+  // gyorsbillentyű onnantól egy üres ablakot mutatna — ami pont úgy néz ki, mint a „nincs
+  // futó session", vagyis a monitorozó eszköz a legrosszabb módon hibázna: csendben.
+  window.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[claudeswitcher] renderer gone (${details.reason}); reloading`)
+    if (!window.isDestroyed()) window.reload()
+  })
+
   return window
 }
 
@@ -89,17 +100,36 @@ app.whenReady().then(async () => {
 
   // Csak fejlesztői build: abszolút útvonal ennek a repónak a lefordított statusline
   // scriptjére. Ha a repó elköltözik vagy a dist törlődik, újra kell telepíteni.
-  const statusLineCommand = `node "${path.join(dirname, '../../../../packages/statusline/dist/main.js')}"`
+  const statusLineScript = path.join(dirname, '../../../../packages/statusline/dist/main.js')
+  const statusLineCommand = `node "${statusLineScript}"`
 
   const describeError = (error: unknown): string =>
     error instanceof Error ? error.message : String(error)
 
+  // A gyorsbillentyűt a tálca ELŐTT foglaljuk le, mert a menü megjeleníti az eredményt.
+  // A showOverlay/toggleOverlay függvénydeklarációk, tehát hoistolódnak — a lentebbi
+  // definíciójuk ekkor már hívható.
+  const hotkeyRegistered = registerHotkey(OVERLAY_HOTKEY, toggleOverlay)
+
   const tray = createTray({
+    hotkey: { accelerator: OVERLAY_HOTKEY, registered: hotkeyRegistered },
     onOpen: () => showOverlay(),
     onQuit: () => app.quit(),
     onInstall: () => {
+      // A telepítés különben „sikerült"-et jelentene egy olyan status line-ra, ami nem
+      // létezik — a limitek egyszerűen nem jelennének meg, ok nélkül. Lefordítatlan
+      // `dist`-nél ez a leggyakoribb eset, ezért ütközésként mondjuk meg.
+      const missingStatusLine = existsSync(statusLineScript)
+        ? []
+        : [
+            `A status line scriptje nincs meg (${statusLineScript}). ` +
+              'Futtass egy `pnpm build`-et a repo gyökerében, majd telepíts újra — ' +
+              'addig a limitek nem jelennek meg.',
+          ]
+
       installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token, statusLineCommand })
-        .then((conflicts) => {
+        .then((installConflicts) => {
+          const conflicts = [...missingStatusLine, ...installConflicts]
           void dialog.showMessageBox({
             type: conflicts.length === 0 ? 'info' : 'warning',
             title: 'ClaudeSwitcher',
@@ -152,8 +182,6 @@ app.whenReady().then(async () => {
     if (overlay?.isVisible() === true) overlay.hide()
     else showOverlay()
   }
-
-  const hotkeyRegistered = registerHotkey(OVERLAY_HOTKEY, toggleOverlay)
 
   // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
   // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor

@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import { formatDuration, formatResetsIn, summarize } from './format.js'
 import { moveSelection, resolveSelectedIndex } from './selection.js'
 import { useDaemonState } from './useDaemonState.js'
@@ -28,12 +28,24 @@ export function App(): JSX.Element {
     return () => clearInterval(timer)
   }, [])
 
+  // A kijelölt sor legördítése. A lista scrollozható, tehát nélküle a nyilakkal a
+  // kijelölés kifuthat a látható területről, és az Enter egy olyan sessiont aktiválna,
+  // amit a felhasználó nem is lát — a legrosszabb fajta hiba ebben az appban, mert
+  // ugyanúgy „működik", csak nem azt teszi, amit vártál.
+  const selectedRow = useRef<HTMLLIElement | null>(null)
+  useEffect(() => {
+    selectedRow.current?.scrollIntoView({ block: 'nearest' })
+  }, [selected])
+
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       const ids = sessions.map((s) => s.sessionId)
       if (event.key === 'Escape') void window.claudeswitcher.hide()
-      if (event.key === 'ArrowDown') setSelectedId(moveSelection(ids, selectedId, 1))
-      if (event.key === 'ArrowUp') setSelectedId(moveSelection(ids, selectedId, -1))
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        // Enélkül a nyíl a listát is elscrollozná a kijelölés mozgatása mellett.
+        event.preventDefault()
+        setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
+      }
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
         const view = sessions[resolveSelectedIndex(ids, selectedId)]
@@ -57,6 +69,7 @@ export function App(): JSX.Element {
         {sessions.map((view, index) => (
           <li
             key={view.sessionId}
+            ref={index === selected ? selectedRow : null}
             className={`session ${view.status} ${index === selected ? 'selected' : ''}`}
             onClick={() => void window.claudeswitcher.focusSession(view.sessionId)}
           >
