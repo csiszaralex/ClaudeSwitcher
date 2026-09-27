@@ -31,6 +31,8 @@ export function createTray(options: {
   onQuit(): void
   onInstall(): void
   onUninstall(): void
+  /** Megnyitja a config fájlt, hogy a gyorsbillentyű átírható legyen. */
+  onEditHotkey(): void
   /** A gyorsbillentyű, és hogy sikerült-e lefoglalni. */
   hotkey: { accelerator: string; registered: boolean }
 }): TrayHandle {
@@ -51,6 +53,7 @@ export function createTray(options: {
           : `Gyorsbillentyű: ${options.hotkey.accelerator} — FOGLALT, nem működik`,
         enabled: false,
       },
+      { label: 'Gyorsbillentyű átállítása… (újraindítás után él)', click: options.onEditHotkey },
       { type: 'separator' },
       { label: 'Claude Code integráció telepítése', click: options.onInstall },
       { label: 'Claude Code integráció eltávolítása', click: options.onUninstall },

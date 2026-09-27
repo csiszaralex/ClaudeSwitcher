@@ -3,9 +3,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen } from 'electron'
+import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
+import { configPath, loadConfig } from './config.js'
 import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'
-import { OVERLAY_HOTKEY, registerHotkey } from './hotkey.js'
+import { registerHotkey } from './hotkey.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
@@ -59,7 +60,9 @@ app.whenReady().then(async () => {
   // A token tartós, a port rögzített: a telepített hookok és a statusLine ezeket kapják
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
-  const token = await loadOrCreateToken(app.getPath('userData'))
+  const userData = app.getPath('userData')
+  const config = await loadConfig(userData)
+  const token = await loadOrCreateToken(userData)
   daemon = await startDaemon({
     claudeDir: resolveClaudeDir(),
     probe: createWin32ProcessProbe(),
@@ -109,10 +112,16 @@ app.whenReady().then(async () => {
   // A gyorsbillentyűt a tálca ELŐTT foglaljuk le, mert a menü megjeleníti az eredményt.
   // A showOverlay/toggleOverlay függvénydeklarációk, tehát hoistolódnak — a lentebbi
   // definíciójuk ekkor már hívható.
-  const hotkeyRegistered = registerHotkey(OVERLAY_HOTKEY, toggleOverlay)
+  const hotkeyRegistered = registerHotkey(config.hotkey, toggleOverlay)
 
   const tray = createTray({
-    hotkey: { accelerator: OVERLAY_HOTKEY, registered: hotkeyRegistered },
+    hotkey: { accelerator: config.hotkey, registered: hotkeyRegistered },
+    // A config fájl megnyitása a rendszer szerkesztőjével. Enélkül az „állítható"
+    // gyakorlatban azt jelentené, hogy a felhasználónak ki kell találnia egy útvonalat az
+    // AppData alatt.
+    onEditHotkey: () => {
+      void shell.openPath(configPath(userData))
+    },
     onOpen: () => showOverlay(),
     onQuit: () => app.quit(),
     onInstall: () => {
@@ -187,7 +196,7 @@ app.whenReady().then(async () => {
   // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
   // megjelenik, a tálcaikon látható képet kapott.
   console.log(
-    `[claudeswitcher] tray ready, hotkey ${OVERLAY_HOTKEY} ` +
+    `[claudeswitcher] tray ready, hotkey ${config.hotkey} ` +
       (hotkeyRegistered ? 'registered' : 'NOT registered (taken by another application)'),
   )
 

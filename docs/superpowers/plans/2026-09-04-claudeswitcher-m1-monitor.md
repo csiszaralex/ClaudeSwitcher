@@ -5979,7 +5979,7 @@ ellenőriz, amit ágens nem tudott: billentyűket, ablakváltást, és a hookok 
 8. **Válaszolj a promptra a VSCode-ban, sima „Yes"-szel** (ne „don't ask again"-nel, mert az
    a 14. pont összevetését elrontaná). Pár másodpercen belül a session **kilép a várakozásból**.
    Ha nem, a `Stop` hook bekötése hibás.
-9. Kattints egy másik alkalmazásba (pl. böngésző), és onnan nyomd meg a `Ctrl+Alt+Space`-t.
+9. Kattints egy másik alkalmazásba (pl. böngésző), és onnan nyomd meg a `Shift+Alt+Space`-t.
    Az overlay a kurzor melletti kijelzőn jelenik meg, **és a nyilak mozgatják a kijelölést**.
    Ha az overlay látszik, de a nyilakra nem reagál, a Windows megtagadta tőle a fókuszt.
 10. Válassz egy sessiont, aminek a VSCode ablaka más ablakok mögött van, és nyomj Entert. Az
@@ -5996,9 +5996,15 @@ ellenőriz, amit ágens nem tudott: billentyűket, ablakváltást, és a hookok 
     elérhetőnek — de ez érvelés, nem mérés, és ez a lépés méri le. Ha a lista megáll, vagy a
     lábléc „kapcsolat megszakadt — újracsatlakozás…" feliratban ragad, azt jelentsd: a javítás
     egy periodikus ping, nem nagy munka.
-13. **Döntés a gyorsbillentyűről.** Írj be egy `@`-t (`AltGr+V`), és az AltGr-t még nyomva
-    tartva üss szóközt. Ha az overlay felugrik és a szóköz elvész, döntsd el, cseréljük-e
-    az `OVERLAY_HOTKEY`-t.
+13. **A gyorsbillentyű állítható.** A tálcamenü felső részén látszik az élő kombináció, és
+    hogy sikerült-e lefoglalni. A `Ctrl+Alt+Space`-t a Claude desktop app foglalja (lemérve:
+    a regisztráció következetesen elbukott rá), ezért az alapérték `Shift+Alt+Space`, ami az
+    `AltGr`-t is elkerüli — a `Control+Alt` Windowson azonos az AltGr-rel, tehát a régi
+    választás magyar kiosztáson a `@` (`AltGr+V`) utáni szóközt is elnyelte volna.
+    Ha át akarod állítani: tálcamenü → **Gyorsbillentyű átállítása…**, írd át a `hotkey`
+    értékét, majd indítsd újra az appot. Ellenőrizd, hogy az új kombináció él, és a
+    tálcamenü azt mutatja. Egy elrontott fájl nem akadályozza az indulást: ilyenkor az
+    alapértékre esik vissza, és a fájlt érintetlenül hagyja, hogy ki tudd javítani.
 14. Tálcaikon → **Claude Code integráció eltávolítása**, majd hasonlítsd össze a mentéssel:
     ```powershell
     node -e "const fs=require('fs'),u=require('util');const r=p=>JSON.parse(fs.readFileSync(p,'utf8'));console.log(u.isDeepStrictEqual(r(process.argv[1]),r(process.argv[2]))?'EQUAL':'DIFFERENT')" "$env:USERPROFILE\.claude\settings.json" "$env:USERPROFILE\.claude\settings.json.bak"
