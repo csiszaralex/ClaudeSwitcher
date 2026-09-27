@@ -1,6 +1,13 @@
 import type { LiveSession, SessionActivity, SessionView } from '@claudeswitcher/core'
 import type { LifecycleEvent, NotificationEvent } from './hook-server.js'
 
+/**
+ * Meddig tartunk meg egy olyan várakozást, aminek a sessionje még nem szerepel a
+ * pillanatképben. Bőven több, mint a 3 másodperces poll — de nem végtelen, hogy egy soha
+ * meg nem jelenő session ne szivárogjon.
+ */
+const UNMATCHED_WAIT_GRACE_MS = 10_000
+
 const WAITING_TYPES = new Set(['permission_prompt', 'agent_needs_input', 'elicitation_dialog'])
 
 interface WaitState {
@@ -40,20 +47,36 @@ export class SessionStore {
     }
   }
 
-  applySnapshot(sessions: LiveSession[], activities: Map<string, SessionActivity>): void {
+  applySnapshot(
+    sessions: LiveSession[],
+    activities: Map<string, SessionActivity>,
+    now: number = Date.now(),
+  ): void {
     const ids = new Set(sessions.map((s) => s.record.sessionId))
     this.#sessions = new Map(sessions.map((s) => [s.record.sessionId, s]))
     this.#activities = activities
 
-    for (const id of [...this.#waiting.keys()]) {
-      if (!ids.has(id)) this.#waiting.delete(id)
+    for (const [id, wait] of [...this.#waiting]) {
+      if (ids.has(id)) continue
+      // Egy FRISS várakozást nem dobunk el csak azért, mert a session még nem került be a
+      // registry-be: a hook azonnal megérkezik, a registry-t viszont csak pár másodpercenként
+      // olvassuk. A türelmi idő után viszont takarítunk, különben egy soha meg nem jelenő
+      // session várakozása örökre a memóriában maradna.
+      if (now - wait.since < UNMATCHED_WAIT_GRACE_MS) continue
+      this.#waiting.delete(id)
     }
     this.#emit()
   }
 
+  /**
+   * Akkor is eltárolja a várakozást, ha a session még ismeretlen.
+   *
+   * A `views()` a sessionökön iterál, tehát egy párját nem talált bejegyzés láthatatlan —
+   * viszont amint a következő pillanatkép felveszi a sessiont, azonnal `waiting`-ként
+   * jelenik meg. Korábban az ilyen értesítés VÉGLEGESEN elveszett, és a felhasználó egy rá
+   * várakozó sessiont látott idle-ként.
+   */
   applyNotification(event: NotificationEvent, now: number = Date.now()): void {
-    if (!this.#sessions.has(event.sessionId)) return
-
     if (WAITING_TYPES.has(event.type)) {
       this.#waiting.set(event.sessionId, { since: now, text: event.text })
     } else {

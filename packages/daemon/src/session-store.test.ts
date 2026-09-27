@@ -113,4 +113,29 @@ describe('SessionStore', () => {
     expect(store.views()).toHaveLength(1)
     expect(store.views()[0]!.status).toBe('idle')
   })
+
+  it('keeps a notification that arrived before its session was scanned', () => {
+    // A hook azonnal megérkezik, a session registry-jét viszont 3 másodpercenként
+    // olvassuk. Ha a várakozást eldobnánk, amíg a session ismeretlen, a felhasználó egy
+    // rá VÁRAKOZÓ sessiont látna idle-ként — pont azt, amiért ez az app létezik.
+    const store = new SessionStore()
+    store.applySnapshot([], noActivity, 1000)
+    store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'permission_prompt' }, 1000)
+    // Amíg a session nincs meg, nem is jelenik meg — a views() a sessionökön iterál.
+    expect(store.views()).toHaveLength(0)
+
+    store.applySnapshot([live('s1')], noActivity, 2000)
+    expect(store.views()[0]!.status).toBe('waiting')
+    expect(store.views()[0]!.waitingSince).toBe(1000)
+  })
+
+  it('drops an unmatched notification once the grace period has passed', () => {
+    // Enélkül egy soha meg nem jelenő session várakozása örökre a memóriában maradna, és
+    // egy újrahasznosított azonosító azonnal „várakozónak" látszana.
+    const store = new SessionStore()
+    store.applyNotification({ sessionId: 'ghost', cwd: 'c', type: 'permission_prompt' }, 1000)
+    store.applySnapshot([], noActivity, 1000 + 11_000)
+    store.applySnapshot([live('ghost')], noActivity, 1000 + 11_001)
+    expect(store.views()[0]!.status).toBe('idle')
+  })
 })
