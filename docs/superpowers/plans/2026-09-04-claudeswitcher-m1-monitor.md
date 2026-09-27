@@ -5974,8 +5974,20 @@ ellenőriz, amit ágens nem tudott: billentyűket, ablakváltást, és a hookok 
 6. Indíts egy **új** Claude Code sessiont. A TUI alján megjelenik a status line
    (modell · mappa · ág · 5h % · 7d %), és pár másodpercen belül a limitek az overlay alján.
 7. Kérj a sessiontől egy engedélyköteles műveletet. A tálcaikon narancsra vált; az overlayben
-   (`Ctrl+Alt+Space`) a session legfelül, `●` jelöléssel. **A natív prompt a VSCode-ban
+   (`Shift+Alt+Space`) a session legfelül, `●` jelöléssel. **A natív prompt a VSCode-ban
    ugyanúgy megjelenik** — az M1 semmit nem vesz el.
+
+   **7b. Subagent engedélykérése — mérés, nem feltételezés.** Kérj olyan műveletet, ahol egy
+   **subagent** kér engedélyt (pl. adj a sessionnek olyan taskot, amit subagenttel végez el,
+   és a subagent futtat egy engedélyköteles parancsot). Jegyezd fel, MELYIK igaz:
+   (a) a szülő session `●` várakozóra vált — akkor a hook a szülő azonosítójával jön, és ez
+   jó nekünk; (b) semmi nem történik az overlayben — akkor a `Notification` hook subagentre
+   nem tüzel, és a rá várakozó munka láthatatlan; (c) új sor jelenik meg — akkor a subagent
+   önálló sessionként regisztrálódik.
+   Miért külön pont: a subagentek aktivitását a transzkriptből amúgy is olvassuk (a sidechain
+   bejegyzéseket nem szűrjük), de az ENGEDÉLYKÉRÉS hookon jön, és a spec §10 szerint a hookok
+   lefedettsége mérésre szorul. Ez a válasz dönti el, hogy az M2 megoldható-e csak hookokkal,
+   vagy a subagent-promptokhoz más jel is kell.
 8. **Válaszolj a promptra a VSCode-ban, sima „Yes"-szel** (ne „don't ask again"-nel, mert az
    a 14. pont összevetését elrontaná). Pár másodpercen belül a session **kilép a várakozásból**.
    Ha nem, a `Stop` hook bekötése hibás.
