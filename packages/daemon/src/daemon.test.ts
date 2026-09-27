@@ -96,8 +96,11 @@ describe('startDaemon', () => {
     expect(code).toBe(1008)
   })
 
-  it('does not re-broadcast an unchanged state', async () => {
-    // A poll másodpercenként fut; azonos pillanatképet nem küldünk újra.
+  it('does not re-broadcast an unchanged state, but does report every scan', async () => {
+    // Két külön szerződés, és a kettő együtt a lényeg. Azonos PILLANATKÉPET nem küldünk
+    // újra — a poll másodpercenként fut, az hússzor annyi azonos üzenet lenne percenként.
+    // Viszont MINDEN szkennelés után megy egy életjel, különben a kliens nem tudná
+    // megkülönböztetni azt, hogy „élünk, nincs változás", attól, hogy „megállt a poll".
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     await running.refresh()
 
@@ -111,7 +114,9 @@ describe('startDaemon', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     socket.close()
 
-    expect(messages).toHaveLength(0)
+    const types = messages.map((m) => (JSON.parse(m) as { type: string }).type)
+    expect(types.filter((t) => t === 'state')).toHaveLength(0)
+    expect(types.filter((t) => t === 'tick')).toHaveLength(2)
   })
 
   it('stores rate limits posted by the status line', async () => {

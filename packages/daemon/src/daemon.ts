@@ -94,6 +94,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       try {
         const snapshot = await scanSessions(claudeDir, probe)
         sessions.applySnapshot(snapshot.sessions, snapshot.activities)
+        // Életjel MINDEN sikeres szkennelés után, akkor is, ha a pillanatkép nem változott.
+        // Enélkül a kliens nem tudja megkülönböztetni azt, hogy „élünk, csak nincs
+        // változás", attól, hogy „megállt a poll" — és épp a monitorozó eszköznél a
+        // legrosszabb kimenet, ha egy állott lista élőnek látszik. Egy WebSocket-ping ezt
+        // NEM fedné: a socket akkor is egészséges, ha a szkennelés halt meg.
+        hub.broadcastRaw(JSON.stringify({ type: 'tick', at: Date.now() }))
       } catch (error) {
         console.error('[daemon] refresh failed', error)
       } finally {

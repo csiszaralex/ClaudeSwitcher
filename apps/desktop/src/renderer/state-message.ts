@@ -41,8 +41,16 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
   }
 }
 
-/** Egy WebSocket üzenetből kiolvassa az állapotot, vagy `undefined`-ot ad. Soha nem dob. */
-export function parseStateMessage(data: unknown): DaemonState | undefined {
+/** Amit a daemontól érthetünk: egy új állapot, vagy egy életjel. */
+export type DaemonMessage = { kind: 'state'; state: DaemonState } | { kind: 'tick' }
+
+/**
+ * Egy WebSocket üzenet értelmezése, vagy `undefined`. Soha nem dob.
+ *
+ * A `tick` azért kell, mert a daemon nem küldi újra az azonos pillanatképet: nélküle a
+ * kliens nem tudná megkülönböztetni azt, hogy „él, de nincs változás", attól, hogy „megállt".
+ */
+export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
   let message: unknown
   try {
     message = JSON.parse(String(data))
@@ -50,6 +58,14 @@ export function parseStateMessage(data: unknown): DaemonState | undefined {
     return undefined
   }
   if (!isObject(message)) return undefined
+  if (message.type === 'tick') return { kind: 'tick' }
   if (message.type !== 'state') return undefined
-  return sanitizeState(message.payload)
+  const state = sanitizeState(message.payload)
+  return state === undefined ? undefined : { kind: 'state', state }
+}
+
+/** Egy WebSocket üzenetből kiolvassa az állapotot, vagy `undefined`-ot ad. Soha nem dob. */
+export function parseStateMessage(data: unknown): DaemonState | undefined {
+  const parsed = parseDaemonMessage(data)
+  return parsed?.kind === 'state' ? parsed.state : undefined
 }

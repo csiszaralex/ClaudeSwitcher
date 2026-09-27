@@ -12,7 +12,7 @@ const STATUS_LABEL = {
 } as const
 
 export function App(): JSX.Element {
-  const { sessions, rateLimits, connected } = useDaemonState()
+  const { sessions, rateLimits, connected, checkedAt } = useDaemonState()
   // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
   // együtt mozog. Lásd a selection.ts dokumentációját.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -107,6 +107,16 @@ export function App(): JSX.Element {
         {rateLimits.five_hour === undefined && rateLimits.seven_day === undefined && (
           <span className="muted">Limitadat még nincs</span>
         )}
+        {/*
+          Az életjel ideje. Ez az egyetlen jel, amiből látszik, hogy a lista ÉL, csak nincs
+          változás — a daemon az azonos pillanatképet nem küldi újra, tehát egy tétlen gépen
+          a mozdulatlan lista és a megállt poll különben pont ugyanúgy néz ki.
+        */}
+        <span className="muted">
+          {checkedAt === undefined
+            ? 'ellenőrizve: még nem'
+            : `ellenőrizve: ${formatDuration(now - checkedAt)}`}
+        </span>
         {!connected && <span className="muted">kapcsolat megszakadt — újracsatlakozás…</span>}
       </div>
     </div>

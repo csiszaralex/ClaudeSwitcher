@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { parseStateMessage, sanitizeState, type DaemonState } from './state-message.js'
+import { parseDaemonMessage, sanitizeState, type DaemonState } from './state-message.js'
 
 declare global {
   interface Window {
@@ -15,6 +15,13 @@ declare global {
 export interface OverlayState extends DaemonState {
   /** Hamis, amíg nincs élő kapcsolat a daemonnal — a lista ilyenkor állott lehet. */
   connected: boolean
+  /**
+   * Mikor jelzett utoljára a daemon, hogy végigszkennelte a sessionöket (`Date.now()`).
+   * `undefined`, amíg nem jött jel. Nem az utolsó VÁLTOZÁS ideje: a daemon az azonos
+   * pillanatképet nem küldi újra, tehát a „nincs változás" és a „megállt" csak ezen a
+   * jelen keresztül különböztethető meg.
+   */
+  checkedAt: number | undefined
 }
 
 /**
@@ -30,6 +37,7 @@ export function retryDelayMs(attempt: number): number {
 export function useDaemonState(): OverlayState {
   const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {} })
   const [connected, setConnected] = useState(false)
+  const [checkedAt, setCheckedAt] = useState<number | undefined>()
 
   useEffect(() => {
     let socket: WebSocket | undefined
@@ -91,10 +99,13 @@ export function useDaemonState(): OverlayState {
 
       next.onmessage = (event) => {
         if (closed || myGeneration !== generation) return
-        const parsed = parseStateMessage(event.data)
+        const parsed = parseDaemonMessage(event.data)
         if (parsed === undefined) return
+        // Bármelyik érthető üzenet azt bizonyítja, hogy a daemon épp most szkennelt.
+        setCheckedAt(Date.now())
+        if (parsed.kind !== 'state') return
         receivedLive = true
-        setState(parsed)
+        setState(parsed.state)
       }
 
       next.onclose = () => {
@@ -133,5 +144,5 @@ export function useDaemonState(): OverlayState {
     }
   }, [])
 
-  return { ...state, connected }
+  return { ...state, connected, checkedAt }
 }
