@@ -129,8 +129,9 @@ Az eredeti szöveg a dokumentációból dolgozott. Az alábbi a **mért** viselk
   eltűnik, és a tool ugyanabban a másodpercben lefut. A hook elengedése (üres 200) után a
   prompt megmarad és korlátlanul válaszolható (2,5 perccel később mérve).
 - **Natív döntéskor a Claude Code nem bontja a tartott HTTP kérést** — a daemon a kapcsolatból
-  nem tudja meg, hogy már eldőlt. Jelek: engedélyezéskor `PostToolUse` (ugyanaz a session,
-  tool és input), tiltáskor a következő `PreToolUse`/`Stop` a sessionben.
+  nem tudja meg, hogy már eldőlt. Jelek: engedélyezéskor `PostToolUse` (ugyanaz a
+  `tool_use_id`), tiltáskor a session `Stop`-ja / `SessionEnd`-je, subagentnél a
+  `SubagentStop` (§7 `DecisionBroker`).
 - **`Notification`** — csak akkor jön `permission_prompt`, ha a prompt **~6 mp-ig** függ; a
   gyorsan megválaszolt kérések nem jeleznek. A szöveg a **`message`** mezőben van
   („Claude needs your permission to use Bash"), nem `notification_text`-ben. `agent_id`
@@ -268,8 +269,8 @@ PermissionRequest ─→ PendingDecision, a HTTP válasz felfüggesztve
 
    ELSŐ DÖNTÉS NYER — három forrásból:
    ├─ az app (overlay)   → HTTP válasz: allow / deny (+ updatedInput / updatedPermissions)
-   ├─ VSCode / telefon   → a daemon a PostToolUse-ból (allow) vagy a következő
-   │                       PreToolUse/Stop/SessionEnd-ből (tiltás/megszakítás) tudja meg;
+   ├─ VSCode / telefon   → a daemon a PostToolUse-ból (allow) vagy a Stop/SessionEnd/
+   │                       SubagentStop-ból (tiltás/megszakítás) tudja meg;
    │                       a függő kérésre üres 200 megy, amit a Claude Code eldob
    └─ elengedés          → 590 mp-nél üres 200 (a hook timeoutja 600); a sor
                            „döntés a VSCode-ban" állapotba vált, a prompt marad
@@ -332,8 +333,11 @@ ugyanúgy megkapja a promptot, és onnan is el lehet dönteni. Nincs mit védeni
   ezért külön modul és külön tesztkészlet. Lease-időzítő nincs; a natív döntést a
   `tool_use_id` alapján ismeri fel: a `PreToolUse` (ami közvetlenül a `PermissionRequest`
   előtt jön, ugyanazzal a session/tool/bemenettel) adja a `tool_use_id`-t, a
-  `PostToolUse` ugyanazzal zárja le. Tiltás/megszakítás: a session következő
-  `PreToolUse`/`Stop`/`SessionEnd`-je.
+  `PostToolUse` ugyanazzal zárja le. Tiltás/megszakítás: a session `Stop`-ja vagy
+  `SessionEnd`-je, subagent kérésénél a `SubagentStop` (ugyanazzal az `agent_id`-vel).
+  **Nem** a következő `PreToolUse`: a Claude Code egy sessionen belül párhuzamosan is indíthat
+  tool-hívásokat, és egy másik hívás `PreToolUse`-ja egy még függő, jogos kérést zárna le.
+  Ami így nyitva marad, azt az 590 mp-es elengedés zárja.
 - ~~**`PresencePolicy`**~~ — **kikerült** (§6).
 - **`Watchers`** — fájlfigyelők debounce-szal.
 - **`Hub`** — WS, közös csatorna az overlay és az extensionök felé.
