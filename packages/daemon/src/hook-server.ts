@@ -1,3 +1,4 @@
+import { appendFile } from 'node:fs/promises'
 import type { RateLimits, RateLimitWindow } from '@claudeswitcher/core'
 import { Hono } from 'hono'
 
@@ -58,8 +59,26 @@ function limitWindow(v: unknown): RateLimitWindow | undefined {
  * ezek display-only hookok, és a szerver hibája soha nem akaszthat meg egy
  * sessiont. A hibát naplózzuk, nem terjesztjük.
  */
-export function createHookApp(token: string, events: HookEvents): Hono {
+export function createHookApp(token: string, events: HookEvents, rawLogPath?: string): Hono {
   const app = new Hono()
+
+  /**
+   * Kiírja a NYERS hook-törzset, ha kértek naplót. Alapból kikapcsolva.
+   *
+   * Azért a nyers törzs, és nem a kiolvasott mezők: a hookok tényleges alakja nincs
+   * dokumentálva, tehát épp a saját értelmezésünk a leggyanúsabb. Ha rossz mezőnevet
+   * olvasunk, a feldolgozott adat ugyanúgy hiányos lesz — a nyers viszont megmutatja.
+   *
+   * Soha nem vár rá a válasz, és egy írási hiba sem látszik a hívón: egy diagnosztika
+   * nem akaszthat meg egy sessiont.
+   */
+  function record(route: string, body: unknown): void {
+    if (rawLogPath === undefined) return
+    const line = `${JSON.stringify({ at: new Date().toISOString(), route, body })}\n`
+    void appendFile(rawLogPath, line, 'utf8').catch((error: unknown) => {
+      console.error('[hook] raw log write failed', error)
+    })
+  }
 
   app.use('*', async (c, next) => {
     if (c.req.header('authorization') !== `Bearer ${token}`) {
@@ -80,6 +99,7 @@ export function createHookApp(token: string, events: HookEvents): Hono {
   app.post('/hooks/notification', async (c) => {
     try {
       const b = await body(c)
+      record('/hooks/notification', b)
       const sessionId = str(b.session_id)
       const type = str(b.notification_type)
       if (sessionId !== undefined && type !== undefined) {
@@ -103,6 +123,7 @@ export function createHookApp(token: string, events: HookEvents): Hono {
     try {
       const kind = c.req.param('kind')
       const b = await body(c)
+      record(`/hooks/lifecycle/${kind}`, b)
       const sessionId = str(b.session_id)
       if (sessionId !== undefined && LIFECYCLE_KINDS.has(kind)) {
         contain(
@@ -123,6 +144,7 @@ export function createHookApp(token: string, events: HookEvents): Hono {
   app.post('/statusline', async (c) => {
     try {
       const b = await body(c)
+      record('/statusline', b)
       const raw = b.rate_limits
       if (isRecord(raw)) {
         const limits: RateLimits = {}

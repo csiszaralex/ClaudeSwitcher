@@ -1,3 +1,6 @@
+import { mkdtemp, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createHookApp, type HookEvents } from './hook-server.js'
 
@@ -25,6 +28,42 @@ describe('hook app auth', () => {
   it('rejects a wrong token', async () => {
     const app = createHookApp(TOKEN, events())
     expect((await post(app, '/hooks/notification', {}, 'nope')).status).toBe(401)
+  })
+})
+
+describe('raw hook logging', () => {
+  it('writes the untouched payload when a log path is given', async () => {
+    // Azért kell, mert a hookok VALÓS alakja nincs dokumentálva: a mezőneveket csak
+    // méréssel lehet megtudni. A saját értelmezésünk ilyenkor pont a hibaforrás, ezért a
+    // nyers törzset írjuk ki, nem a kiolvasott mezőket.
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-hooklog-'))
+    const logFile = path.join(dir, 'hooks.jsonl')
+    const app = createHookApp(TOKEN, events(), logFile)
+
+    await post(app, '/hooks/notification', { session_id: 's1', notification_type: 'x', odd_field: 42 })
+    await post(app, '/hooks/lifecycle/stop', { session_id: 's1' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const lines = (await readFile(logFile, 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+    expect(lines).toHaveLength(2)
+    expect(lines[0].route).toBe('/hooks/notification')
+    // A kulcs: egy olyan mező is megmarad, amiről a kódunk nem tud.
+    expect(lines[0].body.odd_field).toBe(42)
+    expect(lines[1].route).toBe('/hooks/lifecycle/stop')
+  })
+
+  it('still answers 200 when the log file cannot be written', async () => {
+    // A diagnosztika soha nem akaszthat meg egy sessiont.
+    const app = createHookApp(TOKEN, events(), path.join(tmpdir(), 'no-such-dir-xyz', 'a.jsonl'))
+    const res = await post(app, '/hooks/notification', { session_id: 's1', notification_type: 'x' })
+    expect(res.status).toBe(200)
+  })
+
+  it('writes nothing when no log path is given', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    expect((await post(app, '/hooks/notification', { session_id: 's1', notification_type: 'x' })).status).toBe(200)
+    expect(ev.onNotification).toHaveBeenCalled()
   })
 })
 
