@@ -46,6 +46,34 @@ Eszköz: `server.mjs` (nyers napló + vezérelhető PermissionRequest válasz) �
 5. **A `SessionStart` HTTP-hookként nem érkezik meg, csak parancsként.** Ez az M1 telepítését
    is érinti: a `SessionStart` HTTP-hookja sosem tüzel.
 
+## Második kör — a felhasználó döntései alapján
+
+A felhasználó azt választotta, hogy kérdésre és tervre **az appból is lehessen válaszolni**, és
+legyen **gépszintű engedélyezés szerkeszthető előnézettel**. Ehhez mérve (`custom` mód, a válasz
+a spike mappa `respond.mjs`-éből):
+
+| # | Mérés | Eredmény |
+|---|---|---|
+| K1 | AskUserQuestion megválaszolása: `allow` + `updatedInput.answers` (kulcs a kérdés szövege, érték az opció label-je — az Agent SDK formátuma) | ✅ **Működik.** Ugyanabban a másodpercben ment tovább, kattintás nélkül, a választott opcióval |
+| K3 | Terv elutasítása: `deny` + `message` | ✅ **Működik.** Claude a visszajelzés szerint átírta a tervet |
+| K2 | Terv jóváhagyása: `allow` | ❌ A jóváhagyó ablak 6 mp múlva mégis megjelent |
+| K2b | Terv jóváhagyása: `allow` + `setMode default` | ❌ Ugyanígy |
+| K2c | Terv jóváhagyása a `PreToolUse`-ból (`permissionDecision: allow`) | ❌ A PermissionRequest ettől még lefutott, az ablak megjelent |
+| K4 | `updatedPermissions` egy **általunk kitalált** szabállyal (nem a javaslatból) | ✅ **Beírta** a `localSettings`-be, változtatás nélkül |
+| K5 | Ugyanez `destination: userSettings`-szel | ✅ **A globális `~/.claude/settings.json`-be írta.** Utána csak ezt az egy szabályt eltávolítottuk; a fájl bitre azonos lett a mérés előtti mentéssel |
+
+**Következmény az M2-re:**
+- Kérdésre válasz az appból: **megvalósítható**.
+- Terv: **elutasítás visszajelzéssel az appból megvalósítható; jóváhagyás nem.** Három független
+  próba bukott, egybevágóan egy bejelentett Claude Code-hibával (a hookból adott `allow` a
+  tervnél figyelmen kívül marad). Az app a jóváhagyáshoz a VSCode-ba visz (vagy telefonon).
+  Ha a Claude Code javítja, az app oldalán egy válasz-ágat kell bekapcsolni.
+- Projekt- és gépszintű szabály, **szerkeszthető előnézettel: megvalósítható.** A Claude Code
+  bármilyen általunk adott szabályt elfogad és maga ír be; saját beállításfájl-író nem kell.
+- Mérési csapda, amit érdemes megjegyezni: `acceptEdits` módban a `> fájl` átirányítás
+  fájlírásnak számít, és **engedélykérés nélkül** fut — a K4 első próbája ezért nem mért
+  semmit. A második próba egy nem fájlíró paranccsal (`node -e`) futott.
+
 ## Nyitva maradt
 
 - **A beírt szabály tényleg megakadályozza-e a következő kérdést?** A beírás biztos. Az
