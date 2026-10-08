@@ -98,10 +98,24 @@ function serve() {
 
       console.log(`${time()}  → ${event}  ${short(body)}`)
 
+      const { mode, seconds } = readMode()
+
+      // A PreToolUse csak `custom` módban kaphat döntést, és csak ha a respond.mjs exportál
+      // `preToolUse` függvényt — így a korábbi mérések viselkedése nem változik.
+      if (event === 'PreToolUse' && mode === 'custom') {
+        import(`${pathToFileURL(RESPOND_FILE).href}?t=${Date.now()}`)
+          .then((mod) => {
+            const out = mod.preToolUse?.(body)
+            if (out === undefined) return respond(200, '', 'üres 200')
+            respond(200, JSON.stringify(out), `custom PreToolUse — ${out.hookSpecificOutput?.permissionDecision ?? '?'}`)
+          })
+          .catch((error) => respond(200, '', `custom PreToolUse HIBA: ${error.message} — üres 200`))
+        return
+      }
+
       // Csak a PermissionRequest kap döntést; minden más azonnal üres 200.
       if (event !== 'PermissionRequest') return respond(200, '', 'üres 200')
 
-      const { mode, seconds } = readMode()
       if (mode === 'pass') return respond(200, '', 'pass — nincs döntés')
       if (mode === 'allow') return respond(200, decision('allow'), 'ALLOW')
       if (mode === 'deny') return respond(200, decision('deny'), 'DENY')
