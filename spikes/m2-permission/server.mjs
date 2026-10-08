@@ -19,14 +19,19 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-const PORT = 47899
+const PORT = Number(process.env.CS_SPIKE_PORT ?? 47899)
 const WORKSPACE = process.env.CS_SPIKE_DIR ?? 'P:/08_Apps/cs-spike'
 const LOG = path.join(WORKSPACE, 'spike-log.jsonl')
 const MODE_FILE = path.join(WORKSPACE, 'mode.json')
 
 const DEFAULT_MODE = { mode: 'pass', seconds: 0 }
-const MODES = new Set(['pass', 'hold', 'allow', 'deny', 'allow-after', 'allow-rule'])
+const MODES = new Set(['pass', 'hold', 'allow', 'deny', 'allow-after', 'allow-rule', 'custom'])
+
+// A `custom` mód a választ a spike mappa `respond.mjs`-éből állítja elő, minden kérésnél frissen
+// betöltve. Így egy új méréshez csak azt a fájlt kell átírni, a szervert nem kell újraindítani.
+const RESPOND_FILE = path.join(WORKSPACE, 'respond.mjs')
 
 function readMode() {
   try {
@@ -100,6 +105,20 @@ function serve() {
       if (mode === 'pass') return respond(200, '', 'pass — nincs döntés')
       if (mode === 'allow') return respond(200, decision('allow'), 'ALLOW')
       if (mode === 'deny') return respond(200, decision('deny'), 'DENY')
+      if (mode === 'custom') {
+        // A query string cache-buster: enélkül a Node a modult csak egyszer töltené be.
+        import(`${pathToFileURL(RESPOND_FILE).href}?t=${Date.now()}`)
+          .then((mod) => {
+            const out = mod.default(body)
+            if (out === undefined) return respond(200, '', 'custom — nincs döntés')
+            respond(200, JSON.stringify(out), `custom — ${out.hookSpecificOutput?.decision?.behavior ?? '?'}`)
+          })
+          .catch((error) => {
+            console.error(error)
+            respond(200, '', `custom HIBA: ${error.message} — üres 200`)
+          })
+        return
+      }
       if (mode === 'allow-rule') {
         // Engedélyez, és a Claude Code SAJÁT javaslatát kéri beírni projekt-szintű szabályként.
         // Szándékosan csak `localSettings` cél: a spike mappa .claude/settings.local.json-je.
