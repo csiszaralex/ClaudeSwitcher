@@ -108,7 +108,9 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
             sessionId,
             cwd: str(b.cwd) ?? '',
             type,
-            text: str(b.notification_text),
+            // A Claude Code `message`-ben küldi — a CLAUDESWITCHER_HOOK_LOG nyers naplójából
+            // mérve. A `notification_text` csak tartalék, ha egy jövőbeli verzió átnevezné.
+            text: str(b.message) ?? str(b.notification_text),
           }),
           'notification',
         )

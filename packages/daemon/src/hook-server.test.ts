@@ -68,6 +68,28 @@ describe('raw hook logging', () => {
 })
 
 describe('POST /hooks/notification', () => {
+  it('reads the prompt text from `message`, the field Claude Code actually sends', async () => {
+    // Mérve, a CLAUDESWITCHER_HOOK_LOG nyers naplójából, egy valódi VSCode-os sessionből.
+    // A korábbi kód `notification_text`-et olvasott, ami nem létezik — a szöveg ezért
+    // minden várakozásnál üres volt, és az pont úgy nézett ki, mint ha nem jönne szöveg.
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/notification', {
+      session_id: '672b0e7c-b1a1-488e-aca0-b44c545e515b',
+      transcript_path: 'C:\\x.jsonl',
+      cwd: 'P:\\05_Scripts\\BSZ-Parser',
+      prompt_id: 'cc77cf3d-310d-4a4b-9fa8-3638863009c8',
+      hook_event_name: 'Notification',
+      message: 'Claude needs your permission to use Bash',
+      notification_type: 'permission_prompt',
+    })
+    expect(ev.onNotification).toHaveBeenCalledWith({
+      sessionId: '672b0e7c-b1a1-488e-aca0-b44c545e515b',
+      cwd: 'P:\\05_Scripts\\BSZ-Parser',
+      type: 'permission_prompt',
+      text: 'Claude needs your permission to use Bash',
+    })
+  })
+
   it('forwards a permission_prompt notification', async () => {
     const ev = events()
     const app = createHookApp(TOKEN, ev)
