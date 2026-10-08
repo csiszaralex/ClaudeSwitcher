@@ -26,7 +26,7 @@ const LOG = path.join(WORKSPACE, 'spike-log.jsonl')
 const MODE_FILE = path.join(WORKSPACE, 'mode.json')
 
 const DEFAULT_MODE = { mode: 'pass', seconds: 0 }
-const MODES = new Set(['pass', 'hold', 'allow', 'deny', 'allow-after'])
+const MODES = new Set(['pass', 'hold', 'allow', 'deny', 'allow-after', 'allow-rule'])
 
 function readMode() {
   try {
@@ -100,6 +100,20 @@ function serve() {
       if (mode === 'pass') return respond(200, '', 'pass — nincs döntés')
       if (mode === 'allow') return respond(200, decision('allow'), 'ALLOW')
       if (mode === 'deny') return respond(200, decision('deny'), 'DENY')
+      if (mode === 'allow-rule') {
+        // Engedélyez, és a Claude Code SAJÁT javaslatát kéri beírni projekt-szintű szabályként.
+        // Szándékosan csak `localSettings` cél: a spike mappa .claude/settings.local.json-je.
+        // A `userSettings` a globális konfigodba írna — azt itt nem mérjük.
+        const rules = (body.permission_suggestions ?? []).filter((s) => s.type === 'addRules')
+        const updatedPermissions = rules.map((s) => ({ ...s, destination: 'localSettings' }))
+        const payload = JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PermissionRequest',
+            decision: { behavior: 'allow', updatedPermissions },
+          },
+        })
+        return respond(200, payload, `ALLOW + ${updatedPermissions.length} szabály (localSettings)`)
+      }
 
       console.log(`${time()}     tartás ${seconds} mp (${mode})…`)
       // Ha a kliens közben bontja a kapcsolatot (pl. a Claude Code timeoutja), azt is mérjük.
