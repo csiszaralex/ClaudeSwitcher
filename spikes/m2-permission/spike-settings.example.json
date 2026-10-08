@@ -1,0 +1,46 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://127.0.0.1:47899/hook/PermissionRequest", "timeout": 300 },
+          { "type": "command", "command": "node P:/08_Apps/ClaudeSwitcher/spikes/m2-permission/log-hook.mjs PermissionRequest" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      { "hooks": [{ "type": "http", "url": "http://127.0.0.1:47899/hook/PreToolUse", "timeout": 10 }] }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://127.0.0.1:47899/hook/PostToolUse", "timeout": 10 },
+          { "type": "command", "command": "node P:/08_Apps/ClaudeSwitcher/spikes/m2-permission/log-hook.mjs PostToolUse" }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      { "hooks": [{ "type": "command", "command": "node P:/08_Apps/ClaudeSwitcher/spikes/m2-permission/log-hook.mjs PostToolUseFailure" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "http", "url": "http://127.0.0.1:47899/hook/Notification", "timeout": 10 }] }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "http", "url": "http://127.0.0.1:47899/hook/SubagentStart", "timeout": 10 }] }
+    ],
+    "SubagentStop": [
+      { "hooks": [{ "type": "http", "url": "http://127.0.0.1:47899/hook/SubagentStop", "timeout": 10 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "http", "url": "http://127.0.0.1:47899/hook/Stop", "timeout": 10 }] }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "http", "url": "http://127.0.0.1:47899/hook/SessionStart", "timeout": 10 },
+          { "type": "command", "command": "node P:/08_Apps/ClaudeSwitcher/spikes/m2-permission/log-hook.mjs SessionStart" }
+        ]
+      }
+    ]
+  }
+}

@@ -281,7 +281,7 @@ PermissionRequest ─→ PendingDecision, a HTTP válasz felfüggesztve
 |---|---|---|---|
 | Bash, PowerShell, WebFetch, MCP, … | tool, bemenet, ki kéri (session vagy subagent) | Engedélyez · Tilt (indoklással) · Projekt-szinten · Gép-szinten | `allow` / `deny`+`message` / `allow`+`updatedPermissions` |
 | Write, Edit | fájl, diff-összegzés | Engedélyez · Tilt · Erre a sessionre automatikusan | `allow` / `deny` / `allow`+`setMode acceptEdits session` |
-| AskUserQuestion | a kérdések és az opciók | opció-választás → Válasz | `allow`+`updatedInput.answers` (kulcs: kérdés szövege, érték: opció label) |
+| AskUserQuestion | a kérdések és az opciók | opció-választás (többválasztósnál több), szabad szöveg → Válasz | `allow`+`updatedInput.answers` (kulcs: kérdés szövege, érték: opció label; több label `", "`-vel összefűzve; szabad szöveg szó szerint) |
 | ExitPlanMode | a terv szövege | Elutasít visszajelzéssel · **Jóváhagyás a VSCode-ban** (odaugrik) | `deny`+`message`; jóváhagyni a hookból nem lehet (§10) |
 
 **Projekt- és gépszintű szabály.** A Claude Code javaslata (`permission_suggestions`)
@@ -360,12 +360,11 @@ felülete, nem a puszta jóváhagyás.
 
 Vezérelv: **az app hibája soha ne blokkoljon egy sessiont.**
 
-- Daemon nem fut / port foglalt / crash → connection refused vagy nem-2xx →
-  natív flow, változatlanul. **Mérendő az M2 elején** (§10, nyitott 1).
-- Electron restart felfüggesztett döntésekkel → a kapcsolatok elhalnak → a
-  Claude Code hook-hibát lát. Mivel a natív prompt a tartás alatt is látszik (§3.4), a
-  felhasználó semmit nem veszít; hogy a Claude Code egy megszakadt hookot tiltásnak vagy
-  „nincs döntés"-nek vesz-e, az **mérendő** (§10, nyitott 1).
+- Daemon nem fut / port foglalt / crash → connection refused → natív flow, változatlanul.
+  **Mérve** (§10): pontosan úgy működik, mint hook nélkül.
+- Electron restart vagy összeomlás felfüggesztett döntésekkel → a kapcsolatok elhalnak →
+  **mérve:** a natív prompt marad és válaszolható, a Claude Code nem veszi tiltásnak. Az app
+  hibája így soha nem tagad meg egy parancsot.
 - **Az app nem dönthet vakon kérdésre és tervre**: az `AskUserQuestion`-re csak a
   felhasználó által választott opciókkal ad `allow`-t, `ExitPlanMode`-ra soha nem ad
   `allow`-t. Egy hibás besorolás tehát legfeljebb egy fölösleges sort jelent, nem egy
@@ -413,14 +412,15 @@ visszajelzéssel ✅, **terv jóváhagyása ❌** (sima `allow`, `allow`+`setMod
 `allow` — mindhárom esetben a jóváhagyó ablak megmaradt; egybevág egy bejelentett Claude
 Code-hibával), átírt szabály projekt- és gépszinten ✅.
 
-**Nyitott — az M2 első lépéseként mérendő:**
+**A spec jóváhagyása után kimérve (3. kör):**
 
-1. **Biztonság:** ha a daemon nem fut, vagy tartás közben leáll, a Claude Code „nincs
-   döntés"-nek veszi-e (a natív prompt működik tovább), vagy tiltásnak? Ezen múlik a §8
-   vezérelve.
-2. `AskUserQuestion` többválasztós (`multiSelect`) és szabad szöveges („Other") válasz
-   kódolása — csak egyválasztósat mértünk.
-3. Megjelenik-e a kérdés/terv a telefonon is, és ott megválaszolva a daemon helyesen zárja-e.
+1. **Biztonság ✅:** ha a hook-szerver nem fut, vagy tartás közben leáll, a natív prompt
+   marad, és „Yes"-re a tool lefut. A Claude Code a hiba-hookot „nincs döntés"-nek veszi.
+2. **Kérdés-válasz formátum:** szabad szöveg ✅ (a felületen „Other" alatt). Többválasztós:
+   tömbként a session helyesen érti, de a felület „Other"-ként mutatja; az M2 a dokumentált
+   `", "`-vel összefűzött szöveget küldi, és az elfogadási teszt ellenőrzi.
+3. **Telefonos válasz ✅:** a `PostToolUse` a válasszal és a `tool_use_id`-vel érkezik, a
+   daemon le tudja zárni a sort.
 
 ## 11. Mérföldkövek
 
@@ -450,7 +450,7 @@ kerül bele.
 | Kockázat | Hatás | Kezelés |
 | --- | --- | --- |
 | `sessions/` és `ide/` formátum nem dokumentált, verzióváltásnál törhet | a lista elromlik | §8 rétegzés: az approve független tőle; séma-validáció, graceful degradation |
-| A hookok a globális `~/.claude/settings.json`-be kerülnek → minden sessionre hatnak | szélesebb blast radius, mint az app | a natív prompt a tartás alatt is él (§3.4); a leállt daemon viselkedése §10 nyitott 1 |
+| A hookok a globális `~/.claude/settings.json`-be kerülnek → minden sessionre hatnak | szélesebb blast radius, mint az app | a natív prompt a tartás alatt is él (§3.4); a leállt vagy összeomló daemon mérten nem blokkol és nem tilt (§8) |
 | ~~Az interception elveszi a promptot a Remote Controltól~~ | — | mérve: nem veszi el (§3.7) |
 | statusLine bevezetése elrejti a footer hinteket | apró UX-veszteség a TUI-ban | a statusLine hasznosat is mutat |
 | Túl bő szabály kerül be projekt- vagy gépszinten | tartós, nem szándékolt engedély | a szabály szerkeszthetően megjelenik, a gépszint külön megerősítést kér |

@@ -74,6 +74,20 @@ a spike mappa `respond.mjs`-éből):
   fájlírásnak számít, és **engedélykérés nélkül** fut — a K4 első próbája ezért nem mért
   semmit. A második próba egy nem fájlíró paranccsal (`node -e`) futott.
 
+## Harmadik kör — a spec nyitott pontjai (2026-10-08)
+
+| # | Mérés | Eredmény |
+|---|---|---|
+| R1a | Többválasztós válasz **tömbként** (`["Alma","Banán"]`) | Tartalmilag ✅ — a session helyesen értette. A felület viszont nem a két opciót pipálta be, hanem „Other: Alma,Banán"-ként mutatta. Az Agent SDK dokumentációja a `", "`-vel összefűzött szöveget is említi; az M2 azt használja, és az elfogadási teszten ellenőrizzük |
+| R1b | Szabad szöveg, ami nem opció | ✅ „Other: …" alatt jelenik meg, a session helyesen értette |
+| R2 | Kérdés megválaszolása a gépen, majd a telefonon (Remote Control) | ✅ Mindkét esetben `PostToolUse` jött `tool_response.answers`-szel és `tool_use_id`-vel → a daemon le tudja zárni a sort |
+| R3 | A hook-szerver leáll a tartás közben | ✅ **A prompt marad, „Yes"-re lefut.** Nincs `PostToolUseFailure` |
+| R4 | A hook-szerver egyáltalán nem fut | ✅ **Pontosan úgy működik, mint hook nélkül** |
+
+**Következmény:** egy elérhetetlen vagy menet közben leálló hookot a Claude Code „nincs
+döntés"-nek vesz, nem tiltásnak. Az app összeomlása vagy kilépése tehát soha nem tagad meg
+egy parancsot — ezen állt a spec §8 vezérelve.
+
 ## Nyitva maradt
 
 - **A beírt szabály tényleg megakadályozza-e a következő kérdést?** A beírás biztos. Az
