@@ -49,10 +49,10 @@ const OUR_HOOK_PATHS = /^\/hooks\/(notification|lifecycle\/(start|end|stop))$/
  */
 export function isOurHook(hook: unknown): boolean {
   if (!isPlainObject(hook)) return false
-  if (Array.isArray(hook.allowedEnvVars) && hook.allowedEnvVars.includes(TOKEN_ENV)) return true
-  if (typeof hook.url !== 'string') return false
+  if (Array.isArray(hook['allowedEnvVars']) && hook['allowedEnvVars'].includes(TOKEN_ENV)) return true
+  if (typeof hook['url'] !== 'string') return false
   try {
-    const url = new URL(hook.url)
+    const url = new URL(hook['url'])
     // A protokollt is nézni kell. A `new URL` a hostot és az útvonalat bármilyen sémára
     // kitölti, így e nélkül egy `file://127.0.0.1/hooks/notification` is a mienknek
     // számítana — ugyanaz a túl tág azonosítás, amit ez a kör megszüntetett.
@@ -72,10 +72,10 @@ export function isOurHook(hook: unknown): boolean {
  */
 function stripOurHooks(list: unknown[]): unknown[] {
   return list.flatMap((entry) => {
-    if (!isPlainObject(entry) || !Array.isArray(entry.hooks)) return [entry]
-    const foreign = entry.hooks.filter((hook) => !isOurHook(hook))
+    if (!isPlainObject(entry) || !Array.isArray(entry['hooks'])) return [entry]
+    const foreign = entry['hooks'].filter((hook) => !isOurHook(hook))
     if (foreign.length === 0) return []
-    if (foreign.length === entry.hooks.length) return [entry]
+    if (foreign.length === entry['hooks'].length) return [entry]
     return [{ ...entry, hooks: foreign }]
   })
 }
@@ -95,8 +95,8 @@ export const STATUS_LINE_MARKER = '--claudeswitcher'
 export function isOurStatusLine(statusLine: unknown): boolean {
   return (
     isPlainObject(statusLine) &&
-    typeof statusLine.command === 'string' &&
-    statusLine.command.includes(STATUS_LINE_MARKER)
+    typeof statusLine['command'] === 'string' &&
+    statusLine['command'].includes(STATUS_LINE_MARKER)
   )
 }
 
@@ -129,7 +129,7 @@ export function applyIntegration(
   const settings: Record<string, unknown> = { ...existing }
   const conflicts: string[] = []
 
-  const rawHooks = existing.hooks
+  const rawHooks = existing['hooks']
   if (rawHooks !== undefined && !isPlainObject(rawHooks)) {
     conflicts.push('A "hooks" érték nem objektum, ezért a hookokat nem telepítettük.')
   } else {
@@ -143,13 +143,13 @@ export function applyIntegration(
       const foreign = stripOurHooks(Array.isArray(current) ? current : [])
       hooks[event] = [...foreign, ourHookEntry(options.port, route)]
     }
-    settings.hooks = hooks
+    settings['hooks'] = hooks
   }
 
-  const previousStatusLine = existing.statusLine
+  const previousStatusLine = existing['statusLine']
   if (previousStatusLine === undefined || isOurStatusLine(previousStatusLine)) {
-    const previousPadding = isPlainObject(previousStatusLine) ? previousStatusLine.padding : undefined
-    settings.statusLine = {
+    const previousPadding = isPlainObject(previousStatusLine) ? previousStatusLine['padding'] : undefined
+    settings['statusLine'] = {
       type: 'command',
       command: `${options.statusLineCommand} ${STATUS_LINE_MARKER}`,
       // A felhasználó által állított padding megmarad; enélkül minden újratelepítés
@@ -162,11 +162,11 @@ export function applyIntegration(
     )
   }
 
-  const rawEnv = existing.env
+  const rawEnv = existing['env']
   if (rawEnv !== undefined && !isPlainObject(rawEnv)) {
     conflicts.push('Az "env" érték nem objektum, ezért a portot és a tokent nem állítottuk be.')
   } else {
-    settings.env = {
+    settings['env'] = {
       ...(isPlainObject(rawEnv) ? rawEnv : {}),
       [PORT_ENV]: String(options.port),
       [TOKEN_ENV]: options.token,
@@ -184,29 +184,29 @@ export function applyIntegration(
 export function removeIntegration(existing: Record<string, unknown>): Record<string, unknown> {
   const settings: Record<string, unknown> = { ...existing }
 
-  const rawHooks = existing.hooks
+  const rawHooks = existing['hooks']
   if (isPlainObject(rawHooks)) {
-    const hooks: Record<string, unknown> = { ...rawHooks }
-    for (const event of Object.keys(HOOK_ROUTES)) {
-      const current = hooks[event]
-      if (!Array.isArray(current)) continue
-      const foreign = stripOurHooks(current)
-      if (foreign.length === 0) delete hooks[event]
-      else hooks[event] = foreign
-    }
-    if (Object.keys(hooks).length === 0) delete settings.hooks
-    else settings.hooks = hooks
+    // Új objektum, nem dinamikus `delete`: a kulcsok sorrendje megmarad, a kiürült eseményé kiesik.
+    const hooks: Record<string, unknown> = Object.fromEntries(
+      Object.entries(rawHooks).flatMap(([event, current]): Array<[string, unknown]> => {
+        if (!Object.hasOwn(HOOK_ROUTES, event) || !Array.isArray(current)) return [[event, current]]
+        const foreign = stripOurHooks(current)
+        return foreign.length === 0 ? [] : [[event, foreign]]
+      }),
+    )
+    if (Object.keys(hooks).length === 0) delete settings['hooks']
+    else settings['hooks'] = hooks
   }
 
-  if (isOurStatusLine(existing.statusLine)) delete settings.statusLine
+  if (isOurStatusLine(existing['statusLine'])) delete settings['statusLine']
 
-  const rawEnv = existing.env
+  const rawEnv = existing['env']
   if (isPlainObject(rawEnv)) {
-    const env: Record<string, unknown> = { ...rawEnv }
-    delete env[PORT_ENV]
-    delete env[TOKEN_ENV]
-    if (Object.keys(env).length === 0) delete settings.env
-    else settings.env = env
+    const env: Record<string, unknown> = Object.fromEntries(
+      Object.entries(rawEnv).filter(([key]) => key !== PORT_ENV && key !== TOKEN_ENV),
+    )
+    if (Object.keys(env).length === 0) delete settings['env']
+    else settings['env'] = env
   }
 
   return settings

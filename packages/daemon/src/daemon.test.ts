@@ -81,7 +81,9 @@ describe('startDaemon', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=wrong`)
     const messages: string[] = []
-    socket.on('message', (data) => messages.push(String(data)))
+    socket.on('message', (data) => {
+      messages.push(data instanceof Buffer ? data.toString('utf8') : '')
+    })
 
     const code = await new Promise<number>((resolve) => socket.on('close', resolve))
     expect(code).toBe(1008)
@@ -106,7 +108,9 @@ describe('startDaemon', () => {
 
     const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
     const messages: string[] = []
-    socket.on('message', (data) => messages.push(String(data)))
+    socket.on('message', (data) => {
+      messages.push(data instanceof Buffer ? data.toString('utf8') : '')
+    })
     await new Promise((resolve) => socket.on('open', resolve))
 
     await running.refresh()

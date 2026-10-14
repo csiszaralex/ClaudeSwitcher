@@ -42,6 +42,7 @@ export function useDaemonState(): OverlayState {
   useEffect(() => {
     let socket: WebSocket | undefined
     let closed = false
+    const isClosed = (): boolean => closed
     let attempt = 0
     let retry: ReturnType<typeof setTimeout> | undefined
     // Ha már érkezett élő üzenet, egy később befutó IPC-lekérés nem írhatja felül: a két
@@ -64,7 +65,9 @@ export function useDaemonState(): OverlayState {
       const myGeneration = ++generation
 
       const { port, token } = await window.claudeswitcher.connection()
-      if (closed || myGeneration !== generation) return
+      // Az `await` alatt a `closed` megváltozhat; a függvényhívás megakadályozza, hogy a
+      // fordító a korábbi `if (closed)` után végleg hamisnak vegye.
+      if (isClosed() || myGeneration !== generation) return
 
       const next = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
       socket = next

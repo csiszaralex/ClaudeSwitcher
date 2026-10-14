@@ -14,17 +14,17 @@ interface State {
  * ránézel — és úgy néz ki, mintha nem lenne futó session.
  */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { message: undefined }
+  override state: State = { message: undefined }
 
   static getDerivedStateFromError(error: unknown): State {
     return { message: error instanceof Error ? error.message : String(error) }
   }
 
-  componentDidCatch(error: unknown, info: ErrorInfo): void {
+  override componentDidCatch(error: unknown, info: ErrorInfo): void {
     console.error('[overlay] render failed', error, info.componentStack)
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     if (this.state.message !== undefined) {
       return <div className="empty">Az overlay hibába futott: {this.state.message}</div>
     }

@@ -46,7 +46,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const app = createHookApp(
     token,
     {
-      onNotification: (event) => sessions.applyNotification(event),
+      onNotification: (event) => {
+        sessions.applyNotification(event)
+      },
       onLifecycle: (event) => {
         sessions.applyLifecycle(event)
         void refresh()
@@ -59,11 +61,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     // Diagnosztika, alapból kikapcsolva. A hookok valódi alakja nincs dokumentálva, és egy
     // rosszul olvasott mezőnév ugyanúgy néz ki, mint egy hiányzó adat — ezzel a nyers
     // törzs megnézhető anélkül, hogy a kódot kellene átírni hozzá.
-    process.env.CLAUDESWITCHER_HOOK_LOG,
+    process.env['CLAUDESWITCHER_HOOK_LOG'],
   )
 
   const server: ServerType = await new Promise((resolve, reject) => {
-    const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: requestedPort }, () => resolve(s))
+    const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: requestedPort }, () => {
+      resolve(s)
+    })
     // Foglalt porton a listen `error` eseményt emittál. Kezelő nélkül ez elkapatlan kivétel
     // lenne; így a startDaemon elutasít, a desktop pedig indulási hibadialógust mutat.
     s.on('error', reject)
@@ -130,7 +134,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       // ami a processzt életben tartja vagy egy már lezárt hubba írna.
       await refreshing?.catch(() => undefined)
       await hub.close()
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      await new Promise<void>((resolve) => server.close(() => {
+          resolve()
+        }))
     },
   }
 }

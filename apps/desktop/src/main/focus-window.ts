@@ -10,12 +10,13 @@ const SW_RESTORE = 9
 const GW_HWNDNEXT = 2
 
 interface User32 {
-  GetTopWindow(hWnd: number): number
-  GetWindow(hWnd: number, uCmd: number): number
+  // Az `intptr` visszatérés koffi-ben futásidőben `number` vagy `bigint` lehet.
+  GetTopWindow(hWnd: number): number | bigint
+  GetWindow(hWnd: number, uCmd: number): number | bigint
   GetWindowThreadProcessId(hWnd: number, pid: [number]): number
   IsWindowVisible(hWnd: number): number
   GetWindowTextLengthW(hWnd: number): number
-  GetForegroundWindow(): number
+  GetForegroundWindow(): number | bigint
   SetForegroundWindow(hWnd: number): number
   ShowWindow(hWnd: number, nCmdShow: number): number
 }
@@ -119,7 +120,8 @@ export function findMainWindow(targetPid: number): number {
   const api = loadUser32()
   if (api === null) return 0
   const windows = scanWindowsForPid(api, targetPid)
-  return windows.length === 1 ? windows[0]! : 0
+  const only = windows[0]
+  return windows.length === 1 && only !== undefined ? only : 0
 }
 
 /**

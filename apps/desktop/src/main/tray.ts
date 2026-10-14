@@ -27,12 +27,12 @@ function loadIcon(file: string): Electron.NativeImage {
 }
 
 export function createTray(options: {
-  onOpen(): void
-  onQuit(): void
-  onInstall(): void
-  onUninstall(): void
+  onOpen: () => void
+  onQuit: () => void
+  onInstall: () => void
+  onUninstall: () => void
   /** Megnyitja a config fájlt, hogy a gyorsbillentyű átírható legyen. */
-  onEditHotkey(): void
+  onEditHotkey: () => void
   /** A gyorsbillentyű, és hogy sikerült-e lefoglalni. */
   hotkey: { accelerator: string; registered: boolean }
 }): TrayHandle {

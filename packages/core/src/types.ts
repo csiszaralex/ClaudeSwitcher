@@ -4,12 +4,12 @@ export interface SessionRecord {
   sessionId: string
   cwd: string
   startedAt: number
-  procStart?: string
-  version?: string
-  kind?: string
-  entrypoint?: string
-  name?: string
-  bridgeSessionId?: string | null
+  procStart?: string | undefined
+  version?: string | undefined
+  kind?: string | undefined
+  entrypoint?: string | undefined
+  name?: string | undefined
+  bridgeSessionId?: string | null | undefined
 }
 
 /** Nyers rekord a ~/.claude/ide/<port>.lock fájlból. Nem dokumentált formátum. */
@@ -17,21 +17,21 @@ export interface IdeLock {
   port: number
   pid: number
   workspaceFolders: string[]
-  ideName?: string
-  transport?: string
+  ideName?: string | undefined
+  transport?: string | undefined
 }
 
 export type SessionStatus = 'waiting' | 'working' | 'idle' | 'unknown'
 
 export interface SessionActivity {
-  lastAssistantText?: string
-  runningTool?: string
-  lastEventAt?: number
+  lastAssistantText?: string | undefined
+  runningTool?: string | undefined
+  lastEventAt?: number | undefined
 }
 
 export interface LiveSession {
   record: SessionRecord
-  window?: IdeLock
+  window?: IdeLock | undefined
 }
 
 /** Amit a daemon a UI-nak küld. */
@@ -42,11 +42,11 @@ export interface SessionView {
   cwd: string
   status: SessionStatus
   activity: SessionActivity
-  windowPid?: number
-  workspaceFolder?: string
-  bridgeSessionId?: string | null
-  waitingSince?: number
-  notificationText?: string
+  windowPid?: number | undefined
+  workspaceFolder?: string | undefined
+  bridgeSessionId?: string | null | undefined
+  waitingSince?: number | undefined
+  notificationText?: string | undefined
 }
 
 export interface RateLimitWindow {
@@ -55,7 +55,7 @@ export interface RateLimitWindow {
 }
 
 export interface RateLimits {
-  five_hour?: RateLimitWindow
-  seven_day?: RateLimitWindow
-  spend_limit?: RateLimitWindow
+  five_hour?: RateLimitWindow | undefined
+  seven_day?: RateLimitWindow | undefined
+  spend_limit?: RateLimitWindow | undefined
 }

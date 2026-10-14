@@ -24,8 +24,12 @@ export function App(): JSX.Element {
   )
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
+    const timer = setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+    return () => {
+      clearInterval(timer)
+    }
   }, [])
 
   // A kijelölt sor legördítése. A lista scrollozható, tehát nélküle a nyilakkal a
@@ -53,7 +57,9 @@ export function App(): JSX.Element {
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+    }
   }, [sessions, selectedId])
 
   return (

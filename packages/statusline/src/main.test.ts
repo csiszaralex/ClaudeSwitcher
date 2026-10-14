@@ -18,7 +18,10 @@ function finite(chunks: string[]): AsyncIterable<Buffer> & { destroy(): void } {
   return {
     destroy() {},
     async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield Buffer.from(chunk, 'utf8')
+      for (const chunk of chunks) {
+        await Promise.resolve()
+        yield Buffer.from(chunk, 'utf8')
+      }
     },
   }
 }

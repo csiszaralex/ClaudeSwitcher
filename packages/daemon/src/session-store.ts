@@ -12,7 +12,7 @@ const WAITING_TYPES = new Set(['permission_prompt', 'agent_needs_input', 'elicit
 
 interface WaitState {
   since: number
-  text?: string
+  text?: string | undefined
 }
 
 function displayName(record: LiveSession['record']): string {

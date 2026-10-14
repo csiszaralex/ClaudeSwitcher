@@ -139,7 +139,10 @@ describe('quoteForCli', () => {
       exec(
         `node -e "process.stdout.write(process.argv[1])" ${quoteForCli(folder)}`,
         { windowsHide: true },
-        (error, stdout) => (error ? reject(error) : resolve(stdout)),
+        (error, stdout) => {
+          if (error) reject(error)
+          else resolve(stdout)
+        },
       )
     })
   }

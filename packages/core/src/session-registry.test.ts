@@ -47,7 +47,7 @@ describe('parseSessionRecord', () => {
   })
 
   it('returns null when a required field is missing', () => {
-    const { sessionId, ...withoutId } = REAL_SESSION
+    const withoutId = Object.fromEntries(Object.entries(REAL_SESSION).filter(([k]) => k !== 'sessionId'))
     expect(parseSessionRecord(withoutId)).toBeNull()
     expect(parseSessionRecord(null)).toBeNull()
     expect(parseSessionRecord('nonsense')).toBeNull()
@@ -79,7 +79,7 @@ describe('parseIdeLock', () => {
   })
 
   it('returns null without workspaceFolders', () => {
-    const { workspaceFolders, ...bad } = REAL_LOCK
+    const bad = Object.fromEntries(Object.entries(REAL_LOCK).filter(([k]) => k !== 'workspaceFolders'))
     expect(parseIdeLock(bad, 1)).toBeNull()
   })
 

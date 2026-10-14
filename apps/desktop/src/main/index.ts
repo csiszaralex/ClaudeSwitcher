@@ -37,12 +37,14 @@ function createOverlay(): BrowserWindow {
     },
   })
 
-  if (process.env.ELECTRON_RENDERER_URL !== undefined) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL)
+  if (process.env['ELECTRON_RENDERER_URL'] !== undefined) {
+    void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     void window.loadFile(path.join(dirname, '../renderer/index.html'))
   }
-  window.on('blur', () => window.hide())
+  window.on('blur', () => {
+    window.hide()
+  })
 
   // Ha a renderer processz meghal (OOM, GPU- vagy V8-összeomlás), az Electron egy üres
   // keretet hagy, és semmi nem tölti újra. Az overlay az egyetlen ablak, tehát a
@@ -63,19 +65,25 @@ app.whenReady().then(async () => {
   const userData = app.getPath('userData')
   const config = await loadConfig(userData)
   const token = await loadOrCreateToken(userData)
-  daemon = await startDaemon({
+  // Egy helyi, nem-null konstans: a kezelők ezt fogják be, így nincs szükség `!`-re, és a típus
+  // garantálja, hogy indulás után minden kezelő ugyanazt a futó daemont látja. A modulszintű
+  // `daemon` csak a `before-quit`-nek kell.
+  const running = await startDaemon({
     claudeDir: resolveClaudeDir(),
     probe: createWin32ProcessProbe(),
     port: DAEMON_PORT,
     token,
   })
-  await daemon.refresh()
+  daemon = running
+  await running.refresh()
 
-  ipcMain.handle('daemon:connection', () => ({ port: daemon!.port, token: daemon!.token }))
-  ipcMain.handle('daemon:state', () => daemon!.state())
+  ipcMain.handle('daemon:connection', () => ({ port: running.port, token: running.token }))
+  ipcMain.handle('daemon:state', () => running.state())
 
-  ipcMain.handle('session:focus', async (_event, sessionId: string) => {
-    const view = daemon!.state().sessions.find((s) => s.sessionId === sessionId)
+  ipcMain.handle('session:focus', async (_event, sessionId: unknown) => {
+    // IPC-bemenet: a renderer bármit küldhet, ezért `unknown`, és itt ellenőrizzük.
+    if (typeof sessionId !== 'string') return false
+    const view = running.state().sessions.find((s) => s.sessionId === sessionId)
     if (view === undefined) return false
     // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
     // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van —
@@ -94,8 +102,8 @@ app.whenReady().then(async () => {
   // automatizálhatóvá: nem kell DevTools-konzolba gépelni ahhoz, hogy lássuk,
   // a daemon elindult és tényleg megtalálta a futó sessionöket.
   console.log(
-    `[claudeswitcher] daemon on 127.0.0.1:${daemon.port}, ` +
-      `${daemon.state().sessions.length} session(s) discovered, ` +
+    `[claudeswitcher] daemon on 127.0.0.1:${running.port}, ` +
+      `${running.state().sessions.length} session(s) discovered, ` +
       `fast focus ${isFastFocusAvailable() ? 'available' : 'UNAVAILABLE'}`,
   )
 
@@ -122,8 +130,12 @@ app.whenReady().then(async () => {
     onEditHotkey: () => {
       void shell.openPath(configPath(userData))
     },
-    onOpen: () => showOverlay(),
-    onQuit: () => app.quit(),
+    onOpen: () => {
+      showOverlay()
+    },
+    onQuit: () => {
+      app.quit()
+    },
     onInstall: () => {
       // A telepítés különben „sikerült"-et jelentene egy olyan status line-ra, ami nem
       // létezik — a limitek egyszerűen nem jelennének meg, ok nélkül. Lefordítatlan
@@ -201,7 +213,7 @@ app.whenReady().then(async () => {
   )
 
   const syncTray = (): void => {
-    tray.setWaiting(daemon!.state().sessions.filter((s) => s.status === 'waiting').length)
+    tray.setWaiting(running.state().sessions.filter((s) => s.status === 'waiting').length)
   }
   syncTray()
   setInterval(syncTray, 1000).unref()

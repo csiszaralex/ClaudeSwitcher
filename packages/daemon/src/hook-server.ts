@@ -6,7 +6,7 @@ export interface NotificationEvent {
   sessionId: string
   cwd: string
   type: string
-  text?: string
+  text?: string | undefined
 }
 
 export interface LifecycleEvent {
@@ -85,6 +85,7 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       return c.text('unauthorized', 401)
     }
     await next()
+    return undefined
   })
 
   async function body(c: { req: { json(): Promise<unknown> } }): Promise<Record<string, unknown>> {
@@ -100,17 +101,17 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     try {
       const b = await body(c)
       record('/hooks/notification', b)
-      const sessionId = str(b.session_id)
-      const type = str(b.notification_type)
+      const sessionId = str(b['session_id'])
+      const type = str(b['notification_type'])
       if (sessionId !== undefined && type !== undefined) {
         contain(
           events.onNotification({
             sessionId,
-            cwd: str(b.cwd) ?? '',
+            cwd: str(b['cwd']) ?? '',
             type,
             // A Claude Code `message`-ben küldi — a CLAUDESWITCHER_HOOK_LOG nyers naplójából
             // mérve. A `notification_text` csak tartalék, ha egy jövőbeli verzió átnevezné.
-            text: str(b.message) ?? str(b.notification_text),
+            text: str(b['message']) ?? str(b['notification_text']),
           }),
           'notification',
         )
@@ -126,12 +127,12 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       const kind = c.req.param('kind')
       const b = await body(c)
       record(`/hooks/lifecycle/${kind}`, b)
-      const sessionId = str(b.session_id)
+      const sessionId = str(b['session_id'])
       if (sessionId !== undefined && LIFECYCLE_KINDS.has(kind)) {
         contain(
           events.onLifecycle({
             sessionId,
-            cwd: str(b.cwd) ?? '',
+            cwd: str(b['cwd']) ?? '',
             kind: kind as LifecycleEvent['kind'],
           }),
           'lifecycle',
@@ -147,12 +148,12 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     try {
       const b = await body(c)
       record('/statusline', b)
-      const raw = b.rate_limits
+      const raw = b['rate_limits']
       if (isRecord(raw)) {
         const limits: RateLimits = {}
-        const five = limitWindow(raw.five_hour)
-        const seven = limitWindow(raw.seven_day)
-        const spend = limitWindow(raw.spend_limit)
+        const five = limitWindow(raw['five_hour'])
+        const seven = limitWindow(raw['seven_day'])
+        const spend = limitWindow(raw['spend_limit'])
         if (five) limits.five_hour = five
         if (seven) limits.seven_day = seven
         if (spend) limits.spend_limit = spend

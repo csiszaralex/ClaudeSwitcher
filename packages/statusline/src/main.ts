@@ -67,14 +67,14 @@ async function main(): Promise<void> {
   }
   process.stdout.write(line)
 
-  const port = process.env.CLAUDESWITCHER_PORT
-  const token = process.env.CLAUDESWITCHER_TOKEN
-  if (port !== undefined && token !== undefined && input.rate_limits !== undefined) {
+  const port = process.env['CLAUDESWITCHER_PORT']
+  const token = process.env['CLAUDESWITCHER_TOKEN']
+  if (port !== undefined && token !== undefined && input['rate_limits'] !== undefined) {
     try {
       await fetch(`http://127.0.0.1:${port}/statusline`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: JSON.stringify({ rate_limits: input.rate_limits }),
+        body: JSON.stringify({ rate_limits: input['rate_limits'] }),
         signal: AbortSignal.timeout(1000),
       })
     } catch {

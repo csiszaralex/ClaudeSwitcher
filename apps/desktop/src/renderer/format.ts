@@ -21,8 +21,9 @@ export function formatResetsIn(resetsAt: number, now: number = Date.now()): stri
 
 export function summarize(view: {
   status: SessionStatus
-  activity: SessionActivity
-  notificationText?: string
+  // Futásidőben hiányozhat (lásd lent), ezért a típus is ezt mondja.
+  activity?: SessionActivity | undefined
+  notificationText?: string | undefined
 }): string {
   // Az `activity` a típus szerint kötelező, de a daemon üzenete futásidőben bármi lehet.
   // Egy hiányzó mező itt renderelési hibát dobna, ami az EGÉSZ overlayt leszedné — ezért

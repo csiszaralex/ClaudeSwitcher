@@ -9,9 +9,9 @@ interface ContentBlock {
 }
 
 function blocks(rec: Record<string, unknown>): ContentBlock[] {
-  const message = rec.message
+  const message = rec['message']
   if (typeof message !== 'object' || message === null) return []
-  const content = (message as Record<string, unknown>).content
+  const content = (message as Record<string, unknown>)['content']
   if (!Array.isArray(content)) return []
   // A nem-objektum elemeket itt dobjuk el, nem a hívóban. Egy `null` blokk
   // valid JSON, és a `.type` olvasása rajta TypeError-t dobna — pontosan az a
@@ -42,10 +42,10 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
       continue
     }
 
-    const at = typeof rec.timestamp === 'string' ? Date.parse(rec.timestamp) : NaN
+    const at = typeof rec['timestamp'] === 'string' ? Date.parse(rec['timestamp']) : NaN
     if (!Number.isNaN(at)) activity.lastEventAt = at
 
-    if (rec.type === 'assistant') {
+    if (rec['type'] === 'assistant') {
       for (const block of blocks(rec)) {
         if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
           activity.lastAssistantText = block.text.trim()
@@ -54,7 +54,7 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
           activity.runningTool = block.name
         }
       }
-    } else if (rec.type === 'user') {
+    } else if (rec['type'] === 'user') {
       // Egy tool_result lezárja a futó toolt.
       if (blocks(rec).some((b) => b.type === 'tool_result')) {
         activity.runningTool = undefined

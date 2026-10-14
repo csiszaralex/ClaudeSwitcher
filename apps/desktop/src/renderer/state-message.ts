@@ -37,7 +37,7 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
     // `.used_percentage`-en dobna. Itt kiszűrve a megjelenítésnek nem kell erre gondolnia.
     rateLimits: Object.fromEntries(
       Object.entries(rateLimits).filter(([, window]) => isObject(window)),
-    ) as RateLimits,
+    ),
   }
 }
 
@@ -58,9 +58,9 @@ export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
     return undefined
   }
   if (!isObject(message)) return undefined
-  if (message.type === 'tick') return { kind: 'tick' }
-  if (message.type !== 'state') return undefined
-  const state = sanitizeState(message.payload)
+  if (message['type'] === 'tick') return { kind: 'tick' }
+  if (message['type'] !== 'state') return undefined
+  const state = sanitizeState(message['payload'])
   return state === undefined ? undefined : { kind: 'state', state }
 }
 

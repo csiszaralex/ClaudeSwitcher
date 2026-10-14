@@ -13,23 +13,23 @@ describe('mergeSettings', () => {
       permissions: { allow: ['Bash(pnpm build *)'] },
     }
     const out = mergeSettings(existing, { statusLine: { type: 'command', command: 'x' } })
-    expect(out.model).toBe('opus[1m]')
-    expect(out.effortLevel).toBe('xhigh')
-    expect(out.tui).toBe('fullscreen')
-    expect(out.permissions).toEqual({ allow: ['Bash(pnpm build *)'] })
-    expect(out.statusLine).toEqual({ type: 'command', command: 'x' })
+    expect(out['model']).toBe('opus[1m]')
+    expect(out['effortLevel']).toBe('xhigh')
+    expect(out['tui']).toBe('fullscreen')
+    expect(out['permissions']).toEqual({ allow: ['Bash(pnpm build *)'] })
+    expect(out['statusLine']).toEqual({ type: 'command', command: 'x' })
   })
 
   it('deep-merges nested objects instead of replacing them', () => {
     const existing = { permissions: { allow: ['a'], deny: ['b'] } }
     const out = mergeSettings(existing, { permissions: { ask: ['c'] } })
-    expect(out.permissions).toEqual({ allow: ['a'], deny: ['b'], ask: ['c'] })
+    expect(out['permissions']).toEqual({ allow: ['a'], deny: ['b'], ask: ['c'] })
   })
 
   it('replaces arrays wholesale rather than concatenating', () => {
     const existing = { hooks: { Notification: [{ old: true }] } }
     const out = mergeSettings(existing, { hooks: { Notification: [{ fresh: true }] } })
-    expect(out.hooks).toEqual({ Notification: [{ fresh: true }] })
+    expect(out['hooks']).toEqual({ Notification: [{ fresh: true }] })
   })
 
   it('does not mutate its inputs', () => {
@@ -46,7 +46,7 @@ describe('mergeSettings', () => {
     const out = mergeSettings({ model: 'opus' }, patch)
     expect(out).toEqual({ model: 'opus' })
     expect(Object.getPrototypeOf(out)).toBe(Object.prototype)
-    expect((({} as Record<string, unknown>).polluted)).toBeUndefined()
+    expect((({} as Record<string, unknown>)['polluted'])).toBeUndefined()
   })
 })
 
@@ -63,7 +63,7 @@ describe('updateSettingsFile', () => {
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ model: 'opus', tui: 'fullscreen' }))
     await updateSettingsFile(file, { statusLine: { type: 'command' } })
-    const out = JSON.parse(await readFile(file, 'utf8'))
+    const out: unknown = JSON.parse(await readFile(file, 'utf8'))
     expect(out).toEqual({
       model: 'opus',
       tui: 'fullscreen',
@@ -126,7 +126,7 @@ describe('transformSettingsFile', () => {
     await writeFile(file, JSON.stringify({ keep: 1, drop: 2 }))
 
     await transformSettingsFile(file, (existing) => {
-      const { drop, ...rest } = existing
+      const rest = Object.fromEntries(Object.entries(existing).filter(([k]) => k !== 'drop'))
       return rest
     })
 

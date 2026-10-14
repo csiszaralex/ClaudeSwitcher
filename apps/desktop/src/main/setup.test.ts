@@ -48,28 +48,28 @@ describe('applyIntegration', () => {
   })
 
   it('installs only the four non-blocking hook events', () => {
-    const hooks = applyIntegration({}, OPTIONS).settings.hooks as Record<string, unknown>
+    const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as Record<string, unknown>
     expect(Object.keys(hooks).sort()).toEqual(['Notification', 'SessionEnd', 'SessionStart', 'Stop'])
     // A PermissionRequest az M2 hatásköre; az M1 egyetlen döntést sem vesz el.
-    expect(hooks.PermissionRequest).toBeUndefined()
+    expect(hooks['PermissionRequest']).toBeUndefined()
   })
 
   it('points each hook at the fixed loopback port with the token header', () => {
-    const hooks = applyIntegration({}, OPTIONS).settings.hooks as HookGroups
-    const hook = hooks.Notification![0]!.hooks[0]!
-    expect(hook.type).toBe('http')
-    expect(hook.url).toBe('http://127.0.0.1:47821/hooks/notification')
-    expect(hook.timeout).toBe(5)
-    expect((hook.headers as Record<string, string>).Authorization).toBe('Bearer $CLAUDESWITCHER_TOKEN')
-    expect(hook.allowedEnvVars).toEqual(['CLAUDESWITCHER_TOKEN'])
+    const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as HookGroups
+    const hook = hooks['Notification']![0]!.hooks[0]!
+    expect(hook['type']).toBe('http')
+    expect(hook['url']).toBe('http://127.0.0.1:47821/hooks/notification')
+    expect(hook['timeout']).toBe(5)
+    expect((hook['headers'] as Record<string, string>)['Authorization']).toBe('Bearer $CLAUDESWITCHER_TOKEN')
+    expect(hook['allowedEnvVars']).toEqual(['CLAUDESWITCHER_TOKEN'])
   })
 
   it('keeps a foreign hook on the same event instead of overwriting it', () => {
     // Az eredeti terv a tömböt egészben cserélte, és ezt a hookot némán törölte volna.
     const existing = { hooks: { Notification: [FOREIGN_NOTIFICATION] } }
-    const hooks = applyIntegration(existing, OPTIONS).settings.hooks as Record<string, unknown[]>
-    expect(hooks.Notification).toHaveLength(2)
-    expect(hooks.Notification![0]).toEqual(FOREIGN_NOTIFICATION)
+    const hooks = applyIntegration(existing, OPTIONS).settings['hooks'] as Record<string, unknown[]>
+    expect(hooks['Notification']).toHaveLength(2)
+    expect(hooks['Notification']![0]).toEqual(FOREIGN_NOTIFICATION)
   })
 
   it('is idempotent: installing twice changes nothing the second time', () => {
@@ -79,19 +79,19 @@ describe('applyIntegration', () => {
 
   it('replaces our old entry when the port changes, rather than adding a second', () => {
     const old = applyIntegration({}, { ...OPTIONS, port: 11111 }).settings
-    const hooks = applyIntegration(old, OPTIONS).settings.hooks as HookGroups
-    expect(hooks.Stop).toHaveLength(1)
-    expect(String(hooks.Stop![0]!.hooks[0]!.url)).toContain(':47821/')
+    const hooks = applyIntegration(old, OPTIONS).settings['hooks'] as HookGroups
+    expect(hooks['Stop']).toHaveLength(1)
+    expect(String(hooks['Stop']![0]!.hooks[0]!['url'])).toContain(':47821/')
   })
 
   it('installs the status line and adds the two env vars beside existing ones', () => {
     const { settings } = applyIntegration({ env: { OTHER: 'x' } }, OPTIONS)
-    expect(settings.statusLine).toEqual({
+    expect(settings['statusLine']).toEqual({
       type: 'command',
       command: `${OPTIONS.statusLineCommand} --claudeswitcher`,
       padding: 0,
     })
-    expect(settings.env).toEqual({
+    expect(settings['env']).toEqual({
       OTHER: 'x',
       CLAUDESWITCHER_PORT: '47821',
       CLAUDESWITCHER_TOKEN: 'abc123',
@@ -100,13 +100,13 @@ describe('applyIntegration', () => {
 
   it('refuses to overwrite a foreign status line and reports it as a conflict', () => {
     const { settings, conflicts } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
-    expect(settings.statusLine).toEqual(FOREIGN_STATUS_LINE)
+    expect(settings['statusLine']).toEqual(FOREIGN_STATUS_LINE)
     expect(conflicts).toHaveLength(1)
   })
 
   it('leaves a malformed hooks value alone and reports it', () => {
     const { settings, conflicts } = applyIntegration({ hooks: 'nonsense' }, OPTIONS)
-    expect(settings.hooks).toBe('nonsense')
+    expect(settings['hooks']).toBe('nonsense')
     expect(conflicts.length).toBeGreaterThan(0)
   })
 
@@ -114,15 +114,15 @@ describe('applyIntegration', () => {
     // A régi felismerés puszta útvonaltöredékre illesztett, így ezt a sajátunknak nézte,
     // ütközésjelzés nélkül felülírta, majd az eltávolításnál törölte volna.
     const { settings, conflicts } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
-    expect(settings.statusLine).toEqual(FOREIGN_STATUS_LINE)
+    expect(settings['statusLine']).toEqual(FOREIGN_STATUS_LINE)
     expect(conflicts).toHaveLength(1)
   })
 
   it('keeps the padding the user set on our own status line', () => {
     const once = applyIntegration({}, OPTIONS).settings
-    const tuned = { ...(once.statusLine as Record<string, unknown>), padding: 3 }
+    const tuned = { ...(once['statusLine'] as Record<string, unknown>), padding: 3 }
     const again = applyIntegration({ ...once, statusLine: tuned }, OPTIONS).settings
-    expect((again.statusLine as Record<string, unknown>).padding).toBe(3)
+    expect((again['statusLine'] as Record<string, unknown>)['padding']).toBe(3)
   })
 
   it('keeps a foreign hook that sits inside our own matcher group', () => {
@@ -130,10 +130,10 @@ describe('applyIntegration', () => {
     // tömbbe fűzni. Csoportszintű eldobás ezt is elvinné.
     const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
     const theirs = { type: 'command', command: 'their-beep' }
-    installed.hooks.Stop![0]!.hooks.push(theirs)
+    installed.hooks['Stop']![0]!.hooks.push(theirs)
 
-    const hooks = applyIntegration(installed, OPTIONS).settings.hooks as HookGroups
-    const survivors = hooks.Stop!.flatMap((group) => group.hooks)
+    const hooks = applyIntegration(installed, OPTIONS).settings['hooks'] as HookGroups
+    const survivors = hooks['Stop']!.flatMap((group) => group.hooks)
     expect(survivors).toContainEqual(theirs)
     expect(removeIntegration({ hooks })).toEqual({ hooks: { Stop: [{ hooks: [theirs] }] } })
   })
@@ -142,11 +142,11 @@ describe('applyIntegration', () => {
     // Az allowedEnvVars nem feltétele a futásnak, tehát kieshet. Enélkül a bejegyzés
     // felismerhetetlen árva lenne, és minden telepítés duplikálná.
     const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
-    delete installed.hooks.Stop![0]!.hooks[0]!.allowedEnvVars
+    delete installed.hooks['Stop']![0]!.hooks[0]!['allowedEnvVars']
 
-    const hooks = applyIntegration(installed, OPTIONS).settings.hooks as HookGroups
-    expect(hooks.Stop).toHaveLength(1)
-    expect(removeIntegration({ hooks }).hooks).toBeUndefined()
+    const hooks = applyIntegration(installed, OPTIONS).settings['hooks'] as HookGroups
+    expect(hooks['Stop']).toHaveLength(1)
+    expect(removeIntegration({ hooks })['hooks']).toBeUndefined()
   })
 
   it('does not claim a loopback hook that is not spoken over http', () => {
@@ -156,8 +156,8 @@ describe('applyIntegration', () => {
     const theirs = { type: 'command', url: 'file://127.0.0.1/hooks/notification' }
     const existing = { hooks: { Notification: [{ hooks: [theirs] }] } }
 
-    const hooks = applyIntegration(existing, OPTIONS).settings.hooks as HookGroups
-    expect(hooks.Notification!.flatMap((group) => group.hooks)).toContainEqual(theirs)
+    const hooks = applyIntegration(existing, OPTIONS).settings['hooks'] as HookGroups
+    expect(hooks['Notification']!.flatMap((group) => group.hooks)).toContainEqual(theirs)
     expect(removeIntegration({ hooks })).toEqual(existing)
   })
 })

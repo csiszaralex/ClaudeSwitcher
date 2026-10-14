@@ -43,6 +43,10 @@ export class Hub {
   async close(): Promise<void> {
     for (const client of this.#clients) client.terminate()
     this.#clients.clear()
-    await new Promise<void>((resolve) => this.#wss.close(() => resolve()))
+    await new Promise<void>((resolve) => {
+      this.#wss.close(() => {
+        resolve()
+      })
+    })
   }
 }

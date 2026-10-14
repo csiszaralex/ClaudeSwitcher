@@ -44,12 +44,12 @@ describe('raw hook logging', () => {
     await post(app, '/hooks/lifecycle/stop', { session_id: 's1' })
     await new Promise((resolve) => setTimeout(resolve, 50))
 
-    const lines = (await readFile(logFile, 'utf8')).trim().split('\n').map((l) => JSON.parse(l))
+    const lines = (await readFile(logFile, 'utf8')).trim().split('\n').map((l) => JSON.parse(l) as { route: string; body: Record<string, unknown> })
     expect(lines).toHaveLength(2)
-    expect(lines[0].route).toBe('/hooks/notification')
+    expect(lines[0]?.route).toBe('/hooks/notification')
     // A kulcs: egy olyan mező is megmarad, amiről a kódunk nem tud.
-    expect(lines[0].body.odd_field).toBe(42)
-    expect(lines[1].route).toBe('/hooks/lifecycle/stop')
+    expect(lines[0]?.body['odd_field']).toBe(42)
+    expect(lines[1]?.route).toBe('/hooks/lifecycle/stop')
   })
 
   it('still answers 200 when the log file cannot be written', async () => {

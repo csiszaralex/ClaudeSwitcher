@@ -4,6 +4,7 @@
     "build": { "dependsOn": ["^build"], "cache": true },
     "test": { "dependsOn": ["^build"], "cache": true },
     "check-types": { "dependsOn": ["^build"], "cache": true },
+    "lint": { "dependsOn": ["^build"], "cache": true },
     "dev": { "dependsOn": ["^build"], "cache": false }
   }
 }
