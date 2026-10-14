@@ -47,11 +47,17 @@ describe('applyIntegration', () => {
     }
   })
 
-  it('installs only the four non-blocking hook events', () => {
+  it('installs the M2 hook events, including the blocking PermissionRequest', () => {
     const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as Record<string, unknown>
-    expect(Object.keys(hooks).sort()).toEqual(['Notification', 'SessionEnd', 'SessionStart', 'Stop'])
-    // A PermissionRequest az M2 hatásköre; az M1 egyetlen döntést sem vesz el.
-    expect(hooks['PermissionRequest']).toBeUndefined()
+    expect(Object.keys(hooks).sort()).toEqual([
+      'Notification',
+      'PermissionRequest',
+      'PostToolUse',
+      'PreToolUse',
+      'SessionEnd',
+      'Stop',
+      'SubagentStop',
+    ])
   })
 
   it('points each hook at the fixed loopback port with the token header', () => {
@@ -159,6 +165,45 @@ describe('applyIntegration', () => {
     const hooks = applyIntegration(existing, OPTIONS).settings['hooks'] as HookGroups
     expect(hooks['Notification']!.flatMap((group) => group.hooks)).toContainEqual(theirs)
     expect(removeIntegration({ hooks })).toEqual(existing)
+  })
+
+  it('gives PermissionRequest the 600 s timeout the decision broker releases inside', () => {
+    const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as HookGroups
+    const permission = hooks['PermissionRequest']![0]!.hooks[0]!
+    expect(permission['url']).toBe('http://127.0.0.1:47821/hooks/permission-request')
+    expect(permission['timeout']).toBe(600)
+    expect(hooks['PreToolUse']![0]!.hooks[0]!['timeout']).toBe(5)
+  })
+
+  it('no longer installs SessionStart, which never fires as an http hook', () => {
+    const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as Record<string, unknown>
+    expect(hooks['SessionStart']).toBeUndefined()
+  })
+
+  it('removes the SessionStart entry an earlier version installed, keeping a foreign one', () => {
+    // A korábbi verzió saját bejegyzése: a tokenre hivatkozik, a régi route-ra mutat.
+    const legacy = {
+      hooks: [
+        {
+          type: 'http',
+          url: 'http://127.0.0.1:47821/hooks/lifecycle/start',
+          allowedEnvVars: ['CLAUDESWITCHER_TOKEN'],
+        },
+      ],
+    }
+    const installedBefore = { hooks: { SessionStart: [legacy] } }
+    const reinstalled = applyIntegration(installedBefore, OPTIONS).settings['hooks'] as Record<string, unknown>
+    expect(reinstalled['SessionStart']).toBeUndefined()
+
+    const withForeign = { hooks: { SessionStart: [legacy, FOREIGN_NOTIFICATION] } }
+    expect(removeIntegration(withForeign)).toEqual({ hooks: { SessionStart: [FOREIGN_NOTIFICATION] } })
+  })
+
+  it('recognises its own hook on every new route, even with allowedEnvVars pruned', () => {
+    for (const route of ['permission-request', 'pre-tool-use', 'post-tool-use', 'subagent-stop']) {
+      const ours = { type: 'http', url: `http://127.0.0.1:47821/hooks/${route}` }
+      expect(removeIntegration({ hooks: { PreToolUse: [{ hooks: [ours] }] } })).toEqual({})
+    }
   })
 })
 
