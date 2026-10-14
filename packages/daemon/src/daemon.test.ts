@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -152,5 +153,86 @@ describe('startDaemon', () => {
     } finally {
       await first.stop()
     }
+  })
+})
+
+const payloads = JSON.parse(
+  readFileSync(new URL('../../core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
+) as Record<string, Record<string, unknown>>
+
+function payload(name: string): Record<string, unknown> {
+  const value = payloads[name]
+  if (value === undefined) throw new Error(`missing fixture: ${name}`)
+  return value
+}
+
+function postHook(daemon: Daemon, route: string, body: unknown): Promise<Response> {
+  return fetch(`http://127.0.0.1:${daemon.port}${route}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.token}` },
+    body: JSON.stringify(body),
+  })
+}
+
+async function waitFor<T>(read: () => T[], timeoutMs = 2000): Promise<T[]> {
+  const started = Date.now()
+  for (;;) {
+    const value = read()
+    if (value.length > 0) return value
+    if (Date.now() - started > timeoutMs) throw new Error('timed out waiting')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+describe('startDaemon — held decisions', () => {
+  it('holds a PermissionRequest until the user decides, then answers with the decision', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    const response = postHook(daemon, '/hooks/permission-request', payload('permissionRequest_bash'))
+
+    const [pending] = await waitFor(() => daemon.state().decisions)
+    expect(daemon.decide(pending!.id, { type: 'allow' })).toEqual({ ok: true })
+    const res = await response
+    expect(await res.json()).toEqual({
+      hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
+    })
+    expect(daemon.state().decisions).toEqual([])
+  })
+
+  it('closes a held request with an empty 200 when VS Code answers first', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await postHook(daemon, '/hooks/pre-tool-use', payload('preToolUse_bash'))
+    const response = postHook(daemon, '/hooks/permission-request', payload('permissionRequest_bashCorrelated'))
+    await waitFor(() => daemon.state().decisions)
+
+    await postHook(daemon, '/hooks/post-tool-use', payload('postToolUse_bash'))
+    const res = await response
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('')
+    expect(daemon.state().decisions).toEqual([])
+  })
+
+  it('marks the session waiting while its decision is held', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    // Valódi payload, a fixture-registry sessionjéhez igazítva.
+    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+
+    await waitFor(() => daemon.state().decisions)
+    expect(daemon.state().sessions[0]?.status).toBe('waiting')
+  })
+
+  it('answers held requests on stop instead of hanging the shutdown', async () => {
+    // A tartott kapcsolatok miatt a server.close() különben soha nem térne vissza.
+    const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const response = postHook(daemon, '/hooks/permission-request', payload('permissionRequest_bash'))
+    await waitFor(() => daemon.state().decisions)
+
+    await daemon.stop()
+    const res = await response
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('')
   })
 })

@@ -138,4 +138,15 @@ describe('SessionStore', () => {
     store.applySnapshot([live('ghost')], noActivity, 1000 + 11_001)
     expect(store.views()[0]!.status).toBe('idle')
   })
+
+  it('marks a session waiting while a decision is held, before any Notification', () => {
+    // A Notification csak ~6 mp függés után jön (mérve); a PermissionRequest azonnal.
+    const store = new SessionStore()
+    store.applySnapshot([live('s1'), live('s2')], noActivity)
+    const views = store.views(new Map([['s2', 500]]))
+    const s2 = views.find((v) => v.sessionId === 's2')
+    expect(s2?.status).toBe('waiting')
+    expect(s2?.waitingSince).toBe(500)
+    expect(views[0]?.sessionId).toBe('s2')
+  })
 })

@@ -2,16 +2,20 @@ import { randomBytes } from 'node:crypto'
 import type { Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
-import type { ProcessProbe, RateLimits, SessionView } from '@claudeswitcher/core'
+import type { ProcessProbe, RateLimits, SessionView, UserDecision } from '@claudeswitcher/core'
+import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
 import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
 import { RateLimitStore } from './rate-limits.js'
 import { scanSessions } from './scanner.js'
 import { SessionStore } from './session-store.js'
 
+export type { DecideResult, PendingDecisionView } from './decision-broker.js'
+
 export interface DaemonState {
   sessions: SessionView[]
   rateLimits: RateLimits
+  decisions: PendingDecisionView[]
 }
 
 export interface Daemon {
@@ -19,6 +23,8 @@ export interface Daemon {
   readonly token: string
   state(): DaemonState
   refresh(): Promise<void>
+  /** A felhasználó döntése egy függő kérésről (az overlayből, IPC-n át). */
+  decide(id: string, decision: UserDecision): DecideResult
   stop(): Promise<void>
 }
 
@@ -26,14 +32,14 @@ export interface DaemonOptions {
   claudeDir: string
   probe: ProcessProbe
   /** Poll periódus ms-ben. 0 kikapcsolja (tesztekhez). */
-  pollMs?: number
+  pollMs?: number | undefined
   /**
    * A port, amire a daemon köt. 0: ideiglenes (tesztekhez). A desktop fix portot ad, mert a
    * telepített hookok és a statusLine egy rögzített URL-t kapnak a settings.json-ban.
    */
-  port?: number
+  port?: number | undefined
   /** A daemon tokenje. Ha nincs megadva, véletlen. A desktop tartós tokent ad, ugyanezért. */
-  token?: string
+  token?: string | undefined
 }
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
@@ -42,6 +48,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   const sessions = new SessionStore()
   const limits = new RateLimitStore()
+  const decisions = new DecisionBroker()
 
   const app = createHookApp(
     token,
@@ -51,11 +58,24 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
       onLifecycle: (event) => {
         sessions.applyLifecycle(event)
+        // Kör vége vagy session vége: nála már nincs függő döntés — ha a VSCode-ban tiltottak,
+        // erről csak így értesülünk (a tiltásnak nincs PostToolUse-a).
+        if (event.kind !== 'start') decisions.sessionStopped(event.sessionId)
         void refresh()
       },
       onRateLimits: (received) => {
         limits.update(received)
         broadcast()
+      },
+      onPermissionRequest: (request) => decisions.hold(request),
+      onPreToolUse: (event) => {
+        decisions.preToolUse(event)
+      },
+      onPostToolUse: (event) => {
+        decisions.postToolUse(event)
+      },
+      onSubagentStop: (event) => {
+        decisions.subagentStopped(event.sessionId, event.agentId)
       },
     },
     // Diagnosztika, alapból kikapcsolva. A hookok valódi alakja nincs dokumentálva, és egy
@@ -78,7 +98,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const hub = new Hub(server as HttpServer, token)
 
   function state(): DaemonState {
-    return { sessions: sessions.views(), rateLimits: limits.current() }
+    const pending = decisions.views()
+    // Sessionönként a legrégebbi függő döntés: amíg az tart, a session várakozó.
+    const pendingSince = new Map<string, number>()
+    for (const view of pending) {
+      const earlier = pendingSince.get(view.sessionId)
+      if (earlier === undefined || view.createdAt < earlier) pendingSince.set(view.sessionId, view.createdAt)
+    }
+    return { sessions: sessions.views(pendingSince), rateLimits: limits.current(), decisions: pending }
   }
 
   // A SessionStore minden `apply*` híváskor jelez, akkor is, ha az állapot nem
@@ -96,6 +123,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   }
 
   sessions.onChange(broadcast)
+  decisions.onChange(broadcast)
 
   let refreshing: Promise<void> | undefined
   async function refresh(): Promise<void> {
@@ -128,15 +156,21 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     token,
     state,
     refresh,
+    decide: (id, decision) => decisions.decide(id, decision),
     async stop() {
       if (timer !== undefined) clearInterval(timer)
+      // A tartott kéréseket a szerver lezárása ELŐTT kell megválaszolni: a nyitott
+      // kapcsolatok miatt a server.close() különben soha nem térne vissza.
+      decisions.releaseAll()
       // Megvárjuk a futó szkennelést: leállás után ne maradjon dolgozó ígéret,
       // ami a processzt életben tartja vagy egy már lezárt hubba írna.
       await refreshing?.catch(() => undefined)
       await hub.close()
-      await new Promise<void>((resolve) => server.close(() => {
+      await new Promise<void>((resolve) => {
+        server.close(() => {
           resolve()
-        }))
+        })
+      })
     },
   }
 }

@@ -1,6 +1,13 @@
 import { appendFile } from 'node:fs/promises'
-import type { RateLimits, RateLimitWindow } from '@claudeswitcher/core'
+import {
+  parsePermissionRequest,
+  type HookDecisionBody,
+  type PermissionRequestInfo,
+  type RateLimits,
+  type RateLimitWindow,
+} from '@claudeswitcher/core'
 import { Hono } from 'hono'
+import type { ToolUseEvent } from './decision-broker.js'
 
 export interface NotificationEvent {
   sessionId: string
@@ -19,6 +26,11 @@ export interface HookEvents {
   onNotification(event: NotificationEvent): void | Promise<void>
   onLifecycle(event: LifecycleEvent): void | Promise<void>
   onRateLimits(limits: RateLimits): void | Promise<void>
+  /** A hook válasza: döntés, vagy `undefined` = nincs döntés (üres 200, a natív prompt marad). */
+  onPermissionRequest(request: PermissionRequestInfo): Promise<HookDecisionBody | undefined>
+  onPreToolUse(event: ToolUseEvent): void
+  onPostToolUse(event: { sessionId: string; toolUseId: string }): void
+  onSubagentStop(event: { sessionId: string; agentId: string }): void
 }
 
 /**
@@ -49,15 +61,28 @@ function str(v: unknown): string | undefined {
 
 function limitWindow(v: unknown): RateLimitWindow | undefined {
   if (!isRecord(v)) return undefined
-  const { used_percentage, resets_at } = v
-  if (typeof used_percentage !== 'number' || typeof resets_at !== 'number') return undefined
-  return { used_percentage, resets_at }
+  const usedPercentage = v['used_percentage']
+  const resetsAt = v['resets_at']
+  if (typeof usedPercentage !== 'number' || typeof resetsAt !== 'number') return undefined
+  return { used_percentage: usedPercentage, resets_at: resetsAt }
+}
+
+function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
+  const sessionId = str(b['session_id'])
+  const toolName = str(b['tool_name'])
+  const toolUseId = str(b['tool_use_id'])
+  const toolInput = b['tool_input']
+  if (sessionId === undefined || toolName === undefined || toolUseId === undefined || !isRecord(toolInput)) {
+    return undefined
+  }
+  return { sessionId, toolName, toolInput, toolUseId }
 }
 
 /**
- * Az M1 hook-szervere. Minden route feltétel nélkül 200-at ad üres törzzsel:
- * ezek display-only hookok, és a szerver hibája soha nem akaszthat meg egy
- * sessiont. A hibát naplózzuk, nem terjesztjük.
+ * A daemon hook-szervere. A display-only route-ok feltétel nélkül 200-at adnak üres törzzsel: a
+ * szerver hibája soha nem akaszthat meg egy sessiont. A PermissionRequest route a döntést tartja,
+ * de bármilyen hiba esetén ott is üres 200 megy — mérve, hogy ezt a Claude Code „nincs döntés"-nek
+ * veszi, nem tiltásnak.
  */
 export function createHookApp(token: string, events: HookEvents, rawLogPath?: string): Hono {
   const app = new Hono()
@@ -140,6 +165,61 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       }
     } catch (error) {
       console.error('[hook] lifecycle handler failed', error)
+    }
+    return c.body(null, 200)
+  })
+
+  app.post('/hooks/permission-request', async (c) => {
+    try {
+      const b = await body(c)
+      record('/hooks/permission-request', b)
+      const request = parsePermissionRequest(b)
+      if (request === undefined) return c.body(null, 200)
+      const decision = await events.onPermissionRequest(request)
+      if (decision === undefined) return c.body(null, 200)
+      return c.body(JSON.stringify(decision), 200, { 'content-type': 'application/json' })
+    } catch (error) {
+      // Bármilyen hiba itt „nincs döntés": a natív prompt a VSCode-ban és a telefonon amúgy is
+      // ott van, és egy hibás hookot a Claude Code sem vesz tiltásnak (spike R3, R4).
+      console.error('[hook] permission request failed', error)
+      return c.body(null, 200)
+    }
+  })
+
+  app.post('/hooks/pre-tool-use', async (c) => {
+    try {
+      const b = await body(c)
+      record('/hooks/pre-tool-use', b)
+      const event = toolUseEvent(b)
+      if (event !== undefined) events.onPreToolUse(event)
+    } catch (error) {
+      console.error('[hook] pre-tool-use handler failed', error)
+    }
+    return c.body(null, 200)
+  })
+
+  app.post('/hooks/post-tool-use', async (c) => {
+    try {
+      const b = await body(c)
+      record('/hooks/post-tool-use', b)
+      const sessionId = str(b['session_id'])
+      const toolUseId = str(b['tool_use_id'])
+      if (sessionId !== undefined && toolUseId !== undefined) events.onPostToolUse({ sessionId, toolUseId })
+    } catch (error) {
+      console.error('[hook] post-tool-use handler failed', error)
+    }
+    return c.body(null, 200)
+  })
+
+  app.post('/hooks/subagent-stop', async (c) => {
+    try {
+      const b = await body(c)
+      record('/hooks/subagent-stop', b)
+      const sessionId = str(b['session_id'])
+      const agentId = str(b['agent_id'])
+      if (sessionId !== undefined && agentId !== undefined) events.onSubagentStop({ sessionId, agentId })
+    } catch (error) {
+      console.error('[hook] subagent-stop handler failed', error)
     }
     return c.body(null, 200)
   })

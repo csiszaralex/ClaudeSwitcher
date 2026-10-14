@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -6,8 +7,26 @@ import { createHookApp, type HookEvents } from './hook-server.js'
 
 const TOKEN = 'test-token'
 
+const fixtures = JSON.parse(
+  readFileSync(new URL('../../core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
+) as Record<string, unknown>
+
+function payload(name: string): unknown {
+  const value = fixtures[name]
+  if (value === undefined) throw new Error(`missing fixture: ${name}`)
+  return value
+}
+
 function events(): HookEvents {
-  return { onNotification: vi.fn(), onLifecycle: vi.fn(), onRateLimits: vi.fn() }
+  return {
+    onNotification: vi.fn(),
+    onLifecycle: vi.fn(),
+    onRateLimits: vi.fn(),
+    onPermissionRequest: vi.fn(() => Promise.resolve(undefined)),
+    onPreToolUse: vi.fn(),
+    onPostToolUse: vi.fn(),
+    onSubagentStop: vi.fn(),
+  }
 }
 
 function post(app: ReturnType<typeof createHookApp>, url: string, body: unknown, token = TOKEN) {
@@ -198,5 +217,74 @@ describe('POST /statusline', () => {
       rate_limits: { five_hour: { used_percentage: 'lots' }, seven_day: null },
     })
     expect(ev.onRateLimits).not.toHaveBeenCalled()
+  })
+})
+
+describe('M2 decision routes — measured payloads', () => {
+  const ALLOW = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } } as const
+
+  it('answers a PermissionRequest with the handler\'s decision', async () => {
+    const ev = { ...events(), onPermissionRequest: vi.fn(() => Promise.resolve(ALLOW)) }
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', payload('permissionRequest_bash'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual(ALLOW)
+    expect(ev.onPermissionRequest).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'Bash', kind: 'tool' }))
+  })
+
+  it('answers an empty 200 when there is no decision', async () => {
+    const res = await post(createHookApp(TOKEN, events()), '/hooks/permission-request', payload('permissionRequest_bash'))
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('')
+  })
+
+  it('answers an empty 200 when the handler fails — never a denial', async () => {
+    // Mérve (R3, R4): egy hibás hookot a Claude Code „nincs döntés"-nek vesz, a natív prompt marad.
+    const ev = { ...events(), onPermissionRequest: vi.fn(() => Promise.reject(new Error('boom'))) }
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', payload('permissionRequest_bash'))
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('')
+  })
+
+  it('answers an empty 200 for an unusable body without calling the handler', async () => {
+    const ev = events()
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', { nonsense: true })
+    expect(res.status).toBe(200)
+    expect(ev.onPermissionRequest).not.toHaveBeenCalled()
+  })
+
+  it('forwards a PreToolUse with its tool_use_id', async () => {
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', payload('preToolUse_bash'))
+    expect(ev.onPreToolUse).toHaveBeenCalledWith({
+      sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
+      toolName: 'Bash',
+      toolInput: { command: 'echo spike-c2 > c3.txt', description: 'Write spike-c2 to c3.txt' },
+      toolUseId: 'toolu_014XMiXFVTin7eyaeqBvxbLQ',
+    })
+  })
+
+  it('forwards a PostToolUse with the same tool_use_id', async () => {
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', payload('postToolUse_bash'))
+    expect(ev.onPostToolUse).toHaveBeenCalledWith({
+      sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
+      toolUseId: 'toolu_014XMiXFVTin7eyaeqBvxbLQ',
+    })
+  })
+
+  it('forwards a SubagentStop with its agent_id', async () => {
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/subagent-stop', payload('subagentStop'))
+    expect(ev.onSubagentStop).toHaveBeenCalledWith({
+      sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
+      agentId: 'ad0b11acf46ef176e',
+    })
+  })
+
+  it('rejects the new routes without the token', async () => {
+    const app = createHookApp(TOKEN, events())
+    for (const route of ['/hooks/permission-request', '/hooks/pre-tool-use', '/hooks/post-tool-use', '/hooks/subagent-stop']) {
+      expect((await post(app, route, {}, 'nope')).status).toBe(401)
+    }
   })
 })

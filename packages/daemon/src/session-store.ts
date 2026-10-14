@@ -30,8 +30,8 @@ function displayName(record: LiveSession['record']): string {
 export class SessionStore {
   #sessions = new Map<string, LiveSession>()
   #activities = new Map<string, SessionActivity>()
-  #waiting = new Map<string, WaitState>()
-  #listeners: Array<() => void> = []
+  readonly #waiting = new Map<string, WaitState>()
+  readonly #listeners: Array<() => void> = []
 
   onChange(listener: () => void): void {
     this.#listeners.push(listener)
@@ -93,15 +93,21 @@ export class SessionStore {
     this.#emit()
   }
 
-  views(): SessionView[] {
+  /**
+   * @param pendingSince — sessionönként a legrégebbi függő döntés kezdete. Egy ilyen session
+   * akkor is várakozó, ha a Notification még nem jött meg: az csak ~6 mp függés után érkezik
+   * (mérve), a PermissionRequest viszont azonnal.
+   */
+  views(pendingSince: ReadonlyMap<string, number> = new Map()): SessionView[] {
     const views: SessionView[] = []
 
     for (const [sessionId, session] of this.#sessions) {
       const activity = this.#activities.get(sessionId) ?? {}
       const wait = this.#waiting.get(sessionId)
+      const pending = pendingSince.get(sessionId)
 
       const status =
-        wait !== undefined ? 'waiting'
+        wait !== undefined || pending !== undefined ? 'waiting'
         : activity.runningTool !== undefined ? 'working'
         : 'idle'
 
@@ -115,7 +121,7 @@ export class SessionStore {
         windowPid: session.window?.pid,
         workspaceFolder: session.window?.workspaceFolders[0],
         bridgeSessionId: session.record.bridgeSessionId,
-        waitingSince: wait?.since,
+        waitingSince: wait?.since ?? pending,
         notificationText: wait?.text,
       })
     }
