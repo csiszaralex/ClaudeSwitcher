@@ -1,4 +1,7 @@
+import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
+import { DecisionPanel } from './DecisionPanel.js'
+import { isTypingTarget } from './decision-actions.js'
 import { formatDuration, formatResetsIn, summarize } from './format.js'
 import { moveSelection, resolveSelectedIndex } from './selection.js'
 import { useDaemonState } from './useDaemonState.js'
@@ -12,7 +15,7 @@ const STATUS_LABEL = {
 } as const
 
 export function App(): JSX.Element {
-  const { sessions, rateLimits, connected, checkedAt } = useDaemonState()
+  const { sessions, rateLimits, connected, checkedAt, decisions } = useDaemonState()
   // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
   // együtt mozog. Lásd a selection.ts dokumentációját.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -22,6 +25,14 @@ export function App(): JSX.Element {
     sessions.map((s) => s.sessionId),
     selectedId,
   )
+  const selectedView = selected === -1 ? undefined : sessions[selected]
+
+  // Sessionönként a legrégebbi függő döntés — a daemon létrehozás szerint rendezve küldi.
+  const decisionBySession = new Map<string, PendingDecisionView>()
+  for (const decision of decisions) {
+    if (!decisionBySession.has(decision.sessionId)) decisionBySession.set(decision.sessionId, decision)
+  }
+  const decision = selectedView === undefined ? undefined : decisionBySession.get(selectedView.sessionId)
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -43,6 +54,8 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
+      // Szövegmezőben a gépelés az övé: se a nyilak, se az Enter, se az Esc ne vezérelje a listát.
+      if (isTypingTarget(event.target)) return
       const ids = sessions.map((s) => s.sessionId)
       if (event.key === 'Escape') void window.claudeswitcher.hide()
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -50,7 +63,8 @@ export function App(): JSX.Element {
         event.preventDefault()
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
-      if (event.key === 'Enter' || event.key === 'Tab') {
+      // Nyitott döntési panelnél a Tab a gombok között lép — ott nem ugrás.
+      if (event.key === 'Enter' || (event.key === 'Tab' && decision === undefined)) {
         event.preventDefault()
         const view = sessions[resolveSelectedIndex(ids, selectedId)]
         if (view !== undefined) void window.claudeswitcher.focusSession(view.sessionId)
@@ -60,7 +74,7 @@ export function App(): JSX.Element {
     return () => {
       window.removeEventListener('keydown', onKey)
     }
-  }, [sessions, selectedId])
+  }, [sessions, selectedId, decision])
 
   return (
     <div className="overlay">
@@ -72,30 +86,50 @@ export function App(): JSX.Element {
             {connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
           </li>
         )}
-        {sessions.map((view, index) => (
-          <li
-            key={view.sessionId}
-            ref={index === selected ? selectedRow : null}
-            className={`session ${view.status} ${index === selected ? 'selected' : ''}`}
-            onClick={() => void window.claudeswitcher.focusSession(view.sessionId)}
-          >
-            <span className="marker">{STATUS_LABEL[view.status]}</span>
-            <span className="name">
-              {view.name}
-              {(view.bridgeSessionId === null || view.bridgeSessionId === undefined) && (
-                // Remote Control nélkül ez a session telefonról nem érhető el.
-                <span className="unbridged" title="Nincs Remote Control kapcsolata">
-                  {' ⚑'}
-                </span>
-              )}
-            </span>
-            <span className="summary">{summarize(view)}</span>
-            <span className="age">
-              {view.waitingSince !== undefined ? formatDuration(now - view.waitingSince) : ''}
-            </span>
-          </li>
-        ))}
+        {sessions.map((view, index) => {
+          const pending = decisionBySession.get(view.sessionId)
+          return (
+            <li
+              key={view.sessionId}
+              ref={index === selected ? selectedRow : null}
+              className={`session ${view.status} ${index === selected ? 'selected' : ''}`}
+              onClick={() => {
+                setSelectedId(view.sessionId)
+              }}
+              onDoubleClick={() => {
+                void window.claudeswitcher.focusSession(view.sessionId)
+              }}
+            >
+              <span className="marker">{STATUS_LABEL[view.status]}</span>
+              <span className="name">
+                {view.name}
+                {(view.bridgeSessionId === null || view.bridgeSessionId === undefined) && (
+                  // Remote Control nélkül ez a session telefonról nem érhető el.
+                  <span className="unbridged" title="Nincs Remote Control kapcsolata">
+                    {' ⚑'}
+                  </span>
+                )}
+              </span>
+              <span className="summary">
+                {pending === undefined ? summarize(view) : `${pending.toolName}: ${pending.summary}`}
+              </span>
+              <span className="age">
+                {view.waitingSince !== undefined ? formatDuration(now - view.waitingSince) : ''}
+              </span>
+            </li>
+          )
+        })}
       </ul>
+
+      {decision !== undefined && selectedView !== undefined && (
+        <DecisionPanel
+          key={decision.id}
+          decision={decision}
+          onJump={() => {
+            void window.claudeswitcher.focusSession(selectedView.sessionId)
+          }}
+        />
+      )}
 
       <div className="limits">
         {rateLimits.five_hour !== undefined && (
@@ -109,9 +143,6 @@ export function App(): JSX.Element {
             7d {Math.round(rateLimits.seven_day.used_percentage)}% ·{' '}
             {formatResetsIn(rateLimits.seven_day.resets_at, now)}
           </span>
-        )}
-        {rateLimits.five_hour === undefined && rateLimits.seven_day === undefined && (
-          <span className="muted">Limitadat még nincs</span>
         )}
         {/*
           Az életjel ideje. Ez az egyetlen jel, amiből látszik, hogy a lista ÉL, csak nincs
