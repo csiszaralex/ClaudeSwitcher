@@ -3,6 +3,8 @@ import { formatRule } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useState, type JSX } from 'react'
 import { isTypingTarget, readDecideResult, shortcutFor, type DecisionAction } from './decision-actions.js'
+import { PlanPanel } from './PlanPanel.js'
+import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
 
 const KIND_LABEL = {
@@ -178,9 +180,26 @@ export function DecisionPanel({ decision, onJump }: Props): JSX.Element {
           </div>
         )
       case 'question':
-        return jumpRow('A kérdést a VSCode-ban tudod megválaszolni.')
+        return (
+          <QuestionForm
+            questions={decision.questions}
+            busy={busy}
+            onSubmit={(answers) => {
+              void submit({ type: 'answer', answers })
+            }}
+          />
+        )
       case 'plan':
-        return jumpRow('A tervet a VSCode-ban tudod jóváhagyni.')
+        return (
+          <PlanPanel
+            plan={decision.plan}
+            busy={busy}
+            onReject={(feedback) => {
+              void submit({ type: 'deny', message: feedback })
+            }}
+            onJump={onJump}
+          />
+        )
     }
   }
 

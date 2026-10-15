@@ -94,3 +94,19 @@ body {
 .decision .grow { flex: 1; min-width: 200px; }
 .rule-editor textarea { width: 100%; resize: vertical; }
 .rule-editor .confirm { display: block; margin-top: 6px; color: #e0796b; }
+.question-form fieldset { margin: 6px 0; padding: 6px 10px; border: 1px solid #3a3836; border-radius: 5px; }
+.question-form legend { padding: 0 4px; color: #e8e6e3; font-weight: 600; }
+.question-form .option { display: block; padding: 2px 0; cursor: pointer; }
+.question-form .other { width: 100%; margin-top: 4px; }
+.plan {
+  max-height: 30vh;
+  overflow-y: auto;
+  margin: 0 0 8px;
+  padding: 8px;
+  border-radius: 4px;
+  background: #1c1b1a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.45 Consolas, "Cascadia Mono", monospace;
+}
+.plan-panel textarea { width: 100%; resize: vertical; }
