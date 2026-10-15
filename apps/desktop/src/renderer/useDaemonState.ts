@@ -1,3 +1,4 @@
+import type { UserDecision } from '@claudeswitcher/core'
 import { useEffect, useState } from 'react'
 import { parseDaemonMessage, sanitizeState, type DaemonState } from './state-message.js'
 
@@ -8,6 +9,8 @@ declare global {
       state(): Promise<DaemonState>
       focusSession(sessionId: string): Promise<boolean>
       hide(): Promise<void>
+      /** A main `DecideResult`-ot ad; a renderer a `readDecideResult`-tal olvassa (Task 8). */
+      decide(id: string, decision: UserDecision): Promise<unknown>
     }
   }
 }
@@ -35,7 +38,7 @@ export function retryDelayMs(attempt: number): number {
 
 /** Élő állapot a daemon WebSocket hubjáról, újracsatlakozással. */
 export function useDaemonState(): OverlayState {
-  const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {} })
+  const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {}, decisions: [] })
   const [connected, setConnected] = useState(false)
   const [checkedAt, setCheckedAt] = useState<number | undefined>()
 

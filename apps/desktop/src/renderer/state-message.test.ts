@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { parseStateMessage, sanitizeState } from './state-message.js'
+import { readFileSync } from 'node:fs'
+import { parsePermissionRequest } from '@claudeswitcher/core/browser'
+
+const fixtures = JSON.parse(
+  readFileSync(new URL('../../../../packages/core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
+) as Record<string, unknown>
+
+/** Egy függő döntés úgy, ahogy a daemon küldi: a valódi payload értelmezve, broker-mezőkkel. */
+function decisionFrom(name: string): Record<string, unknown> {
+  const info = parsePermissionRequest(fixtures[name])
+  if (info === undefined) throw new Error(`fixture did not parse: ${name}`)
+  return { ...info, id: `id-${name}`, createdAt: 1, released: false }
+}
 
 describe('parseStateMessage', () => {
   it('returns the state carried by a well-formed state message', () => {
-    const message = JSON.stringify({ type: 'state', payload: { sessions: [], rateLimits: {} } })
-    expect(parseStateMessage(message)).toEqual({ sessions: [], rateLimits: {} })
+    const message = JSON.stringify({ type: 'state', payload: { sessions: [], rateLimits: {}, decisions: [] } })
+    expect(parseStateMessage(message)).toEqual({ sessions: [], rateLimits: {}, decisions: [] })
   })
 
   it('ignores messages that are not state updates', () => {
@@ -51,5 +64,28 @@ describe('sanitizeState', () => {
     for (const garbage of [null, 42, 'text', [], { sessions: [undefined], rateLimits: {} }]) {
       expect(() => sanitizeState(garbage)).not.toThrow()
     }
+  })
+
+  it('keeps a well-formed decision and drops the malformed ones', () => {
+    // Egy hibás elem a panelen renderelési hibát dobna, és az ErrorBoundary miatt az egész
+    // overlay hibaszövegbe fagyna — itt csendben kiesik.
+    const good = decisionFrom('permissionRequest_askMulti')
+    const clean = sanitizeState({
+      sessions: [],
+      rateLimits: {},
+      decisions: [
+        good,
+        null,
+        { ...good, id: 7 },
+        { ...good, kind: 'other' },
+        { ...good, questions: [{ question: 'q' }] },
+        { ...good, suggestedRules: [{}] },
+      ],
+    })
+    expect(clean?.decisions).toEqual([good])
+  })
+
+  it('defaults decisions to an empty list when an older daemon omits them', () => {
+    expect(sanitizeState({ sessions: [], rateLimits: {} })?.decisions).toEqual([])
   })
 })

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createWin32ProcessProbe, resolveClaudeDir } from '@claudeswitcher/core'
+import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
 import { configPath, loadConfig } from './config.js'
@@ -19,7 +19,7 @@ let overlay: BrowserWindow | undefined
 function createOverlay(): BrowserWindow {
   const window = new BrowserWindow({
     width: 620,
-    height: 460,
+    height: 600,
     show: false,
     frame: false,
     resizable: false,
@@ -79,6 +79,14 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('daemon:connection', () => ({ port: running.port, token: running.token }))
   ipcMain.handle('daemon:state', () => running.state())
+  ipcMain.handle('decision:decide', (_event, id: unknown, raw: unknown) => {
+    // IPC-bemenet: a renderer bármit küldhet. Csak egy pontosan érvényes döntés jut a
+    // daemonhoz — annak érvényességét az adott kérésre a broker még külön ellenőrzi.
+    if (typeof id !== 'string') return { ok: false, reason: 'Érvénytelen azonosító.' }
+    const decision = parseUserDecision(raw)
+    if (decision === undefined) return { ok: false, reason: 'Érvénytelen döntés.' }
+    return running.decide(id, decision)
+  })
 
   ipcMain.handle('session:focus', async (_event, sessionId: unknown) => {
     // IPC-bemenet: a renderer bármit küldhet, ezért `unknown`, és itt ellenőrizzük.
