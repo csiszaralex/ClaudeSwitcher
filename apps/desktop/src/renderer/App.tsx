@@ -136,7 +136,9 @@ export function App(): JSX.Element {
               </span>
               <span className="name">
                 {/* Csak a szöveg csonkolódik (…), a pötty soha: hosszú névnél is látszania kell. */}
-                <span className="name-text">{view.name}</span>
+                <span className="name-text" title={view.name}>
+                  {view.name}
+                </span>
                 {hasRemoteControl(view) && (
                   <span className="remote" title="Remote Control: telefonról is elérhető">
                     ●
