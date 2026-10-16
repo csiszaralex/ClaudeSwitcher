@@ -47,6 +47,12 @@ export interface SessionView {
   bridgeSessionId?: string | null | undefined
   waitingSince?: number | undefined
   notificationText?: string | undefined
+  /**
+   * A session utolsó `Stop` eseményének ideje (ms), amíg azóta nem mutatott új tevékenységet
+   * (PreToolUse, PermissionRequest, várakozó Notification, futó tool a pillanatképben). Ebből
+   * látszik, hogy „épp végzett" — a `status` maga ilyenkor is `idle`.
+   */
+  stoppedAt?: number | undefined
 }
 
 export interface RateLimitWindow {

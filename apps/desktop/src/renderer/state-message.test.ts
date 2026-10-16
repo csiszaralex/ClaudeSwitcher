@@ -41,6 +41,18 @@ describe('parseStateMessage', () => {
     })
     expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a' }])
   })
+
+  it('keeps a session carrying stoppedAt, and drops one whose stoppedAt is not a number', () => {
+    // A part B ebből számol „épp végzett" állapotot; egy szöveges érték ott NaN-t adna.
+    const message = JSON.stringify({
+      type: 'state',
+      payload: {
+        sessions: [{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'b', stoppedAt: 'tegnap' }, { sessionId: 'c' }],
+        rateLimits: {},
+      },
+    })
+    expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'c' }])
+  })
 })
 
 describe('sanitizeState', () => {
@@ -81,6 +93,18 @@ describe('sanitizeState', () => {
         { ...good, questions: [{ question: 'q' }] },
         { ...good, suggestedRules: [{}] },
       ],
+    })
+    expect(clean?.decisions).toEqual([good])
+  })
+
+  it('keeps a decision carrying a description, and drops one whose description is not a string', () => {
+    // A panel a leírást szövegként rendereli; egy objektum ott dobna.
+    const good = decisionFrom('permissionRequest_bash')
+    expect(good['description']).toBe('Write spike-a to a.txt')
+    const clean = sanitizeState({
+      sessions: [],
+      rateLimits: {},
+      decisions: [good, { ...good, id: 'x', description: { text: 'nope' } }],
     })
     expect(clean?.decisions).toEqual([good])
   })

@@ -224,6 +224,83 @@ describe('startDaemon — held decisions', () => {
     expect(daemon.state().sessions[0]?.status).toBe('waiting')
   })
 
+  it('clears the waiting row when the app decides, and ignores the late permission_prompt', async () => {
+    // Mérve (Task 10 A, F): a döntés után a sor a Stop-ig „waiting" maradt. A 6 mp-en belüli
+    // döntésnél a Notification a döntés UTÁN érkezik — azt sem szabad újra várakozásnak venni.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    const request = { ...payload('permissionRequest_bash'), session_id: 'sid-100' }
+    const prompt = { ...payload('notification_permissionPrompt'), session_id: 'sid-100' }
+    const response = postHook(daemon, '/hooks/permission-request', request)
+    const [pending] = await waitFor(() => daemon.state().decisions)
+    await postHook(daemon, '/hooks/notification', prompt)
+    expect(daemon.state().sessions[0]?.notificationText).toBe('Claude needs your permission to use Write')
+
+    expect(daemon.decide(pending!.id, { type: 'allow' })).toEqual({ ok: true })
+    await response
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+    expect(daemon.state().sessions[0]?.notificationText).toBeUndefined()
+
+    await postHook(daemon, '/hooks/notification', prompt)
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+  })
+
+  it('broadcasts the decided session as no longer waiting in a single state message', async () => {
+    // Két külön frissítés között a renderer egy pillanatra egy már eldöntött, de még
+    // „waiting" sessiont látna.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    const [pending] = await waitFor(() => daemon.state().decisions)
+    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+
+    const socket = new WebSocket(`ws://127.0.0.1:${daemon.port}/ws?token=${daemon.token}`)
+    const states: Array<{ sessions: Array<{ status: string }>; decisions: unknown[] }> = []
+    socket.on('message', (data) => {
+      const message = JSON.parse(data instanceof Buffer ? data.toString('utf8') : '{}') as {
+        type: string
+        payload: (typeof states)[number]
+      }
+      if (message.type === 'state') states.push(message.payload)
+    })
+    await new Promise((resolve) => socket.on('open', resolve))
+
+    daemon.decide(pending!.id, { type: 'allow' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    socket.close()
+
+    expect(states).toHaveLength(1)
+    expect(states[0]?.decisions).toEqual([])
+    expect(states[0]?.sessions[0]?.status).toBe('idle')
+  })
+
+  it('clears the waiting row when a tool of the session has run', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    expect(daemon.state().sessions[0]?.status).toBe('waiting')
+
+    await postHook(daemon, '/hooks/post-tool-use', { ...payload('postToolUse_bash'), session_id: 'sid-100' })
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+  })
+
+  it('reports when the session stopped, until a tool starts again', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    const before = Date.now()
+    await postHook(daemon, '/hooks/lifecycle/stop', { ...payload('stop'), session_id: 'sid-100' })
+    const stoppedAt = daemon.state().sessions[0]?.stoppedAt
+    expect(stoppedAt).toBeGreaterThanOrEqual(before)
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+
+    await postHook(daemon, '/hooks/pre-tool-use', { ...payload('preToolUse_bash'), session_id: 'sid-100' })
+    expect(daemon.state().sessions[0]?.stoppedAt).toBeUndefined()
+  })
+
   it('answers held requests on stop instead of hanging the shutdown', async () => {
     // A tartott kapcsolatok miatt a server.close() különben soha nem térne vissza.
     const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })

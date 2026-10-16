@@ -334,6 +334,22 @@
       }
     ]
   },
+  "permissionRequest_workflow": {
+    "_note": "Constructed from the shape measured in Task 10 D (tool_input = { script, args }, script opens with an `export const meta = { name, description, ... }` block, permission_suggestions null). Not copied verbatim: the script body is shortened.",
+    "session_id": "2160705c-b755-4914-b3cb-d4a8047bdacb",
+    "transcript_path": "C:\\Users\\user\\.claude\\projects\\p--08-Apps-cs-spike\\2160705c-b755-4914-b3cb-d4a8047bdacb.jsonl",
+    "cwd": "P:\\08_Apps\\cs-spike",
+    "permission_mode": "default",
+    "hook_event_name": "PermissionRequest",
+    "tool_name": "Workflow",
+    "tool_input": {
+      "script": "export const meta = {\n  name: 'acceptance-probe',\n  description: \"Run the acceptance probe in every package and summarise the results\",\n  phases: [{ title: 'Probe' }, { title: 'Summarise' }],\n}\n\nexport default async function run({ args, agent }) {\n  const results = await agent.run('Run the probe', { name: 'probe' })\n  return { results, target: args.target }\n}\n",
+      "args": {
+        "target": "cs-spike"
+      }
+    },
+    "permission_suggestions": null
+  },
   "preToolUse_bash": {
     "session_id": "2160705c-b755-4914-b3cb-d4a8047bdacb",
     "transcript_path": "C:\\Users\\user\\.claude\\projects\\p--08-Apps-cs-spike\\2160705c-b755-4914-b3cb-d4a8047bdacb.jsonl",

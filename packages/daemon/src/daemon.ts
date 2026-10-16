@@ -69,9 +69,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
       onPermissionRequest: (request) => decisions.hold(request),
       onPreToolUse: (event) => {
+        sessions.applyToolStarted(event.sessionId)
         decisions.preToolUse(event)
       },
       onPostToolUse: (event) => {
+        // Előbb a Notification-várakozás, aztán a függés: így egyik köztes állapot sem mutat
+        // „waiting" sessiont függő döntés nélkül — a függés még tartja, amíg a broker le nem zárja.
+        sessions.applyToolFinished(event.sessionId)
         decisions.postToolUse(event)
       },
       onSubagentStop: (event) => {
@@ -98,14 +102,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const hub = new Hub(server as HttpServer, token)
 
   function state(): DaemonState {
-    const pending = decisions.views()
-    // Sessionönként a legrégebbi függő döntés: amíg az tart, a session várakozó.
-    const pendingSince = new Map<string, number>()
-    for (const view of pending) {
-      const earlier = pendingSince.get(view.sessionId)
-      if (earlier === undefined || view.createdAt < earlier) pendingSince.set(view.sessionId, view.createdAt)
-    }
-    return { sessions: sessions.views(pendingSince), rateLimits: limits.current(), decisions: pending }
+    return { sessions: sessions.views(), rateLimits: limits.current(), decisions: decisions.views() }
   }
 
   // A SessionStore minden `apply*` híváskor jelez, akkor is, ha az állapot nem
@@ -123,7 +120,33 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   }
 
   sessions.onChange(broadcast)
-  decisions.onChange(broadcast)
+
+  /**
+   * Annak a sessionnek az azonosítója, amelynek a döntését az app ÉPP most zárja le. A broker
+   * a `decide`-on belül pontosan egyszer jelez, és csak sikeres döntésnél — így a jelzésből
+   * tudjuk, hogy ezt a változást az app okozta, és a store a függést meg a Notification-
+   * várakozást egy lépésben, egyetlen broadcasttal törölheti.
+   */
+  let resolvingFor: string | undefined
+  decisions.onChange(() => {
+    // Sessionönként a legrégebbi függő döntés: amíg az tart, a session várakozó. A store
+    // emittál, az pedig broadcastol — a döntések listája is ezzel megy ki.
+    const pendingSince = new Map<string, number>()
+    for (const view of decisions.views()) {
+      const earlier = pendingSince.get(view.sessionId)
+      if (earlier === undefined || view.createdAt < earlier) pendingSince.set(view.sessionId, view.createdAt)
+    }
+    sessions.applyPending(pendingSince, Date.now(), resolvingFor)
+  })
+
+  function decide(id: string, decision: UserDecision): DecideResult {
+    resolvingFor = decisions.views().find((view) => view.id === id)?.sessionId
+    try {
+      return decisions.decide(id, decision)
+    } finally {
+      resolvingFor = undefined
+    }
+  }
 
   let refreshing: Promise<void> | undefined
   async function refresh(): Promise<void> {
@@ -156,7 +179,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     token,
     state,
     refresh,
-    decide: (id, decision) => decisions.decide(id, decision),
+    decide,
     async stop() {
       if (timer !== undefined) clearInterval(timer)
       // A tartott kéréseket a szerver lezárása ELŐTT kell megválaszolni: a nyitott

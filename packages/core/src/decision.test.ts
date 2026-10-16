@@ -28,6 +28,7 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
     ['permissionRequest_mcp', 'mcp__claude-vscode__getDiagnostics', 'tool', 'mcp__claude-vscode__getDiagnostics'],
     ['permissionRequest_askSingle', 'AskUserQuestion', 'question', 'Mi legyen a k1.txt tartalma?'],
     ['permissionRequest_plan', 'ExitPlanMode', 'plan', 'Terv: c.txt létrehozása'],
+    ['permissionRequest_workflow', 'Workflow', 'tool', 'acceptance-probe'],
   ] as const)('%s → %s, %s', (name, toolName, kind, summary) => {
     const info = parsed(name)
     expect(info.toolName).toBe(toolName)
@@ -91,5 +92,72 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
     const info = parsePermissionRequest({ session_id: 's', tool_name: 'Bash' })
     expect(info?.toolInput).toEqual({})
     expect(info?.summary).toBe('Bash')
+  })
+})
+
+/** Egy Bash-kérés a megadott bemenettel — a sortörés-esetekhez nincs valódi payload. */
+function bash(toolInput: Record<string, unknown>): PermissionRequestInfo | undefined {
+  return parsePermissionRequest({ session_id: 's', tool_name: 'Bash', tool_input: toolInput })
+}
+
+describe('parsePermissionRequest — a parancs sortörései és a leírás', () => {
+  it('keeps the line breaks of a multi-line command, normalising CRLF and trimming the ends', () => {
+    // Mérve (Task 10 C): a többsoros parancs egy sorba folyt a panelen.
+    const info = bash({ command: '\n  git add -A\r\n  git commit -m "x"\n\n' })
+    expect(info?.summary).toBe('git add -A\n  git commit -m "x"')
+  })
+
+  it('still flattens a file path or URL to one line', () => {
+    const info = parsePermissionRequest({
+      session_id: 's', tool_name: 'WebFetch', tool_input: { url: ' https://example.com/\n a ' },
+    })
+    expect(info?.summary).toBe('https://example.com/ a')
+  })
+
+  it('carries the tool\'s own description of a command', () => {
+    expect(parsed('permissionRequest_bash').description).toBe('Write spike-a to a.txt')
+    expect(bash({ command: 'ls', description: '  List\nfiles ' })?.description).toBe('List files')
+  })
+
+  it('has no description where the tool gives none', () => {
+    expect(parsed('permissionRequest_write').description).toBeUndefined()
+    expect(parsed('permissionRequest_mcp').description).toBeUndefined()
+    expect(bash({ command: 'ls', description: 42 })?.description).toBeUndefined()
+  })
+})
+
+describe('parsePermissionRequest — Workflow', () => {
+  function workflow(script: unknown): PermissionRequestInfo | undefined {
+    return parsePermissionRequest({ session_id: 's', tool_name: 'Workflow', tool_input: { script, args: {} } })
+  }
+
+  it('summarises with the script\'s meta name and describes with its meta description', () => {
+    const info = parsed('permissionRequest_workflow')
+    expect(info.summary).toBe('acceptance-probe')
+    expect(info.description).toBe('Run the acceptance probe in every package and summarise the results')
+    expect(info.suggestedRules).toEqual([])
+  })
+
+  it('reads either quote style and an escaped quote inside the value', () => {
+    const info = workflow(
+      'export const meta = { name: "it\\"s-a-name", description: \'Don\\\'t panic\' }\nexport default 1',
+    )
+    expect(info?.summary).toBe('it"s-a-name')
+    expect(info?.description).toBe("Don't panic")
+  })
+
+  it('does not take a name from outside the meta block', () => {
+    // A meta-blokkban nincs név; a szkript későbbi `name:`-je nem a workflow neve.
+    const info = workflow("export const meta = {\n  description: 'Only a description',\n}\nrun({ name: 'step' })")
+    expect(info?.summary).toBe('Workflow')
+    expect(info?.description).toBe('Only a description')
+  })
+
+  it('falls back to the tool name when the script cannot be read, and never throws', () => {
+    for (const script of [undefined, 42, '', 'export default 1', 'export const meta = { name: ', null]) {
+      expect(() => workflow(script)).not.toThrow()
+      expect(workflow(script)?.summary).toBe('Workflow')
+      expect(workflow(script)?.description).toBeUndefined()
+    }
   })
 })

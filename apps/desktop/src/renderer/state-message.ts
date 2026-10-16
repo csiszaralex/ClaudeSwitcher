@@ -34,11 +34,14 @@ function isDecision(value: unknown): value is PendingDecisionView {
   const kind = value['kind']
   const questions = value['questions']
   const rules = value['suggestedRules']
+  const description = value['description']
   return (
     typeof value['id'] === 'string' &&
     typeof value['sessionId'] === 'string' &&
     typeof value['toolName'] === 'string' &&
     typeof value['summary'] === 'string' &&
+    // Opcionális: egy régebbi daemon nem küldi. Ha jön, szövegnek kell lennie — a panel annak rendereli.
+    (description === undefined || typeof description === 'string') &&
     typeof value['released'] === 'boolean' &&
     typeof kind === 'string' &&
     DECISION_KINDS.has(kind) &&
@@ -72,7 +75,11 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
 
   return {
     sessions: sessions.filter(
-      (view: unknown): view is SessionView => isObject(view) && typeof view['sessionId'] === 'string',
+      (view: unknown): view is SessionView =>
+        isObject(view) &&
+        typeof view['sessionId'] === 'string' &&
+        // Opcionális: egy régebbi daemon nem küldi. Ha jön, számnak kell lennie — időt számolnak belőle.
+        (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number'),
     ),
     // A `five_hour !== undefined` vizsgálat egy `null`-ra IGAZ, az App pedig utána a
     // `.used_percentage`-en dobna. Itt kiszűrve a megjelenítésnek nem kell erre gondolnia.
