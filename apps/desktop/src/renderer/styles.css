@@ -21,12 +21,18 @@ body {
 }
 
 .session.selected { background: #2f2e2c; }
-.session.waiting .marker { color: #d97757; }
-.session.working .marker { color: #7aa2c4; }
-.session.idle .marker { color: #6b6a67; }
+/* Az állapotjel (session-marker.ts): a szín mellett az alak is más. */
+.marker { cursor: default; }
+.marker.tone-waiting { color: #d97757; }
+.marker.tone-released { color: #e3b341; }
+.marker.tone-working { color: #7aa2c4; }
+.marker.tone-done { color: #8fbf7a; }
+.marker.tone-idle { color: #6b6a67; }
 
-.name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.unbridged { color: #6b6a67; font-weight: 400; }
+/* Flex, hogy csak a szöveg csonkolódjon (…), a Remote Control-pötty soha ne. */
+.name { display: flex; align-items: baseline; min-width: 0; font-weight: 600; }
+.name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote { flex: none; margin-left: 4px; color: #5fa8e8; font-size: 9px; font-weight: 400; cursor: default; }
 .summary { color: #a8a6a2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .age { color: #6b6a67; text-align: right; font-variant-numeric: tabular-nums; }
 .empty { padding: 24px; text-align: center; color: #6b6a67; }
@@ -42,8 +48,18 @@ body {
 
 .muted { color: #6b6a67; }
 
+/*
+ * A panel oszlop: fejléc felül, művelet-terület alul (flex: none), köztük a görgethető
+ * tartalom. A 620×600-as, át nem méretezhető ablakban a 60vh a session-listának is hagy
+ * ~200 px-t, ami a saját scrolljával görget. Az `overflow-y: auto` csak tartalék: ha a
+ * művelet-terület maga nem férne el, inkább görgessen az egész, mint hogy levágja a gombokat.
+ */
 .decision {
-  max-height: 55vh;
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 60vh;
   overflow-y: auto;
   margin: 0 6px 6px;
   padding: 10px 12px;
@@ -51,7 +67,11 @@ body {
   border-radius: 6px;
   background: #242321;
 }
-.decision-head { display: flex; gap: 10px; align-items: baseline; }
+.decision-head { flex: none; display: flex; gap: 10px; align-items: baseline; }
+.decision-scroll { flex: 0 1 auto; min-height: 2.5em; overflow-y: auto; }
+.decision-actions { flex: none; }
+/* Kérdésnél és tervnél a művelet-terület is hosszú: ott a belseje görget, a gombsor alul marad. */
+.decision-actions.fill { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .decision-kind { color: #d97757; font-weight: 600; }
 .decision-tool { color: #a8a6a2; }
 .decision-agent { color: #7aa2c4; margin-left: auto; }
@@ -61,6 +81,19 @@ body {
   word-break: break-word;
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
   color: #e8e6e3;
+}
+.decision-description { margin: -4px 0 8px; color: #8a8885; }
+.decision-details { margin: 0 0 6px; }
+.decision-details summary { color: #a8a6a2; cursor: pointer; }
+.decision-details summary:focus-visible { outline: 2px solid #d97757; outline-offset: 1px; }
+.decision-details pre {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #1c1b1a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
 }
 .decision-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 .decision-error { margin: 6px 0 0; color: #e0796b; }
@@ -94,12 +127,17 @@ body {
 .decision .grow { flex: 1; min-width: 200px; }
 .rule-editor textarea { width: 100%; resize: vertical; }
 .rule-editor .confirm { display: block; margin-top: 6px; color: #e0796b; }
+.question-form { display: flex; flex-direction: column; min-height: 0; }
+.question-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 .question-form fieldset { margin: 6px 0; padding: 6px 10px; border: 1px solid #3a3836; border-radius: 5px; }
 .question-form legend { padding: 0 4px; color: #e8e6e3; font-weight: 600; }
 .question-form .option { display: block; padding: 2px 0; cursor: pointer; }
 .question-form .other { width: 100%; margin-top: 4px; }
+.plan-panel { display: flex; flex-direction: column; min-height: 0; }
+.plan-panel form { flex: none; }
 .plan {
-  max-height: 30vh;
+  flex: 0 1 auto;
+  min-height: 3em;
   overflow-y: auto;
   margin: 0 0 8px;
   padding: 8px;

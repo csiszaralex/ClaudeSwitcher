@@ -1,18 +1,12 @@
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
-import { isTypingTarget } from './decision-actions.js'
+import { isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, formatResetsIn, summarize } from './format.js'
-import { moveSelection, resolveSelectedIndex } from './selection.js'
+import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
+import { hasRemoteControl, statusMarker } from './session-marker.js'
 import { useDaemonState } from './useDaemonState.js'
 import './styles.css'
-
-const STATUS_LABEL = {
-  waiting: '●',
-  working: '◐',
-  idle: '○',
-  unknown: '?',
-} as const
 
 export function App(): JSX.Element {
   const { sessions, rateLimits, connected, checkedAt, decisions } = useDaemonState()
@@ -27,12 +21,47 @@ export function App(): JSX.Element {
   )
   const selectedView = selected === -1 ? undefined : sessions[selected]
 
-  // Sessionönként a legrégebbi függő döntés — a daemon létrehozás szerint rendezve küldi.
-  const decisionBySession = new Map<string, PendingDecisionView>()
+  // Sessionönként a függő döntések, a legrégebbi elöl — a daemon létrehozás szerint rendezve
+  // küldi. A panel a legrégebbit mutatja; az állapotjelnek mind kell (elengedett-e mind).
+  const decisionsBySession = new Map<string, PendingDecisionView[]>()
   for (const decision of decisions) {
-    if (!decisionBySession.has(decision.sessionId)) decisionBySession.set(decision.sessionId, decision)
+    const list = decisionsBySession.get(decision.sessionId)
+    if (list === undefined) decisionsBySession.set(decision.sessionId, [decision])
+    else list.push(decision)
   }
-  const decision = selectedView === undefined ? undefined : decisionBySession.get(selectedView.sessionId)
+  const decision = selectedView === undefined ? undefined : decisionsBySession.get(selectedView.sessionId)?.[0]
+
+  // A legutóbbi állapot az aszinkron kezelőknek (megjelenés, döntés utáni léptetés). Egy
+  // renderkori closure a döntés válaszáig vagy a megjelenésig elavulhat — a lépést a
+  // legfrissebb listán kell kiszámolni, különben egy közben eltűnt sessionre ugorhatna.
+  const latest = useRef({ sessions, decisions })
+  useEffect(() => {
+    latest.current = { sessions, decisions }
+  })
+
+  // Megjelenéskor a legrégebben várakozó sessionre ugrunk. A jel a main `show` eseménye (az
+  // indoklás a main createOverlay-ében).
+  useEffect(
+    () =>
+      window.claudeswitcher.onShown(() => {
+        setSelectedId((current) => selectOnShow(latest.current.sessions, latest.current.decisions, current))
+      }),
+    [],
+  )
+
+  /** Egy appból hozott SIKERES döntés után: a következő várakozóra lép, vagy elrejtőzik. */
+  async function afterDecision(decided: PendingDecisionView): Promise<void> {
+    // Minden döntésnél frissen kérdezzük: a tálcapipa bármikor átállhat, és egy gyorsítótár
+    // ehhez külön értesítési csatornát kívánna. Ha az IPC elbukik, az alapérték (elrejtés) jön.
+    const raw = await window.claudeswitcher.settings().catch((error: unknown) => {
+      console.error('[overlay] could not read the settings', error)
+      return undefined
+    })
+    const { hideAfterLastDecision } = readOverlaySettings(raw)
+    const next = nextAfterDecision(latest.current.sessions, latest.current.decisions, decided, hideAfterLastDecision)
+    if (next.select !== undefined) setSelectedId(next.select)
+    if (next.hide) await window.claudeswitcher.hide()
+  }
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -87,7 +116,9 @@ export function App(): JSX.Element {
           </li>
         )}
         {sessions.map((view, index) => {
-          const pending = decisionBySession.get(view.sessionId)
+          const sessionDecisions = decisionsBySession.get(view.sessionId) ?? []
+          const pending = sessionDecisions[0]
+          const marker = statusMarker(view, sessionDecisions)
           return (
             <li
               key={view.sessionId}
@@ -100,13 +131,15 @@ export function App(): JSX.Element {
                 void window.claudeswitcher.focusSession(view.sessionId)
               }}
             >
-              <span className="marker">{STATUS_LABEL[view.status]}</span>
+              <span className={`marker tone-${marker.tone}`} title={marker.title}>
+                {marker.glyph}
+              </span>
               <span className="name">
-                {view.name}
-                {(view.bridgeSessionId === null || view.bridgeSessionId === undefined) && (
-                  // Remote Control nélkül ez a session telefonról nem érhető el.
-                  <span className="unbridged" title="Nincs Remote Control kapcsolata">
-                    {' ⚑'}
+                {/* Csak a szöveg csonkolódik (…), a pötty soha: hosszú névnél is látszania kell. */}
+                <span className="name-text">{view.name}</span>
+                {hasRemoteControl(view) && (
+                  <span className="remote" title="Remote Control: telefonról is elérhető">
+                    ●
                   </span>
                 )}
               </span>
@@ -125,6 +158,11 @@ export function App(): JSX.Element {
         <DecisionPanel
           key={decision.id}
           decision={decision}
+          onDecided={() => {
+            afterDecision(decision).catch((error: unknown) => {
+              console.error('[overlay] could not move on after the decision', error)
+            })
+          }}
           onJump={() => {
             void window.claudeswitcher.focusSession(selectedView.sessionId)
           }}

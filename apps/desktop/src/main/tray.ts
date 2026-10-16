@@ -35,6 +35,10 @@ export function createTray(options: {
   onEditHotkey: () => void
   /** A gyorsbillentyű, és hogy sikerült-e lefoglalni. */
   hotkey: { accelerator: string; registered: boolean }
+  /** Az auto-hide kezdőállapota a configból. */
+  hideAfterLastDecision: boolean
+  /** A pipa új állapota; a hívó menti el és adja tovább az overlaynek. */
+  onToggleHideAfterLastDecision: (enabled: boolean) => void
 }): TrayHandle {
   const idle = loadIcon('tray.png')
   const waiting = loadIcon('tray-waiting.png')
@@ -54,6 +58,17 @@ export function createTray(options: {
         enabled: false,
       },
       { label: 'Gyorsbillentyű átállítása… (újraindítás után él)', click: options.onEditHotkey },
+      { type: 'separator' },
+      {
+        // A pipát az Electron a kattintás ELŐTT átbillenti, tehát az `item.checked` már az új
+        // állapot. Azonnal hat, újraindítás nélkül: az overlay minden döntés után a mainből kérdezi.
+        label: 'Elrejtés az utolsó döntés után',
+        type: 'checkbox',
+        checked: options.hideAfterLastDecision,
+        click: (item) => {
+          options.onToggleHideAfterLastDecision(item.checked)
+        },
+      },
       { type: 'separator' },
       { label: 'Claude Code integráció telepítése', click: options.onInstall },
       { label: 'Claude Code integráció eltávolítása', click: options.onUninstall },

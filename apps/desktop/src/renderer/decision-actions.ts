@@ -41,3 +41,20 @@ export function readDecideResult(raw: unknown): DecideOutcome {
   }
   return { ok: false, reason: 'Ismeretlen válasz a daemontól.' }
 }
+
+export interface OverlaySettings {
+  /** Elrejtőzzön-e az overlay az utolsó várakozó appból hozott eldöntése után. */
+  hideAfterLastDecision: boolean
+}
+
+/**
+ * A main processz beállításai, ellenőrizve. Bármi másra az alapérték (elrejtés) jön — ugyanaz,
+ * amit a main config is ad, ha a kulcs hiányzik.
+ */
+export function readOverlaySettings(raw: unknown): OverlaySettings {
+  if (typeof raw === 'object' && raw !== null) {
+    const { hideAfterLastDecision } = raw as { hideAfterLastDecision?: unknown }
+    if (typeof hideAfterLastDecision === 'boolean') return { hideAfterLastDecision }
+  }
+  return { hideAfterLastDecision: true }
+}

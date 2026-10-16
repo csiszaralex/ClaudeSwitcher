@@ -1,11 +1,12 @@
 import type { UserDecision } from '@claudeswitcher/core'
 import { formatRule } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
-import { useEffect, useState, type JSX } from 'react'
+import { useEffect, useMemo, useState, type JSX } from 'react'
 import { isTypingTarget, readDecideResult, shortcutFor, type DecisionAction } from './decision-actions.js'
 import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
+import { DETAILS_LIMIT, formatToolInput, showsDetails } from './tool-details.js'
 
 const KIND_LABEL = {
   tool: 'Engedélyt kér',
@@ -18,6 +19,8 @@ type Mode = 'buttons' | 'deny' | 'rule-project' | 'rule-machine'
 
 interface Props {
   decision: PendingDecisionView
+  /** A daemon elfogadta a döntést — az App ebből lépteti a kijelölést, vagy rejti el az overlayt. */
+  onDecided: () => void
   /** Ugrás a session VSCode ablakára — ott a natív prompt végig megvan. */
   onJump: () => void
 }
@@ -26,7 +29,7 @@ interface Props {
  * Egy függő kérés döntési panelje. A döntést a main processzen át a daemon ellenőrzi és
  * továbbítja; siker esetén a következő állapot leveszi a kérést, és a panel eltűnik.
  */
-export function DecisionPanel({ decision, onJump }: Props): JSX.Element {
+export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Element {
   const [mode, setMode] = useState<Mode>('buttons')
   const [denyText, setDenyText] = useState('')
   const [error, setError] = useState<string | undefined>()
@@ -37,7 +40,8 @@ export function DecisionPanel({ decision, onJump }: Props): JSX.Element {
     setError(undefined)
     try {
       const result = readDecideResult(await window.claudeswitcher.decide(decision.id, choice))
-      if (!result.ok) setError(result.reason)
+      if (result.ok) onDecided()
+      else setError(result.reason)
     } catch (caught: unknown) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -203,8 +207,20 @@ export function DecisionPanel({ decision, onJump }: Props): JSX.Element {
     }
   }
 
-  const agent = decision.agentType === undefined ? undefined : `subagent · ${decision.agentType}`
+  // Az App másodpercenként újrarenderel (az órák miatt); egy nagy szkript formázása ne fusson
+  // le minden tikkre.
+  const details = useMemo(
+    () => (showsDetails(decision) ? formatToolInput(decision.toolInput) : undefined),
+    [decision],
+  )
 
+  const agent = decision.agentType === undefined ? undefined : `subagent · ${decision.agentType}`
+  // Kérdésnél és tervnél a művelet-terület maga is hosszú (kérdések, tervszöveg): ott a belseje
+  // görget, a küldő gombok pedig alul maradnak.
+  const fill = decision.kind === 'question' || decision.kind === 'plan'
+
+  // Felül a fejléc, alul a művelet-terület, köztük a görgethető tartalom: egy hosszú parancsnál
+  // se kelljen a gombokig görgetni (Task 10, 2. eltérés).
   return (
     <section className="decision">
       <header className="decision-head">
@@ -212,9 +228,32 @@ export function DecisionPanel({ decision, onJump }: Props): JSX.Element {
         <span className="decision-tool">{decision.toolName}</span>
         {agent !== undefined && <span className="decision-agent">{agent}</span>}
       </header>
-      <pre className="decision-summary">{decision.summary}</pre>
-      {body()}
-      {error !== undefined && <p className="decision-error">{error}</p>}
+      <div className="decision-scroll">
+        <pre className="decision-summary">{decision.summary}</pre>
+        {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
+        {details !== undefined && details.blocks.length > 0 && (
+          // Natív <details>: billentyűzetről (Tab, Szóköz) saját kód nélkül nyitható.
+          <details className="decision-details">
+            <summary>Részletek</summary>
+            {details.blocks.map((block) => (
+              <div key={block.label === undefined ? 'json' : `field:${block.label}`}>
+                {block.label !== undefined && <div className="muted">{block.label}</div>}
+                <pre>{block.text}</pre>
+              </div>
+            ))}
+            {details.truncated && (
+              <p className="muted">
+                Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik — a teljes
+                szöveg a VSCode-ban.
+              </p>
+            )}
+          </details>
+        )}
+      </div>
+      <div className={fill ? 'decision-actions fill' : 'decision-actions'}>
+        {body()}
+        {error !== undefined && <p className="decision-error">{error}</p>}
+      </div>
     </section>
   )
 }

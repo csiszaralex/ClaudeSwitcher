@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTypingTarget, readDecideResult, shortcutFor } from './decision-actions.js'
+import { isTypingTarget, readDecideResult, readOverlaySettings, shortcutFor } from './decision-actions.js'
 
 describe('shortcutFor', () => {
   it('maps the command keys, case-insensitively', () => {
@@ -49,5 +49,18 @@ describe('readDecideResult', () => {
     expect(readDecideResult({ ok: false, reason: 'lezárult' })).toEqual({ ok: false, reason: 'lezárult' })
     expect(readDecideResult(undefined).ok).toBe(false)
     expect(readDecideResult({ ok: false }).ok).toBe(false)
+  })
+})
+
+describe('readOverlaySettings', () => {
+  it('reads the auto-hide setting from main', () => {
+    expect(readOverlaySettings({ hideAfterLastDecision: false })).toEqual({ hideAfterLastDecision: false })
+    expect(readOverlaySettings({ hideAfterLastDecision: true })).toEqual({ hideAfterLastDecision: true })
+  })
+
+  it('falls back to the default (hide) for anything else — the IPC can carry anything', () => {
+    for (const raw of [undefined, null, 'x', {}, { hideAfterLastDecision: 'false' }]) {
+      expect(readOverlaySettings(raw)).toEqual({ hideAfterLastDecision: true })
+    }
   })
 })

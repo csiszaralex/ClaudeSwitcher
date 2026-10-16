@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
-import { configPath, loadConfig } from './config.js'
+import { configPath, loadConfig, updateConfig } from './config.js'
 import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'
 import { registerHotkey } from './hotkey.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
@@ -45,6 +45,14 @@ function createOverlay(): BrowserWindow {
   window.on('blur', () => {
     window.hide()
   })
+  // Az overlay megjelenésének jele a renderernek: erre jelöli ki a legrégebben várakozó
+  // sessiont. Szándékosan a main `show` eseménye, nem a renderer `focus`-a vagy a
+  // `visibilitychange`: a Windows előtérzára a `focus()`-t csendben megtagadhatja (lásd
+  // session:focus), a Chromium láthatósági jele pedig az ablakelfedés-követéstől függ. A
+  // `show` mindig lefut, amikor az ablak ténylegesen láthatóvá válik — és csak akkor.
+  window.on('show', () => {
+    window.webContents.send('overlay:shown')
+  })
 
   // Ha a renderer processz meghal (OOM, GPU- vagy V8-összeomlás), az Electron egy üres
   // keretet hagy, és semmi nem tölti újra. Az overlay az egyetlen ablak, tehát a
@@ -64,6 +72,8 @@ app.whenReady().then(async () => {
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
   const userData = app.getPath('userData')
   const config = await loadConfig(userData)
+  // Futás közben a tálcapipa állítja; a renderer minden appból hozott döntés után innen kérdezi.
+  let hideAfterLastDecision = config.hideAfterLastDecision
   const token = await loadOrCreateToken(userData)
   // Egy helyi, nem-null konstans: a kezelők ezt fogják be, így nincs szükség `!`-re, és a típus
   // garantálja, hogy indulás után minden kezelő ugyanazt a futó daemont látja. A modulszintű
@@ -106,6 +116,8 @@ app.whenReady().then(async () => {
     overlay?.hide()
   })
 
+  ipcMain.handle('settings:get', () => ({ hideAfterLastDecision }))
+
   // Indulási összegzés a főprocessz stdoutjára. Ez teszi a Step 5 ellenőrzését
   // automatizálhatóvá: nem kell DevTools-konzolba gépelni ahhoz, hogy lássuk,
   // a daemon elindult és tényleg megtalálta a futó sessionöket.
@@ -137,6 +149,13 @@ app.whenReady().then(async () => {
     // AppData alatt.
     onEditHotkey: () => {
       void shell.openPath(configPath(userData))
+    },
+    hideAfterLastDecision,
+    onToggleHideAfterLastDecision: (enabled) => {
+      // Azonnal él, akkor is, ha a mentés elbukik (pl. elrontott config fájl) — akkor csak
+      // ennek a futásnak a végéig.
+      hideAfterLastDecision = enabled
+      void updateConfig(userData, { hideAfterLastDecision: enabled })
     },
     onOpen: () => {
       showOverlay()

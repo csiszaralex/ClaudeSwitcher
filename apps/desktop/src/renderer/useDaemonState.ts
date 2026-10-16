@@ -11,6 +11,10 @@ declare global {
       hide(): Promise<void>
       /** A main `DecideResult`-ot ad; a renderer a `readDecideResult`-tal olvassa (Task 8). */
       decide(id: string, decision: UserDecision): Promise<unknown>
+      /** A main beállításai; a renderer a `readOverlaySettings`-szel olvassa. */
+      settings(): Promise<unknown>
+      /** Hív, valahányszor az overlay láthatóvá válik; a visszaadott függvény leiratkozik. */
+      onShown(callback: () => void): () => void
     }
   }
 }
