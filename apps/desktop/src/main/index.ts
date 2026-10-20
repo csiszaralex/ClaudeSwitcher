@@ -8,6 +8,7 @@ import { configPath, loadConfig, updateConfig } from './config.js'
 import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'
 import { registerHotkey } from './hotkey.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
+import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
 
@@ -15,6 +16,8 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let daemon: Daemon | undefined
 let overlay: BrowserWindow | undefined
+/** A gyorsbillentyű és a tálcaikon elengedése kilépéskor; indulás után kap tartalmat. */
+let cleanup: () => void = () => undefined
 
 function createOverlay(): BrowserWindow {
   const window = new BrowserWindow({
@@ -245,10 +248,11 @@ app.whenReady().then(async () => {
   syncTray()
   setInterval(syncTray, 1000).unref()
 
-  app.on('before-quit', () => {
+  // A kilépéskori takarítás a lenti, egyetlen `before-quit` kezelőé — az fut le pontosan egyszer.
+  cleanup = () => {
     globalShortcut.unregisterAll()
     tray.destroy()
-  })
+  }
 }).catch((error: unknown) => {
   // Tálcaikonos app: ha az indulás elbukik — tipikusan a daemon —, nincs ablak és
   // nincs tálcaikon, a processz csendben halott maradna, a felhasználó pedig csak
@@ -266,6 +270,29 @@ app.on('window-all-closed', () => {
   // Tálcaikonos app: az ablak bezárása nem lépteti ki.
 })
 
-app.on('before-quit', () => {
-  void daemon?.stop()
+/**
+ * Kilépés: az Electron nem várja meg az aszinkron `stop()`-ot, így a tartott kérések üres 200-ai
+ * kimenet nélkül halhatnának el. Ezért az első `before-quit`-et megállítjuk, legfeljebb
+ * STOP_TIMEOUT_MS-ig várunk a daemonra, aztán valóban kilépünk. A második `before-quit` (a saját
+ * `app.quit()`-ünké, vagy egy türelmetlen második kérés) már nem indít újabb leállást.
+ */
+let quitting: 'no' | 'stopping' | 'done' = 'no'
+app.on('before-quit', (event) => {
+  if (quitting === 'done') return
+  event.preventDefault()
+  if (quitting === 'stopping') return
+  quitting = 'stopping'
+  // Egy takarítási hiba ne akassza meg a kilépést: a daemon leállása és a quit ettől még fut.
+  try {
+    cleanup()
+  } catch (error) {
+    console.error('[claudeswitcher] cleanup failed', error)
+  }
+  const running = daemon
+  const stopped = running === undefined ? Promise.resolve(true) : stopWithin(() => running.stop())
+  void stopped.then((inTime) => {
+    if (!inTime) console.error('[claudeswitcher] daemon did not stop in time; quitting anyway')
+    quitting = 'done'
+    app.quit()
+  })
 })

@@ -18,6 +18,14 @@ export function shortcutFor(kind: DecisionKind, key: string): DecisionAction | u
   return SHORTCUTS[kind][key.toLowerCase()]
 }
 
+/**
+ * Kérdés, aminek a kérdéseit nem tudtuk kiolvasni (megváltozott `tool_input` alak). Válaszolni
+ * rá innen nem lehet — a panel ilyenkor a kiutat kínálja: ugrás a VSCode-ba, vagy tiltás üzenettel.
+ */
+export function isUnreadableQuestion(decision: { kind: DecisionKind; questions: readonly unknown[] }): boolean {
+  return decision.kind === 'question' && decision.questions.length === 0
+}
+
 /** Igaz, ha a billentyű egy szövegmezőé — ott a gépelés az övé, nem a listáé vagy a panelé. */
 export function isTypingTarget(target: unknown): boolean {
   if (typeof target !== 'object' || target === null) return false

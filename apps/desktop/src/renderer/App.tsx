@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, formatResetsIn, summarize } from './format.js'
+import { activeDecision, buildRows } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 import { useDaemonState } from './useDaemonState.js'
@@ -15,28 +16,22 @@ export function App(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [now, setNow] = useState(Date.now())
 
-  const selected = resolveSelectedIndex(
-    sessions.map((s) => s.sessionId),
-    selectedId,
-  )
-  const selectedView = selected === -1 ? undefined : sessions[selected]
+  // A sorok: a sessionök, és külön sorként azok a függő kérések, amelyek sessionjét a
+  // pillanatkép még nem ismeri (rows.ts). Minden kijelölés és léptetés ezen a listán megy.
+  const rows = buildRows(sessions, decisions)
+  const ids = rows.map((row) => row.sessionId)
+  const selected = resolveSelectedIndex(ids, selectedId)
+  const selectedRowView = selected === -1 ? undefined : rows[selected]
 
-  // Sessionönként a függő döntések, a legrégebbi elöl — a daemon létrehozás szerint rendezve
-  // küldi. A panel a legrégebbit mutatja; az állapotjelnek mind kell (elengedett-e mind).
-  const decisionsBySession = new Map<string, PendingDecisionView[]>()
-  for (const decision of decisions) {
-    const list = decisionsBySession.get(decision.sessionId)
-    if (list === undefined) decisionsBySession.set(decision.sessionId, [decision])
-    else list.push(decision)
-  }
-  const decision = selectedView === undefined ? undefined : decisionsBySession.get(selectedView.sessionId)?.[0]
+  // A panel a legrégebbi, appból még dönthető kérést mutatja; az állapotjelnek mind kell.
+  const decision = selectedRowView === undefined ? undefined : activeDecision(selectedRowView.decisions)
 
   // A legutóbbi állapot az aszinkron kezelőknek (megjelenés, döntés utáni léptetés). Egy
   // renderkori closure a döntés válaszáig vagy a megjelenésig elavulhat — a lépést a
   // legfrissebb listán kell kiszámolni, különben egy közben eltűnt sessionre ugorhatna.
-  const latest = useRef({ sessions, decisions })
+  const latest = useRef({ rows, decisions })
   useEffect(() => {
-    latest.current = { sessions, decisions }
+    latest.current = { rows, decisions }
   })
 
   // Megjelenéskor a legrégebben várakozó sessionre ugrunk. A jel a main `show` eseménye (az
@@ -44,7 +39,7 @@ export function App(): JSX.Element {
   useEffect(
     () =>
       window.claudeswitcher.onShown(() => {
-        setSelectedId((current) => selectOnShow(latest.current.sessions, latest.current.decisions, current))
+        setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current))
       }),
     [],
   )
@@ -58,7 +53,7 @@ export function App(): JSX.Element {
       return undefined
     })
     const { hideAfterLastDecision } = readOverlaySettings(raw)
-    const next = nextAfterDecision(latest.current.sessions, latest.current.decisions, decided, hideAfterLastDecision)
+    const next = nextAfterDecision(latest.current.rows, latest.current.decisions, decided, hideAfterLastDecision)
     if (next.select !== undefined) setSelectedId(next.select)
     if (next.hide) await window.claudeswitcher.hide()
   }
@@ -81,11 +76,12 @@ export function App(): JSX.Element {
     selectedRow.current?.scrollIntoView({ block: 'nearest' })
   }, [selected])
 
+  // Függőséglista nélkül: a sorlista minden renderben új tömb, a kezelő tehát úgyis minden
+  // renderben cserélődne — így legalább biztosan a legfrissebb sorokat látja.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       // Szövegmezőben a gépelés az övé: se a nyilak, se az Enter, se az Esc ne vezérelje a listát.
       if (isTypingTarget(event.target)) return
-      const ids = sessions.map((s) => s.sessionId)
       if (event.key === 'Escape') void window.claudeswitcher.hide()
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         // Enélkül a nyíl a listát is elscrollozná a kijelölés mozgatása mellett.
@@ -95,40 +91,40 @@ export function App(): JSX.Element {
       // Nyitott döntési panelnél a Tab a gombok között lép — ott nem ugrás.
       if (event.key === 'Enter' || (event.key === 'Tab' && decision === undefined)) {
         event.preventDefault()
-        const view = sessions[resolveSelectedIndex(ids, selectedId)]
-        if (view !== undefined) void window.claudeswitcher.focusSession(view.sessionId)
+        const id = ids[resolveSelectedIndex(ids, selectedId)]
+        if (id !== undefined) void window.claudeswitcher.focusSession(id)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
     }
-  }, [sessions, selectedId, decision])
+  })
 
   return (
     <div className="overlay">
       <ul className="sessions">
-        {sessions.length === 0 && (
+        {rows.length === 0 && (
           // „Nincs session" és „nem érjük el a daemont" nem ugyanaz — a felhasználónak
           // látnia kell, melyikről van szó.
           <li className="empty">
             {connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
           </li>
         )}
-        {sessions.map((view, index) => {
-          const sessionDecisions = decisionsBySession.get(view.sessionId) ?? []
-          const pending = sessionDecisions[0]
-          const marker = statusMarker(view, sessionDecisions)
+        {rows.map((row, index) => {
+          const pending = activeDecision(row.decisions)
+          // A pillanatképből még ismeretlen session sora: a függő kérés tartja, tehát várakozó.
+          const marker = statusMarker(row.session ?? { status: row.status }, row.decisions)
           return (
             <li
-              key={view.sessionId}
+              key={row.sessionId}
               ref={index === selected ? selectedRow : null}
-              className={`session ${view.status} ${index === selected ? 'selected' : ''}`}
+              className={`session ${row.status} ${index === selected ? 'selected' : ''}`}
               onClick={() => {
-                setSelectedId(view.sessionId)
+                setSelectedId(row.sessionId)
               }}
               onDoubleClick={() => {
-                void window.claudeswitcher.focusSession(view.sessionId)
+                void window.claudeswitcher.focusSession(row.sessionId)
               }}
             >
               <span className={`marker tone-${marker.tone}`} title={marker.title}>
@@ -136,27 +132,31 @@ export function App(): JSX.Element {
               </span>
               <span className="name">
                 {/* Csak a szöveg csonkolódik (…), a pötty soha: hosszú névnél is látszania kell. */}
-                <span className="name-text" title={view.name}>
-                  {view.name}
+                <span className="name-text" title={row.name}>
+                  {row.name}
                 </span>
-                {hasRemoteControl(view) && (
+                {row.session !== undefined && hasRemoteControl(row.session) && (
                   <span className="remote" title="Remote Control: telefonról is elérhető">
                     ●
                   </span>
                 )}
               </span>
               <span className="summary">
-                {pending === undefined ? summarize(view) : `${pending.toolName}: ${pending.summary}`}
+                {pending !== undefined
+                  ? `${pending.toolName}: ${pending.summary}`
+                  : row.session !== undefined
+                    ? summarize(row.session)
+                    : ''}
               </span>
               <span className="age">
-                {view.waitingSince !== undefined ? formatDuration(now - view.waitingSince) : ''}
+                {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}
               </span>
             </li>
           )
         })}
       </ul>
 
-      {decision !== undefined && selectedView !== undefined && (
+      {decision !== undefined && selectedRowView !== undefined && (
         <DecisionPanel
           key={decision.id}
           decision={decision}
@@ -166,7 +166,9 @@ export function App(): JSX.Element {
             })
           }}
           onJump={() => {
-            void window.claudeswitcher.focusSession(selectedView.sessionId)
+            // A session-azonosítóval, mint eddig. Ismeretlen sessionnél a main nem talál ablakot,
+            // és nem ugrik — a natív prompt a VSCode-ban attól még ott van.
+            void window.claudeswitcher.focusSession(selectedRowView.sessionId)
           }}
         />
       )}

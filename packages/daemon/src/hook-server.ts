@@ -26,8 +26,11 @@ export interface HookEvents {
   onNotification(event: NotificationEvent): void | Promise<void>
   onLifecycle(event: LifecycleEvent): void | Promise<void>
   onRateLimits(limits: RateLimits): void | Promise<void>
-  /** A hook válasza: döntés, vagy `undefined` = nincs döntés (üres 200, a natív prompt marad). */
-  onPermissionRequest(request: PermissionRequestInfo): Promise<HookDecisionBody | undefined>
+  /**
+   * A hook válasza: döntés, vagy `undefined` = nincs döntés (üres 200, a natív prompt marad).
+   * A `signal` a hook-kliens kapcsolata: akkor bomlik, ha a kliens a válasz előtt bontja.
+   */
+  onPermissionRequest(request: PermissionRequestInfo, signal: AbortSignal): Promise<HookDecisionBody | undefined>
   onPreToolUse(event: ToolUseEvent): void
   onPostToolUse(event: { sessionId: string; toolUseId: string }): void
   onSubagentStop(event: { sessionId: string; agentId: string }): void
@@ -175,7 +178,9 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       record('/hooks/permission-request', b)
       const request = parsePermissionRequest(b)
       if (request === undefined) return c.body(null, 200)
-      const decision = await events.onPermissionRequest(request)
+      // A @hono/node-server ezt a jelet bontja, ha a válasz befejezése előtt zárul a kapcsolat
+      // (megszakítás a VSCode-ban, a session processzének halála) — valódi szerverrel tesztelve.
+      const decision = await events.onPermissionRequest(request, c.req.raw.signal)
       if (decision === undefined) return c.body(null, 200)
       return c.body(JSON.stringify(decision), 200, { 'content-type': 'application/json' })
     } catch (error) {

@@ -23,6 +23,10 @@ describe('question form', () => {
     expect(isComplete(ask.questions, initialFormState(ask.questions))).toBe(false)
   })
 
+  it('is never complete with no questions — an unreadable question must not be sent as answered', () => {
+    expect(isComplete([], initialFormState([]))).toBe(false)
+  })
+
   it('joins multi-select labels in option order, not click order', () => {
     let state = initialFormState(ask.questions)
     state = toggleOption(state, fruits, 'Banán')

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { isTypingTarget, readDecideResult, readOverlaySettings, shortcutFor } from './decision-actions.js'
+import {
+  isTypingTarget,
+  isUnreadableQuestion,
+  readDecideResult,
+  readOverlaySettings,
+  shortcutFor,
+} from './decision-actions.js'
 
 describe('shortcutFor', () => {
   it('maps the command keys, case-insensitively', () => {
@@ -62,5 +68,18 @@ describe('readOverlaySettings', () => {
     for (const raw of [undefined, null, 'x', {}, { hideAfterLastDecision: 'false' }]) {
       expect(readOverlaySettings(raw)).toEqual({ hideAfterLastDecision: true })
     }
+  })
+})
+
+describe('isUnreadableQuestion', () => {
+  it('flags a question whose list could not be read, so the panel offers jump and deny instead', () => {
+    expect(isUnreadableQuestion({ kind: 'question', questions: [] })).toBe(true)
+  })
+
+  it('leaves a readable question and every other kind alone', () => {
+    const question = { question: 'Mi a kedvenc színed?', multiSelect: false, options: [] }
+    expect(isUnreadableQuestion({ kind: 'question', questions: [question] })).toBe(false)
+    expect(isUnreadableQuestion({ kind: 'tool', questions: [] })).toBe(false)
+    expect(isUnreadableQuestion({ kind: 'plan', questions: [] })).toBe(false)
   })
 })

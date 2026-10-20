@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import type { AddressInfo } from 'node:net'
 import path from 'node:path'
+import { serve } from '@hono/node-server'
 import { describe, expect, it, vi } from 'vitest'
 import { createHookApp, type HookEvents } from './hook-server.js'
 
@@ -228,7 +230,10 @@ describe('M2 decision routes — measured payloads', () => {
     const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', payload('permissionRequest_bash'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual(ALLOW)
-    expect(ev.onPermissionRequest).toHaveBeenCalledWith(expect.objectContaining({ toolName: 'Bash', kind: 'tool' }))
+    expect(ev.onPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'Bash', kind: 'tool' }),
+      expect.any(AbortSignal),
+    )
   })
 
   it('answers an empty 200 when there is no decision', async () => {
@@ -279,6 +284,51 @@ describe('M2 decision routes — measured payloads', () => {
       sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
       agentId: 'ad0b11acf46ef176e',
     })
+  })
+
+  it('aborts the handler signal when the real client drops the connection', async () => {
+    // A @hono/node-server a `c.req.raw.signal`-t a válasz befejezése előtti `close`-ra bontja.
+    // Valódi szerverrel és valódi megszakított fetch-csel mérve, nem az `app.request`-tel.
+    let signalled: (signal: AbortSignal) => void = () => undefined
+    const received = new Promise<AbortSignal>((resolve) => {
+      signalled = resolve
+    })
+    const ev = {
+      ...events(),
+      onPermissionRequest: vi.fn((_request: unknown, signal: AbortSignal) => {
+        signalled(signal)
+        return new Promise<undefined>(() => undefined)
+      }),
+    }
+    const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
+      const s = serve({ fetch: createHookApp(TOKEN, ev).fetch, hostname: '127.0.0.1', port: 0 }, () => {
+        resolve(s)
+      })
+    })
+    try {
+      const { port } = server.address() as AddressInfo
+      const client = new AbortController()
+      const response = fetch(`http://127.0.0.1:${String(port)}/hooks/permission-request`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify(payload('permissionRequest_bash')),
+        signal: client.signal,
+      })
+      const signal = await received
+      expect(signal.aborted).toBe(false)
+      const aborted = new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => {
+          resolve()
+        })
+      })
+
+      client.abort()
+      await expect(response).rejects.toThrow()
+      await aborted
+      expect(signal.aborted).toBe(true)
+    } finally {
+      server.close()
+    }
   })
 
   it('rejects the new routes without the token', async () => {

@@ -124,6 +124,38 @@ describe('buildHookResponse', () => {
     ).toBe(false)
     expect(buildHookResponse(bash, { type: 'answer', answers: {} }).ok).toBe(false)
   })
+
+  it('refuses any answer when the questions could not be read — never an allow with no answers', () => {
+    // Ha a `tool_input.questions` alakja megváltozik, a parser mindent eldob, és a lista üres.
+    // A kérdésenkénti ellenőrzés ilyenkor semmit nem utasítana el.
+    const raw = fixtures['permissionRequest_askMulti'] as Record<string, unknown>
+    const unknownShape = parsePermissionRequest({
+      ...raw,
+      tool_input: { questions: [{ prompt: 'Milyen gyümölcsöket szeretsz?', choices: ['Alma'] }] },
+    })
+    if (unknownShape === undefined) throw new Error('payload did not parse')
+    expect(unknownShape.kind).toBe('question')
+    expect(unknownShape.questions).toEqual([])
+
+    expect(buildHookResponse(unknownShape, { type: 'answer', answers: {} }).ok).toBe(false)
+    expect(
+      buildHookResponse(unknownShape, { type: 'answer', answers: { 'Milyen gyümölcsöket szeretsz?': 'Alma' } }).ok,
+    ).toBe(false)
+    // A kiút: tiltás üzenettel továbbra is mehet.
+    expect(decisionOf(buildHookResponse(unknownShape, { type: 'deny', message: 'a VSCode-ban válaszolok' }))).toEqual({
+      behavior: 'deny',
+      message: 'a VSCode-ban válaszolok',
+    })
+  })
+
+  it('refuses an answer with a key that is not one of the questions', () => {
+    const answers = {
+      'Milyen gyümölcsöket szeretsz?': 'Alma',
+      'Mi a kedvenc színed?': 'kék',
+      'Ilyen kérdés nincs': 'mégis',
+    }
+    expect(buildHookResponse(askMulti, { type: 'answer', answers }).ok).toBe(false)
+  })
 })
 
 describe('joinAnswerLabels', () => {

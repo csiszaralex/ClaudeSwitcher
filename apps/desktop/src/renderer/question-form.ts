@@ -55,8 +55,12 @@ export function buildAnswers(questions: readonly AskQuestion[], state: FormState
   return answers
 }
 
-/** Igaz, ha minden kérdésre van nem üres válasz — csak ekkor küldhető el. */
+/**
+ * Igaz, ha minden kérdésre van nem üres válasz — csak ekkor küldhető el. Üres listánál soha: az
+ * azt jelenti, hogy a kérdéseket nem tudtuk kiolvasni, és egy „üres" válasz nem válasz.
+ */
 export function isComplete(questions: readonly AskQuestion[], state: FormState): boolean {
+  if (questions.length === 0) return false
   const answers = buildAnswers(questions, state)
   return questions.every((question) => (answers[question.question] ?? '').trim() !== '')
 }

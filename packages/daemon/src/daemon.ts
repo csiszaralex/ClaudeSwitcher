@@ -58,16 +58,18 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
       onLifecycle: (event) => {
         sessions.applyLifecycle(event)
-        // Kör vége vagy session vége: nála már nincs függő döntés — ha a VSCode-ban tiltottak,
-        // erről csak így értesülünk (a tiltásnak nincs PostToolUse-a).
-        if (event.kind !== 'start') decisions.sessionStopped(event.sessionId)
+        // Kör vége vagy session vége: ha a VSCode-ban tiltottak, erről csak így értesülünk (a
+        // tiltásnak nincs PostToolUse-a). A Stop csak a fő agent kéréseit zárja — egy háttérben
+        // futó subagent kérése a #pending-en át továbbra is várakozónak mutatja a sessiont.
+        if (event.kind === 'stop') decisions.sessionStopped(event.sessionId)
+        if (event.kind === 'end') decisions.sessionEnded(event.sessionId)
         void refresh()
       },
       onRateLimits: (received) => {
         limits.update(received)
         broadcast()
       },
-      onPermissionRequest: (request) => decisions.hold(request),
+      onPermissionRequest: (request, signal) => decisions.hold(request, signal),
       onPreToolUse: (event) => {
         sessions.applyToolStarted(event.sessionId)
         decisions.preToolUse(event)
@@ -156,6 +158,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       try {
         const snapshot = await scanSessions(claudeDir, probe)
         sessions.applySnapshot(snapshot.sessions, snapshot.activities)
+        // Csak sikeres szkennelés után: egy elbukott szkennelés nem „eltűnt minden session".
+        decisions.pruneAbsent(new Set(snapshot.sessions.map((session) => session.record.sessionId)))
         // Életjel MINDEN sikeres szkennelés után, akkor is, ha a pillanatkép nem változott.
         // Enélkül a kliens nem tudja megkülönböztetni azt, hogy „élünk, csak nincs
         // változás", attól, hogy „megállt a poll" — és épp a monitorozó eszköznél a
@@ -183,7 +187,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     async stop() {
       if (timer !== undefined) clearInterval(timer)
       // A tartott kéréseket a szerver lezárása ELŐTT kell megválaszolni: a nyitott
-      // kapcsolatok miatt a server.close() különben soha nem térne vissza.
+      // kapcsolatok miatt a server.close() különben soha nem térne vissza. A broker ezzel le is
+      // zárul: egy közben vagy ezután érkező PermissionRequest azonnal üres 200-at kap.
       decisions.releaseAll()
       // Megvárjuk a futó szkennelést: leállás után ne maradjon dolgozó ígéret,
       // ami a processzt életben tartja vagy egy már lezárt hubba írna.

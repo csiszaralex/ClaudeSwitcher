@@ -2,7 +2,13 @@ import type { UserDecision } from '@claudeswitcher/core'
 import { formatRule } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useMemo, useState, type JSX } from 'react'
-import { isTypingTarget, readDecideResult, shortcutFor, type DecisionAction } from './decision-actions.js'
+import {
+  isTypingTarget,
+  isUnreadableQuestion,
+  readDecideResult,
+  shortcutFor,
+  type DecisionAction,
+} from './decision-actions.js'
 import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
@@ -184,6 +190,21 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
           </div>
         )
       case 'question':
+        // Kiolvashatatlan kérdésre nem lehet válaszolni (a daemon el is utasítaná), de a sor ne
+        // legyen zsákutca: a natív prompt a VSCode-ban ott van, vagy a session tiltást kap üzenettel.
+        if (isUnreadableQuestion(decision)) {
+          return (
+            <div className="decision-row">
+              <span className="muted">A kérdés formátuma ismeretlen — itt nem válaszolható.</span>
+              <button type="button" disabled={busy} onClick={() => { setMode('deny') }}>
+                Tilt…
+              </button>
+              <button type="button" onClick={onJump}>
+                Ugrás a VSCode-ba
+              </button>
+            </div>
+          )
+        }
         return (
           <QuestionForm
             questions={decision.questions}

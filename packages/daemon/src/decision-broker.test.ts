@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { parsePermissionRequest, type HookDecisionBody, type PermissionRequestInfo } from '@claudeswitcher/core'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  ABSENT_SESSION_GRACE_MS,
   DecisionBroker,
   RELEASE_AFTER_MS,
   type BrokerClock,
@@ -220,6 +221,143 @@ describe('DecisionBroker', () => {
     await flush()
     expect([first.done, second.done]).toEqual([true, true])
     expect([first.value, second.value]).toEqual([undefined, undefined])
+    expect(broker.views()).toEqual([])
+  })
+
+  it('keeps a background subagent\'s request open on the main turn\'s Stop, and closes it on SessionEnd', async () => {
+    // A `run_in_background` subagent a fő kör Stop-ja után is fut; a kérése a szülő session_id-jával jön.
+    const broker = new DecisionBroker(fakeClock())
+    const main = observe(broker.hold(request('permissionRequest_bash')))
+    const subagent = observe(broker.hold(request('permissionRequest_subagent')))
+    const sessionId = request('permissionRequest_bash').sessionId
+    expect(request('permissionRequest_subagent').sessionId).toBe(sessionId)
+
+    broker.sessionStopped(sessionId)
+    await flush()
+    expect(main.done).toBe(true)
+    expect(subagent.done).toBe(false)
+    expect(broker.views().map((v) => v.agentId)).toEqual([request('permissionRequest_subagent').agentId])
+
+    broker.sessionEnded(sessionId)
+    await flush()
+    expect(subagent.done).toBe(true)
+    expect(subagent.value).toBeUndefined()
+    expect(broker.views()).toEqual([])
+  })
+
+  it('finishes a request without an answer when its hook client disconnects', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    const client = new AbortController()
+    const held = observe(broker.hold(request('permissionRequest_bash'), client.signal))
+    const [view] = broker.views()
+
+    client.abort()
+    await flush()
+    expect(held.done).toBe(true)
+    expect(held.value).toBeUndefined()
+    expect(broker.views()).toEqual([])
+    // Az „pontosan egy válasz" zár: a késő kattintás már nem talál semmit.
+    expect(broker.decide(view!.id, { type: 'allow' }).ok).toBe(false)
+  })
+
+  it('does not hold a request whose client is already gone', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    const client = new AbortController()
+    client.abort()
+    const held = observe(broker.hold(request('permissionRequest_bash'), client.signal))
+    await flush()
+    expect(held.done).toBe(true)
+    expect(broker.views()).toEqual([])
+  })
+
+  it('prunes a released request once its session has been gone from the registry past the grace period', () => {
+    const clock = fakeClock()
+    const broker = new DecisionBroker(clock)
+    const gone = request('permissionRequest_bash')
+    void broker.hold(gone)
+    void broker.hold({ ...gone, sessionId: 'alive' })
+    clock.advance(RELEASE_AFTER_MS)
+    expect(broker.views().every((v) => v.released)).toBe(true)
+
+    const live = new Set(['alive'])
+    broker.pruneAbsent(live)
+    clock.advance(ABSENT_SESSION_GRACE_MS - 1)
+    broker.pruneAbsent(live)
+    expect(broker.views()).toHaveLength(2)
+
+    clock.advance(1)
+    broker.pruneAbsent(live)
+    expect(broker.views().map((v) => v.sessionId)).toEqual(['alive'])
+  })
+
+  it('restarts the grace period when the session shows up in the registry again', () => {
+    const clock = fakeClock()
+    const broker = new DecisionBroker(clock)
+    const held = request('permissionRequest_bash')
+    void broker.hold(held)
+    clock.advance(RELEASE_AFTER_MS)
+
+    broker.pruneAbsent(new Set())
+    clock.advance(ABSENT_SESSION_GRACE_MS - 1)
+    // Egy kimaradt szkennelés után újra ott van: a session él.
+    broker.pruneAbsent(new Set([held.sessionId]))
+    clock.advance(ABSENT_SESSION_GRACE_MS - 1)
+    broker.pruneAbsent(new Set())
+    expect(broker.views()).toHaveLength(1)
+  })
+
+  it('never prunes a request the app can still decide, even if discovery does not see its session', async () => {
+    // Spec §8: a jóváhagyás a felderítés nélkül is működik. A még döntható kérést a kliens
+    // bontása (a processz halála) zárja le, nem a registry hiánya.
+    const clock = fakeClock()
+    const broker = new DecisionBroker(clock)
+    const held = observe(broker.hold(request('permissionRequest_bash')))
+    broker.pruneAbsent(new Set())
+    clock.advance(ABSENT_SESSION_GRACE_MS * 10)
+    broker.pruneAbsent(new Set())
+    await flush()
+    expect(held.done).toBe(false)
+    expect(broker.views()).toHaveLength(1)
+  })
+
+  it('matches identical parallel calls oldest-first when both PreToolUses come first', async () => {
+    // Mért sorrend: PreToolUse, majd ~15 ms-mal később a PermissionRequest. Két azonos hívásnál:
+    // Pre(id1), Pre(id2), A, B — az A az id1-é.
+    const broker = new DecisionBroker(fakeClock())
+    const pre = toolUse('preToolUse_bash')
+    broker.preToolUse({ ...pre, toolUseId: 'toolu_1' })
+    broker.preToolUse({ ...pre, toolUseId: 'toolu_2' })
+    const first = observe(broker.hold(request('permissionRequest_bashCorrelated')))
+    const second = observe(broker.hold(request('permissionRequest_bashCorrelated')))
+
+    broker.postToolUse({ sessionId: pre.sessionId, toolUseId: 'toolu_1' })
+    await flush()
+    expect([first.done, second.done]).toEqual([true, false])
+  })
+
+  it('matches identical parallel calls oldest-first when they interleave', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    const pre = toolUse('preToolUse_bash')
+    broker.preToolUse({ ...pre, toolUseId: 'toolu_1' })
+    const first = observe(broker.hold(request('permissionRequest_bashCorrelated')))
+    broker.preToolUse({ ...pre, toolUseId: 'toolu_2' })
+    const second = observe(broker.hold(request('permissionRequest_bashCorrelated')))
+
+    broker.postToolUse({ sessionId: pre.sessionId, toolUseId: 'toolu_2' })
+    await flush()
+    expect([first.done, second.done]).toEqual([false, true])
+    broker.postToolUse({ sessionId: pre.sessionId, toolUseId: 'toolu_1' })
+    await flush()
+    expect(first.done).toBe(true)
+  })
+
+  it('answers a request that arrives after releaseAll at once, so shutdown cannot hang', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    broker.releaseAll()
+    const late = observe(broker.hold(request('permissionRequest_bash')))
+    await flush()
+    expect(late.done).toBe(true)
+    expect(late.value).toBeUndefined()
     expect(broker.views()).toEqual([])
   })
 

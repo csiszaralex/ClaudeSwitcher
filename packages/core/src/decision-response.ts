@@ -73,6 +73,18 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
 
     case 'answer': {
       if (request.kind !== 'question') return refuse('Válasz csak kérdésre adható.')
+      // Üres lista = a kérdéseket nem tudtuk kiolvasni (megváltozott `tool_input` alak). A
+      // kérdésenkénti ellenőrzés ilyenkor semmit nem utasítana el, és egy válasz nélküli `allow`
+      // menne ki — épp az, amit a spec tilt. Innen csak a VSCode vagy egy tiltás vezet tovább.
+      if (request.questions.length === 0) {
+        return refuse('A kérdéseket nem sikerült kiolvasni — válaszolj a VSCode-ban.')
+      }
+      // A válasz kulcsai pontosan a kérdések szövegei: egy idegen kulcs olyan választ jelentene,
+      // amit a felhasználó nem az itt látott kérdésre adott.
+      const texts = new Set(request.questions.map((question) => question.question))
+      for (const key of Object.keys(decision.answers)) {
+        if (!texts.has(key)) return refuse(`Nincs ilyen kérdés: „${key}"`)
+      }
       for (const question of request.questions) {
         if ((decision.answers[question.question] ?? '').trim() === '') {
           return refuse(`Hiányzik a válasz: „${question.question}"`)

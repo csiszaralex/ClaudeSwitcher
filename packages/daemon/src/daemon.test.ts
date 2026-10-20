@@ -301,6 +301,44 @@ describe('startDaemon — held decisions', () => {
     expect(daemon.state().sessions[0]?.stoppedAt).toBeUndefined()
   })
 
+  it('keeps a background subagent\'s request held through the main Stop, and the session waiting', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    const main = postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_subagent'), session_id: 'sid-100' })
+    await waitFor(() => (daemon.state().decisions.length === 2 ? daemon.state().decisions : []))
+
+    await postHook(daemon, '/hooks/lifecycle/stop', { ...payload('stop'), session_id: 'sid-100' })
+    expect(await (await main).text()).toBe('')
+    expect(daemon.state().decisions.map((d) => d.agentId)).toEqual(['ad0b11acf46ef176e'])
+    expect(daemon.state().sessions[0]?.status).toBe('waiting')
+
+    await postHook(daemon, '/hooks/subagent-stop', { ...payload('subagentStop'), session_id: 'sid-100' })
+    expect(daemon.state().decisions).toEqual([])
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+  })
+
+  it('drops a held request when the hook client disconnects — over a real socket', async () => {
+    // Megszakítás a VSCode-ban vagy a session processzének halála: nem jön se Stop, se PostToolUse,
+    // csak a kapcsolat bomlik. Nincs kinek válaszolni, a sor ne maradjon döntésre váró.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    const client = new AbortController()
+    const response = fetch(`http://127.0.0.1:${daemon.port}/hooks/permission-request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.token}` },
+      body: JSON.stringify(payload('permissionRequest_bash')),
+      signal: client.signal,
+    })
+    await waitFor(() => daemon.state().decisions)
+
+    client.abort()
+    await expect(response).rejects.toThrow()
+    await waitFor(() => (daemon.state().decisions.length === 0 ? [true] : []))
+    expect(daemon.state().decisions).toEqual([])
+  })
+
   it('answers held requests on stop instead of hanging the shutdown', async () => {
     // A tartott kapcsolatok miatt a server.close() különben soha nem térne vissza.
     const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
