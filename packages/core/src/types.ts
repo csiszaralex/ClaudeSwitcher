@@ -10,6 +10,16 @@ export interface SessionRecord {
   entrypoint?: string | undefined
   name?: string | undefined
   bridgeSessionId?: string | null | undefined
+  /**
+   * A session állapota a Claude Code szerint (2.1.296+, mérve: `idle`, `busy`, `waiting`).
+   * Nem dokumentált, ezért nyers szövegként tartjuk meg — egy ismeretlen új érték se dobjon el
+   * semmit; a fogyasztó csak az általa ismert értékekre reagál.
+   */
+  status?: string | undefined
+  /** Mire vár (`permission prompt`), ha `status === 'waiting'`; különben `null` vagy hiányzik. */
+  waitingFor?: string | null | undefined
+  /** Mikor váltott utoljára a `status` (epoch ms). */
+  statusUpdatedAt?: number | undefined
 }
 
 /** Nyers rekord a ~/.claude/ide/<port>.lock fájlból. Nem dokumentált formátum. */

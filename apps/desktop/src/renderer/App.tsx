@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, formatResetsIn, summarize } from './format.js'
-import { activeDecision, buildRows } from './rows.js'
+import { activeDecision, buildRows, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 import { useDaemonState } from './useDaemonState.js'
@@ -171,6 +171,29 @@ export function App(): JSX.Element {
             void window.claudeswitcher.focusSession(selectedRowView.sessionId)
           }}
         />
+      )}
+
+      {decision === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
+        // Nincs tartott kérés, tehát nincs mit eldönteni — de a sor ne legyen zsákutca: a natív
+        // prompt a VSCode-ban ott van.
+        <section className="decision">
+          <div className="decision-actions">
+            <div className="decision-row">
+              <span className="muted">
+                A VSCode-ban vár jóváhagyásra — az appból ezt nem lehet eldönteni (az app újraindult, vagy
+                a kérés nem hozzá érkezett).
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void window.claudeswitcher.focusSession(selectedRowView.sessionId)
+                }}
+              >
+                Ugrás a VSCode-ba
+              </button>
+            </div>
+          </div>
+        </section>
       )}
 
       <div className="limits">

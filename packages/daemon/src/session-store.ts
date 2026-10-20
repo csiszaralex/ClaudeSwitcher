@@ -37,8 +37,14 @@ function displayName(record: LiveSession['record']): string {
  * életciklus-eseményeket és a függő döntéseket. Ütközésnél a hook nyer: a snapshot a
  * transcriptből származik és lemaradhat, a hook viszont a történés pillanatában érkezik.
  *
- * Egy session akkor várakozó, ha van Notification-várakozása VAGY függő döntése. Amikor
- * mindkettő megszűnik, feljegyezzük, mikor: a nem-várók ennek alapján rendeződnek.
+ * Egy session akkor várakozó, ha van Notification-várakozása, függő döntése, VAGY a registry
+ * `status: 'waiting'`-et mutat. Amikor mind megszűnik, feljegyezzük, mikor: a nem-várók ennek
+ * alapján rendeződnek.
+ *
+ * A registry-forrás az app-újraindulás esetére kell: a régi daemonhoz ment PermissionRequest és
+ * az egyszeri Notification nem ismétlődik, a várakozást csak a registry tudja. Csak megjelenítés:
+ * döntést soha nem hoz létre, nem válaszol meg és nem zár le. Ütközésnél a hook nyer — lásd
+ * `#clearedAt`.
  */
 export class SessionStore {
   #sessions = new Map<string, LiveSession>()
@@ -52,6 +58,18 @@ export class SessionStore {
   readonly #resolvedAt = new Map<string, number>()
   /** Az utolsó Stop ideje, amíg a session újra nem mozdul — a „épp végzett" jelzéshez. */
   readonly #stoppedAt = new Map<string, number>()
+  /**
+   * Mikor zárta le utoljára egy hook (PostToolUse, Stop, SessionEnd, nem-várakozó Notification)
+   * vagy az app döntése a session várakozását. A registry ennél NEM újabb `waiting`-je elavult.
+   *
+   * Miért nem a `#resolvedAt` 10 mp-es ablaka: a registry lemaradása nem egy mért, rögzített
+   * késés (mint a Notificationé), hanem a poll üteme plusz a Claude Code írása — egy ablak vagy
+   * elnyelne egy valóban új várakozást, vagy a lejárta után feltámasztaná a régit, ha a registry
+   * addig nem írt újat. A `statusUpdatedAt` viszont pontosan megmondja, a lezárás előtt vagy után
+   * kezdődött-e a várakozás: ugyanaz a gép, ugyanaz az óra, és a hook nálunk mindig az esemény
+   * UTÁN jár, tehát a régi várakozás bélyege mindig kisebb.
+   */
+  readonly #clearedAt = new Map<string, number>()
   readonly #listeners: Array<() => void> = []
 
   onChange(listener: () => void): void {
@@ -69,7 +87,38 @@ export class SessionStore {
   }
 
   #isWaiting(sessionId: string): boolean {
-    return this.#waiting.has(sessionId) || this.#pending.has(sessionId)
+    return (
+      this.#waiting.has(sessionId) || this.#pending.has(sessionId) || this.#registryWaitSince(sessionId) !== undefined
+    )
+  }
+
+  /**
+   * A registry szerinti várakozás kezdete, ha a session most is vár. `statusUpdatedAt` nélkül nem
+   * tudjuk a hookokhoz mérni, tehát nem is vesszük figyelembe (spec §8: a régi viselkedés).
+   */
+  #registryWaitSince(sessionId: string): number | undefined {
+    const record = this.#sessions.get(sessionId)?.record
+    if (record?.status !== 'waiting' || record.statusUpdatedAt === undefined) return undefined
+    const cleared = this.#clearedAt.get(sessionId)
+    if (cleared !== undefined && record.statusUpdatedAt <= cleared) return undefined
+    return record.statusUpdatedAt
+  }
+
+  /**
+   * Dolgozik-e a session a registry szerint — akkor is, ha épp nem fut tool (gondolkodik, szöveget
+   * ír). A Stop előtti `busy` a lemaradt pillanatkép maradéka: a session épp végzett.
+   */
+  #registryBusy(sessionId: string): boolean {
+    const record = this.#sessions.get(sessionId)?.record
+    if (record?.status !== 'busy' || record.statusUpdatedAt === undefined) return false
+    const stopped = this.#stoppedAt.get(sessionId)
+    return stopped === undefined || record.statusUpdatedAt > stopped
+  }
+
+  /** Egy hook lezárta a várakozást: a Notification-várakozás megy, a registry régi `waiting`-je elavul. */
+  #clearWait(sessionId: string, now: number): void {
+    this.#waiting.delete(sessionId)
+    this.#clearedAt.set(sessionId, now)
   }
 
   /**
@@ -91,12 +140,23 @@ export class SessionStore {
     now: number = Date.now(),
   ): void {
     const ids = new Set(sessions.map((s) => s.record.sessionId))
-    this.#sessions = new Map(sessions.map((s) => [s.record.sessionId, s]))
+    // A registry `waiting`-je a pillanatképpel jön és megy: a várakozás vége innen is eredhet.
+    this.#tracking(new Set([...this.#sessions.keys(), ...ids]), now, () => {
+      this.#sessions = new Map(sessions.map((s) => [s.record.sessionId, s]))
+    })
     this.#activities = activities
 
     // Futó tool a pillanatképben: a session a Stop után újra dolgozik.
     for (const [id, activity] of activities) {
       if (activity.runningTool !== undefined) this.#stoppedAt.delete(id)
+    }
+    // Ugyanígy egy, a Stop UTÁN kezdődött registry-`busy` vagy -`waiting`: új kör indult. A Stop
+    // előtti a lemaradt pillanatkép maradéka, az nem törli az „épp végzett"-et.
+    for (const { record } of sessions) {
+      const stopped = this.#stoppedAt.get(record.sessionId)
+      const changedAt = record.statusUpdatedAt
+      if (stopped === undefined || changedAt === undefined || changedAt <= stopped) continue
+      if (record.status === 'busy' || record.status === 'waiting') this.#stoppedAt.delete(record.sessionId)
     }
 
     for (const [id, wait] of [...this.#waiting]) {
@@ -109,7 +169,7 @@ export class SessionStore {
       this.#waiting.delete(id)
     }
     // Ugyanez a takarítás az időbélyegekre: egy eltűnt session ne szivárogjon.
-    for (const stamps of [this.#waitEndedAt, this.#stoppedAt]) {
+    for (const stamps of [this.#waitEndedAt, this.#stoppedAt, this.#clearedAt]) {
       for (const [id, at] of [...stamps]) {
         if (!ids.has(id) && now - at >= UNMATCHED_WAIT_GRACE_MS) stamps.delete(id)
       }
@@ -139,7 +199,7 @@ export class SessionStore {
         this.#waiting.set(event.sessionId, { since: now, text: event.text })
         this.#stoppedAt.delete(event.sessionId)
       } else {
-        this.#waiting.delete(event.sessionId)
+        this.#clearWait(event.sessionId, now)
       }
     })
     this.#emit()
@@ -150,7 +210,7 @@ export class SessionStore {
       if (event.kind === 'end') {
         this.#sessions.delete(event.sessionId)
       }
-      this.#waiting.delete(event.sessionId)
+      this.#clearWait(event.sessionId, now)
     })
     if (event.kind === 'stop') this.#stoppedAt.set(event.sessionId, now)
     // A véget ért session nem „épp végzett": ha a registry még egy körig mutatja, ne így jöjjön vissza.
@@ -174,7 +234,7 @@ export class SessionStore {
    */
   applyToolFinished(sessionId: string, now: number = Date.now()): void {
     this.#tracking([sessionId], now, () => {
-      this.#waiting.delete(sessionId)
+      this.#clearWait(sessionId, now)
     })
     this.#emit()
   }
@@ -204,7 +264,7 @@ export class SessionStore {
     this.#tracking(affected, now, () => {
       this.#pending = new Map(pendingSince)
       if (resolvedByApp !== undefined) {
-        this.#waiting.delete(resolvedByApp)
+        this.#clearWait(resolvedByApp, now)
         this.#resolvedAt.set(resolvedByApp, now)
       }
     })
@@ -218,10 +278,11 @@ export class SessionStore {
       const activity = this.#activities.get(sessionId) ?? {}
       const wait = this.#waiting.get(sessionId)
       const pending = this.#pending.get(sessionId)
+      const registryWait = this.#registryWaitSince(sessionId)
 
       const status =
-        wait !== undefined || pending !== undefined ? 'waiting'
-        : activity.runningTool !== undefined ? 'working'
+        wait !== undefined || pending !== undefined || registryWait !== undefined ? 'waiting'
+        : activity.runningTool !== undefined || this.#registryBusy(sessionId) ? 'working'
         : 'idle'
 
       views.push({
@@ -234,7 +295,8 @@ export class SessionStore {
         windowPid: session.window?.pid,
         workspaceFolder: session.window?.workspaceFolders[0],
         bridgeSessionId: session.record.bridgeSessionId,
-        waitingSince: wait?.since ?? pending,
+        // A hook-források pontosabbak; a registry csak akkor, ha egyikük sem tud a várakozásról.
+        waitingSince: wait?.since ?? pending ?? registryWait,
         notificationText: wait?.text,
         stoppedAt: this.#stoppedAt.get(sessionId),
       })

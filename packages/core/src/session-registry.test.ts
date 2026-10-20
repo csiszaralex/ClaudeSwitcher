@@ -69,6 +69,70 @@ describe('parseSessionRecord', () => {
   })
 })
 
+// A 2.1.301-es rekord (2026-10-20, mérve), a pipe útvonala rövidítve.
+const REAL_STATUS_SESSION = {
+  pid: 13884,
+  sessionId: '86f00485-4b4d-4afc-b4c5-a7d0331739c1',
+  cwd: 'd:\\06_Bohem\\bohem-marketing',
+  startedAt: 1792493825481,
+  procStart: '134369674249683679',
+  version: '2.1.301',
+  peerProtocol: 1,
+  peerFeatures: ['notify_idle', 'artifact_yield'],
+  kind: 'interactive',
+  entrypoint: 'claude-vscode',
+  pidDomain: 'win32:alex',
+  messagingSocketPath: '\\\\.\\pipe\\LOCAL\\cc-msg-x',
+  name: 'bohem-marketing-c2',
+  nameSource: 'derived',
+  nameSince: 1792493825481,
+  status: 'idle',
+  updatedAt: 1792493825845,
+  statusUpdatedAt: 1792493825845,
+}
+
+describe('parseSessionRecord — status, waitingFor, statusUpdatedAt', () => {
+  it('reads the status fields of a real idle record', () => {
+    const r = parseSessionRecord(REAL_STATUS_SESSION)
+    expect(r?.status).toBe('idle')
+    expect(r?.statusUpdatedAt).toBe(1792493825845)
+    expect(r?.waitingFor).toBeUndefined()
+  })
+
+  it('reads a waiting record', () => {
+    const r = parseSessionRecord({
+      ...REAL_STATUS_SESSION,
+      status: 'waiting',
+      waitingFor: 'permission prompt',
+      statusUpdatedAt: 1792493830000,
+    })
+    expect(r?.status).toBe('waiting')
+    expect(r?.waitingFor).toBe('permission prompt')
+    expect(r?.statusUpdatedAt).toBe(1792493830000)
+  })
+
+  it('keeps waitingFor: null as null', () => {
+    expect(parseSessionRecord({ ...REAL_STATUS_SESSION, status: 'busy', waitingFor: null })?.waitingFor).toBeNull()
+  })
+
+  it('leaves the fields undefined on an older record without them', () => {
+    const r = parseSessionRecord(REAL_SESSION)
+    expect(r).not.toBeNull()
+    expect(r?.status).toBeUndefined()
+    expect(r?.waitingFor).toBeUndefined()
+    expect(r?.statusUpdatedAt).toBeUndefined()
+  })
+
+  it('keeps an unknown status string as-is, and drops wrongly typed values', () => {
+    expect(parseSessionRecord({ ...REAL_STATUS_SESSION, status: 'compacting' })?.status).toBe('compacting')
+    const bad = parseSessionRecord({ ...REAL_STATUS_SESSION, status: 3, waitingFor: {}, statusUpdatedAt: 'now' })
+    expect(bad).not.toBeNull()
+    expect(bad?.status).toBeUndefined()
+    expect(bad?.waitingFor).toBeUndefined()
+    expect(bad?.statusUpdatedAt).toBeUndefined()
+  })
+})
+
 describe('parseIdeLock', () => {
   it('parses a real lock file', () => {
     const l = parseIdeLock(REAL_LOCK, 50269)

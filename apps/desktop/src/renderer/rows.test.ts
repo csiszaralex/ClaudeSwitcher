@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeDecision, buildRows } from './rows.js'
+import { activeDecision, buildRows, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, selectOnShow } from './selection.js'
 
 type Status = 'waiting' | 'working' | 'idle' | 'unknown'
@@ -75,6 +75,37 @@ describe('buildRows', () => {
 
   it('falls back to the session id when the request has no cwd', () => {
     expect(buildRows([], [decision('o', 'ghost', 1, false, '')])[0]?.name).toBe('ghost')
+  })
+})
+
+describe('waitsOutsideApp', () => {
+  it('is true for a waiting session without a held request (registry or Notification wait)', () => {
+    // Pl. az app újraindult, miközben a session már várt: a kérés a régi daemonhoz ment.
+    const [row] = buildRows([session('r', 'waiting', 4)], [])
+    expect(row !== undefined && waitsOutsideApp(row)).toBe(true)
+  })
+
+  it('is false when the app holds a request for the row', () => {
+    const [row] = buildRows([session('a', 'waiting', 4)], [decision('d', 'a', 4)])
+    expect(row !== undefined && waitsOutsideApp(row)).toBe(false)
+  })
+
+  it('is false for a session that is not waiting', () => {
+    const rows = buildRows([session('i', 'idle'), session('k', 'working')], [])
+    expect(rows.map(waitsOutsideApp)).toEqual([false, false])
+  })
+})
+
+describe('selection with a registry-only wait', () => {
+  it('selects the registry-only waiting session on show — it is the oldest waiting', () => {
+    const rows = buildRows([session('r', 'waiting', 2), session('i', 'idle')], [])
+    expect(selectOnShow(rows, [], 'i')).toBe('r')
+  })
+
+  it('moves to it after a decision instead of hiding', () => {
+    const decisions = [decision('d', 'a', 1)]
+    const rows = buildRows([session('a', 'waiting', 1), session('r', 'waiting', 2), session('i', 'idle')], decisions)
+    expect(nextAfterDecision(rows, decisions, decisions[0]!, true)).toEqual({ select: 'r', hide: false })
   })
 })
 

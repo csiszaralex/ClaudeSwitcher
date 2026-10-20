@@ -399,3 +399,170 @@ describe('SessionStore — „épp végzett" jelzés (stoppedAt)', () => {
     expect(store.views()[0]?.stoppedAt).toBeUndefined()
   })
 })
+
+/** A registry állapotmezői (Claude Code 2.1.296+, mérve): egy várakozó rekord. */
+function registryWaiting(sessionId: string, since: number, over: Partial<LiveSession['record']> = {}): LiveSession {
+  return live(sessionId, { status: 'waiting', waitingFor: 'permission prompt', statusUpdatedAt: since, ...over })
+}
+
+describe('SessionStore — várakozás a registry-ből (app-újraindulás után)', () => {
+  it('counts a registry status of waiting as waiting, since statusUpdatedAt', () => {
+    // A felhasználó esete: a session már várt, amikor az app újraindult — se PermissionRequest,
+    // se Notification nem jön többé, csak a registry tudja.
+    const store = new SessionStore()
+    store.applySnapshot([live('a', { name: 'alpha' }), registryWaiting('b', 4_000, { name: 'bravo' })], noActivity, 9_000)
+    const [first] = store.views()
+    expect(first?.sessionId).toBe('b')
+    expect(first?.status).toBe('waiting')
+    expect(first?.waitingSince).toBe(4_000)
+    expect(first?.notificationText).toBeUndefined()
+  })
+
+  it('falls back to the old behaviour when the record has no status or no statusUpdatedAt', () => {
+    const store = new SessionStore()
+    store.applySnapshot(
+      [live('a'), live('b', { status: 'waiting', waitingFor: 'permission prompt' }), live('c', { status: 'weird', statusUpdatedAt: 1 })],
+      noActivity,
+      9_000,
+    )
+    expect(store.views().map((v) => v.status)).toEqual(['idle', 'idle', 'idle'])
+  })
+
+  it('orders registry waits with hook waits by when they started', () => {
+    const store = new SessionStore()
+    store.applySnapshot([registryWaiting('r', 2_000, { name: 'r' }), live('n', { name: 'n' })], noActivity, 3_000)
+    store.applyNotification({ sessionId: 'n', cwd: 'c', type: 'permission_prompt' }, 1_000)
+    expect(store.views().map((v) => v.sessionId)).toEqual(['n', 'r'])
+  })
+
+  it('prefers the hook source for waitingSince when both know the wait', () => {
+    const store = new SessionStore()
+    store.applySnapshot([registryWaiting('s1', 1_200)], noActivity, 1_300)
+    store.applyPending(new Map([['s1', 1_000]]), 1_000)
+    expect(store.views()[0]?.waitingSince).toBe(1_000)
+  })
+
+  it('does not resurrect the wait from a lagging snapshot after the app decided', () => {
+    // A hook azonnal jön, a registry-t ~3 mp-enként olvassuk: a döntés utáni első pillanatkép
+    // még a régi „waiting"-et mutathatja.
+    const store = new SessionStore()
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 1_500)
+    store.applyPending(new Map([['s1', 1_000]]), 1_000)
+    store.applyPending(new Map(), 3_000, 's1')
+    expect(store.views()[0]?.status).toBe('idle')
+
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 4_000)
+    expect(store.views()[0]?.status).toBe('idle')
+    // Akkor sem, ha a lemaradás a 10 mp-es késő-prompt ablaknál tovább tart.
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 30_000)
+    expect(store.views()[0]?.status).toBe('idle')
+  })
+
+  it('shows a registry wait that started after the app decided, even inside the late-prompt window', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 500)
+    store.applyPending(new Map([['s1', 1_000]]), 1_000)
+    store.applyPending(new Map(), 3_000, 's1')
+    store.applySnapshot([registryWaiting('s1', 3_500)], noActivity, 5_000)
+    expect(store.views()[0]?.status).toBe('waiting')
+    expect(store.views()[0]?.waitingSince).toBe(3_500)
+  })
+
+  it('clears a registry wait on PostToolUse at once, and a lagging snapshot does not bring it back', () => {
+    const store = new SessionStore()
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 1_500)
+    store.applyToolFinished('s1', 2_000)
+    expect(store.views()[0]?.status).toBe('idle')
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 3_000)
+    expect(store.views()[0]?.status).toBe('idle')
+  })
+
+  it('clears a registry wait on Stop, and a lagging snapshot does not bring it back', () => {
+    const store = new SessionStore()
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 1_500)
+    store.applyLifecycle({ sessionId: 's1', cwd: 'c', kind: 'stop' }, 2_000)
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 3_000)
+    expect(store.views()[0]?.status).toBe('idle')
+    expect(store.views()[0]?.stoppedAt).toBe(2_000)
+  })
+
+  it('records the end of a registry wait for the ordering', () => {
+    const store = new SessionStore()
+    store.applySnapshot(
+      [live('a', { name: 'alpha' }), registryWaiting('z', 1_000, { name: 'zulu' })],
+      noActivity,
+      1_500,
+    )
+    // A registry átvált: a várakozás véget ért — a zulu a nem-várók tetejére kerül.
+    store.applySnapshot(
+      [live('a', { name: 'alpha' }), live('z', { name: 'zulu', status: 'idle', statusUpdatedAt: 2_000 })],
+      noActivity,
+      4_000,
+    )
+    expect(store.views().map((v) => v.name)).toEqual(['zulu', 'alpha'])
+  })
+
+  it('records the end of a registry wait when a hook clears it', () => {
+    const store = new SessionStore()
+    store.applySnapshot(
+      [live('a', { name: 'alpha' }), registryWaiting('z', 1_000, { name: 'zulu' })],
+      noActivity,
+      1_500,
+    )
+    store.applyToolFinished('z', 2_000)
+    expect(store.views().map((v) => v.name)).toEqual(['zulu', 'alpha'])
+  })
+
+  it('clears stoppedAt for a registry wait newer than the Stop, not for a lagging one', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 500)
+    store.applyLifecycle({ sessionId: 's1', cwd: 'c', kind: 'stop' }, 2_000)
+    store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 3_000)
+    expect(store.views()[0]?.stoppedAt).toBe(2_000)
+
+    store.applySnapshot([registryWaiting('s1', 2_500)], noActivity, 4_000)
+    expect(store.views()[0]?.status).toBe('waiting')
+    expect(store.views()[0]?.stoppedAt).toBeUndefined()
+  })
+})
+
+describe('SessionStore — „busy" a registry-ből', () => {
+  it('reports working for a registry status of busy, also without a running tool', () => {
+    // Gondolkodás vagy szöveg-streamelés közben nincs futó tool — eddig ez tétlennek látszott.
+    const store = new SessionStore()
+    store.applySnapshot([live('s1', { status: 'busy', statusUpdatedAt: 1_000 })], noActivity, 2_000)
+    expect(store.views()[0]?.status).toBe('working')
+  })
+
+  it('ignores busy without statusUpdatedAt', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1', { status: 'busy' })], noActivity, 2_000)
+    expect(store.views()[0]?.status).toBe('idle')
+  })
+
+  it('does not count a busy older than the last Stop: the session has just finished', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 500)
+    store.applyLifecycle({ sessionId: 's1', cwd: 'c', kind: 'stop' }, 2_000)
+    store.applySnapshot([live('s1', { status: 'busy', statusUpdatedAt: 1_000 })], noActivity, 3_000)
+    expect(store.views()[0]?.status).toBe('idle')
+    expect(store.views()[0]?.stoppedAt).toBe(2_000)
+  })
+
+  it('clears stoppedAt for a busy newer than the Stop: a new turn has begun', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 500)
+    store.applyLifecycle({ sessionId: 's1', cwd: 'c', kind: 'stop' }, 2_000)
+    store.applySnapshot([live('s1', { status: 'busy', statusUpdatedAt: 2_500 })], noActivity, 3_000)
+    expect(store.views()[0]?.status).toBe('working')
+    expect(store.views()[0]?.stoppedAt).toBeUndefined()
+  })
+
+  it('keeps a hook wait over a registry busy', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 500)
+    store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'permission_prompt' }, 1_000)
+    store.applySnapshot([live('s1', { status: 'busy', statusUpdatedAt: 900 })], noActivity, 2_000)
+    expect(store.views()[0]?.status).toBe('waiting')
+  })
+})

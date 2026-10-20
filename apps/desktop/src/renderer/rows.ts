@@ -36,6 +36,15 @@ export function activeDecision<D extends { released: boolean }>(list: readonly D
   return list.find((decision) => !decision.released) ?? list[0]
 }
 
+/**
+ * A sor vár, de az appnak nincs róla eldönthető kérése: a várakozást csak a registry vagy egy
+ * Notification ismeri (pl. az app újraindult, miközben a session már várt, vagy a
+ * PermissionRequest nem ehhez a daemonhoz ment). Ilyenkor csak a VSCode dönthet.
+ */
+export function waitsOutsideApp(row: { status: SessionStatus; decisions: readonly unknown[] }): boolean {
+  return row.status === 'waiting' && row.decisions.length === 0
+}
+
 function lastSegment(cwd: string): string | undefined {
   const parts = cwd.split(/[\\/]/).filter((part) => part !== '')
   return parts[parts.length - 1]

@@ -29,6 +29,13 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
       typeof raw['bridgeSessionId'] === 'string' ? raw['bridgeSessionId']
       : raw['bridgeSessionId'] === null ? null
       : undefined,
+    // Ismeretlen `status` szöveget változatlanul átengedünk (lásd a SessionRecord-ot).
+    status: typeof raw['status'] === 'string' ? raw['status'] : undefined,
+    waitingFor:
+      typeof raw['waitingFor'] === 'string' ? raw['waitingFor']
+      : raw['waitingFor'] === null ? null
+      : undefined,
+    statusUpdatedAt: typeof raw['statusUpdatedAt'] === 'number' ? raw['statusUpdatedAt'] : undefined,
   }
 }
 
