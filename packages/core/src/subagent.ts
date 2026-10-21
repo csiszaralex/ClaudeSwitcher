@@ -21,6 +21,14 @@ export const SUBAGENT_STALE_MS = 5 * 60_000
  */
 export const SUBAGENT_SCAN_LIMIT = 3
 
+/**
+ * Sessionönként legfeljebb ennyi, az elavulási ablakon belül írt subagent meta-fájlját olvassuk
+ * el. A `SUBAGENT_SCAN_LIMIT` a KÉSZ subagentek kiszűrése UTÁN hat — különben néhány frissen
+ * befejezett subagent eltakarná a még futót, csak mert később írtak. A meta kicsi; ez a korlát
+ * csak azt zárja ki, hogy egy sűrűn subagentező session minden pollnál tucatnyi fájlt olvasson.
+ */
+export const SUBAGENT_META_LIMIT = 10
+
 /** A subagent-transcript végéből ennyit olvasunk: az utolsó tool_use-hoz bőven elég. */
 export const SUBAGENT_TAIL_BYTES = 64 * 1024
 

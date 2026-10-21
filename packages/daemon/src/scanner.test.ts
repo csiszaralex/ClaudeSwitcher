@@ -162,6 +162,22 @@ describe('scanSessions — subagents', () => {
     expect(list.map((s) => s.agentId)).toEqual(['a0', 'a1', 'a2'])
   })
 
+  it('does not let newer finished subagents hide an older active one', async () => {
+    // A korlát a KÉSZ subagentek kiszűrése UTÁN hat: három frissen befejezett subagent nem
+    // takarhatja el a még futót, csak mert azok később írtak.
+    const dir = await fixture()
+    for (const [i, id] of ['done0', 'done1', 'done2'].entries()) {
+      await addSubagent(dir, id, {
+        meta: { ...runningMeta, finished: true },
+        lines: [subagentLine('Bash', { command: id })],
+        ageMs: i * 1_000,
+      })
+    }
+    await addSubagent(dir, 'live', { meta: runningMeta, lines: [subagentLine('Grep', { pattern: 'x' })], ageMs: 30_000 })
+    const list = (await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []
+    expect(list.map((s) => s.agentId)).toEqual(['live'])
+  })
+
   it('treats a missing subagents directory as normal, without logging', async () => {
     const dir = await fixture()
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})

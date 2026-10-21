@@ -8,6 +8,8 @@ import {
   type SubagentMeta,
   type SubagentView,
   type IdeLock,
+  SUBAGENT_META_LIMIT,
+  SUBAGENT_SCAN_LIMIT,
   SUBAGENT_TAIL_BYTES,
   findTranscriptPath,
   ideDir,
@@ -97,9 +99,9 @@ async function readSubagentMeta(metaPath: string): Promise<SubagentMeta> {
 
 /**
  * A session aktív subagentjei, a legutóbb írt elöl. Költség pollonként: egy readdir, egy stat
- * minden `agent-*.jsonl`-re (a legfrissebbek kiválasztásához kell), és csak a legfrissebb
- * `SUBAGENT_SCAN_LIMIT` darab, elavulási ablakon belüli subagentre egy meta-olvasás; a
- * transcript végét csak a nem kész subagenteknél olvassuk. Soha nem dob: egy hibás fájl csak a
+ * minden `agent-*.jsonl`-re (a legfrissebbek kiválasztásához kell), legfeljebb
+ * `SUBAGENT_META_LIMIT` meta-olvasás az elavulási ablakon belül, és a transcript vége csak a
+ * legfrissebb `SUBAGENT_SCAN_LIMIT` NEM KÉSZ subagentnél. Soha nem dob: egy hibás fájl csak a
  * saját subagentjét viszi el.
  */
 async function readSubagents(transcript: string, now: number): Promise<SubagentView[]> {
@@ -127,15 +129,23 @@ async function readSubagents(transcript: string, now: number): Promise<SubagentV
       }
     }),
   )
-  const picked = pickRecentSubagentFiles(
+  // Előbb a kész subagentek kiszűrése, CSAK utána a darabszám-korlát: különben néhány frissen
+  // befejezett subagent eltakarná a még futót (lásd SUBAGENT_META_LIMIT).
+  const candidates = pickRecentSubagentFiles(
     files.filter((file) => file !== undefined),
     now,
+    SUBAGENT_META_LIMIT,
   )
+  const withMeta = await Promise.all(
+    candidates.map(async (candidate) => ({
+      ...candidate,
+      meta: await readSubagentMeta(path.join(dir, `agent-${candidate.agentId}.meta.json`)),
+    })),
+  )
+  const active = withMeta.filter(({ meta }) => !meta.finished).slice(0, SUBAGENT_SCAN_LIMIT)
 
-  const views = await Promise.all(
-    picked.map(async ({ agentId, mtimeMs, file }): Promise<SubagentView | undefined> => {
-      const meta = await readSubagentMeta(path.join(dir, `agent-${agentId}.meta.json`))
-      if (meta.finished) return undefined
+  return Promise.all(
+    active.map(async ({ agentId, mtimeMs, file, meta }): Promise<SubagentView> => {
       const activity = readActivityFromLines(await tailLines(file, SUBAGENT_TAIL_BYTES))
       return {
         agentId,
@@ -147,7 +157,6 @@ async function readSubagents(transcript: string, now: number): Promise<SubagentV
       }
     }),
   )
-  return views.filter((view) => view !== undefined)
 }
 
 /** Egy session olvasott állapota: a fő transcript aktivitása és az aktív subagentjei. */
