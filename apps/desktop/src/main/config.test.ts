@@ -6,7 +6,7 @@ import { DEFAULT_HOTKEY, configPath, loadConfig, updateConfig } from './config.j
 
 const freshDir = (): Promise<string> => mkdtemp(path.join(tmpdir(), 'cs-config-'))
 
-const DEFAULTS = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true }
+const DEFAULTS = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true, jumpToTab: true }
 
 describe('loadConfig', () => {
   it('writes a config file with the defaults when none exists', async () => {
@@ -28,8 +28,30 @@ describe('loadConfig', () => {
     const dir = await freshDir()
     const older = JSON.stringify({ hotkey: 'Control+Shift+F9' })
     await writeFile(configPath(dir), older)
-    expect(await loadConfig(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: true })
+    expect(await loadConfig(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: true, jumpToTab: true })
     expect(await readFile(configPath(dir), 'utf8')).toBe(older)
+  })
+
+  it('loads a part B file without the tab-jump key with its default, keeping its other keys and the file', async () => {
+    const dir = await freshDir()
+    const older = JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: false })
+    await writeFile(configPath(dir), older)
+    expect(await loadConfig(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: true })
+    expect(await readFile(configPath(dir), 'utf8')).toBe(older)
+  })
+
+  it('returns the tab-jump setting the user turned off', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', jumpToTab: false }))
+    expect(await loadConfig(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: false })
+  })
+
+  it('ignores a tab-jump value that is not a boolean, without losing the other keys', async () => {
+    for (const bad of ['false', 0, null, {}]) {
+      const dir = await freshDir()
+      await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: bad }))
+      expect(await loadConfig(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: true })
+    }
   })
 
   it('returns the auto-hide setting the user turned off', async () => {
@@ -41,14 +63,14 @@ describe('loadConfig', () => {
   it('reads each setting on its own — a bad hotkey does not lose a valid auto-hide value', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 42, hideAfterLastDecision: false }))
-    expect(await loadConfig(dir)).toEqual({ hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: false })
+    expect(await loadConfig(dir)).toEqual({ hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: false, jumpToTab: true })
   })
 
   it('ignores an auto-hide value that is not a boolean', async () => {
     for (const bad of ['false', 0, null, {}]) {
       const dir = await freshDir()
       await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: bad }))
-      expect(await loadConfig(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true })
+      expect(await loadConfig(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: true })
     }
   })
 
@@ -91,7 +113,19 @@ describe('updateConfig', () => {
       note: 'kézzel',
       hideAfterLastDecision: false,
     })
-    expect(await loadConfig(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: false })
+    expect(await loadConfig(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: false, jumpToTab: true })
+  })
+
+  it('merges the tab-jump key into the file, keeping the auto-hide value and the user keys', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: false, note: 'kézzel' }))
+    expect(await updateConfig(dir, { jumpToTab: false })).toBe(true)
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual({
+      hotkey: 'F9',
+      hideAfterLastDecision: false,
+      note: 'kézzel',
+      jumpToTab: false,
+    })
   })
 
   it('writes the defaults plus the change when there is no file yet', async () => {

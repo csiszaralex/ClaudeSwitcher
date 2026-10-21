@@ -55,6 +55,12 @@ export interface SessionView {
   windowPid?: number | undefined
   workspaceFolder?: string | undefined
   bridgeSessionId?: string | null | undefined
+  /**
+   * Honnan indult a session a registry szerint (`claude-vscode`, `cli`, …), nyers szövegként.
+   * A tab-fókusz ebből tudja, hogy a session a VSCode bővítményben fut-e: egy CLI sessionre a
+   * bővítmény URI-ja egy ÚJ tabot nyitna.
+   */
+  entrypoint?: string | undefined
   waitingSince?: number | undefined
   notificationText?: string | undefined
   /**

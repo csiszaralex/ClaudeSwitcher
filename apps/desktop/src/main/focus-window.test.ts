@@ -1,13 +1,18 @@
 import { exec, execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
+import type { SessionView } from '@claudeswitcher/core'
 import {
+  TAB_FOCUS_SETTLE_MS,
   countMainWindows,
   findMainWindow,
+  focusWith,
   foregroundWindow,
   isFastFocusAvailable,
   isSafeForCli,
   quoteForCli,
   scanWindowsForPid,
+  tabFocusUri,
+  type FocusOutcome,
   type WindowScanner,
 } from './focus-window.js'
 
@@ -161,6 +166,143 @@ describe('quoteForCli', () => {
     for (const folder of folders) {
       expect(await roundTrip(folder)).toBe(folder)
     }
+  })
+})
+
+const SESSION_ID = '0b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f'
+
+/** Egy VSCode bővítményben futó session, ismert ablakkal — a tab-fókusz boldog esete. */
+function extensionView(over: Partial<SessionView> = {}): SessionView {
+  return {
+    sessionId: SESSION_ID,
+    pid: 1,
+    name: 'alpha',
+    cwd: 'p:\\proj\\alpha\\sub',
+    status: 'waiting',
+    activity: {},
+    windowPid: 900,
+    workspaceFolder: 'p:\\proj\\alpha',
+    entrypoint: 'claude-vscode',
+    ...over,
+  }
+}
+
+/** Hamis fókuszlépések: rögzítik, mit kértek tőlük, és semmit nem hoznak előre. */
+function fakeSteps(result: { pid: boolean; cli: boolean }): {
+  steps: Parameters<typeof focusWith>[1]
+  pidCalls: number[]
+  cliCalls: string[]
+} {
+  const pidCalls: number[] = []
+  const cliCalls: string[] = []
+  return {
+    steps: {
+      byPid: (pid) => {
+        pidCalls.push(pid)
+        return result.pid
+      },
+      byCli: (folder) => {
+        cliCalls.push(folder)
+        return Promise.resolve(result.cli)
+      },
+    },
+    pidCalls,
+    cliCalls,
+  }
+}
+
+describe('focusWith', () => {
+  it('reports the fast pid path when it brought the window forward, without running the CLI', async () => {
+    const fake = fakeSteps({ pid: true, cli: true })
+    expect(await focusWith(extensionView(), fake.steps)).toBe<FocusOutcome>('pid')
+    expect(fake.pidCalls).toEqual([900])
+    expect(fake.cliCalls).toEqual([])
+  })
+
+  it('reports the workspace path when the CLI resolved the lock file folder', async () => {
+    const fake = fakeSteps({ pid: false, cli: true })
+    expect(await focusWith(extensionView(), fake.steps)).toBe<FocusOutcome>('workspace')
+    expect(fake.cliCalls).toEqual(['p:\\proj\\alpha'])
+  })
+
+  it('reports the cwd path when no window is known, so the tab URI can refuse it', async () => {
+    const fake = fakeSteps({ pid: false, cli: true })
+    const view = extensionView({ windowPid: undefined, workspaceFolder: undefined })
+    expect(await focusWith(view, fake.steps)).toBe<FocusOutcome>('cwd')
+    expect(fake.pidCalls).toEqual([])
+    expect(fake.cliCalls).toEqual(['p:\\proj\\alpha\\sub'])
+  })
+
+  it('reports the cwd path when the pid is known but the folder is not and the fast path failed', async () => {
+    // Ez a rés a `windowPid !== undefined || workspaceFolder !== undefined` feltétel mögött: a
+    // pid ismert, de a gyors út elbukott, így a `code -r` a cwd-t kapta — ami egy új ablakot
+    // nyithatott. A kimenet ezt `cwd`-ként mondja meg, nem „sikerként".
+    const fake = fakeSteps({ pid: false, cli: true })
+    const view = extensionView({ workspaceFolder: undefined })
+    expect(await focusWith(view, fake.steps)).toBe<FocusOutcome>('cwd')
+  })
+
+  it('reports failure when neither path brought a window forward', async () => {
+    const fake = fakeSteps({ pid: false, cli: false })
+    expect(await focusWith(extensionView(), fake.steps)).toBe<FocusOutcome>('failed')
+  })
+})
+
+describe('tabFocusUri', () => {
+  const expected = `vscode://anthropic.claude-code/open?session=${SESSION_ID}`
+
+  it('builds the extension URI after the fast path or the workspace path focused the window', () => {
+    expect(tabFocusUri(extensionView(), 'pid', true)).toBe(expected)
+    expect(tabFocusUri(extensionView(), 'workspace', true)).toBe(expected)
+  })
+
+  it('sends nothing when the window focus failed', () => {
+    // A URI a legfelső VSCode ablakhoz megy: ha nem a session ablaka jött elő, az egy új tabot nyitna.
+    expect(tabFocusUri(extensionView(), 'failed', true)).toBeUndefined()
+  })
+
+  it('sends nothing after a cwd fallback, which may have opened a brand-new window', () => {
+    expect(tabFocusUri(extensionView(), 'cwd', true)).toBeUndefined()
+    expect(
+      tabFocusUri(extensionView({ windowPid: undefined, workspaceFolder: undefined }), 'cwd', true),
+    ).toBeUndefined()
+  })
+
+  it('sends nothing when the session window is unknown, whatever the outcome claims', () => {
+    const view = extensionView({ windowPid: undefined, workspaceFolder: undefined })
+    expect(tabFocusUri(view, 'pid', true)).toBeUndefined()
+    expect(tabFocusUri(view, 'workspace', true)).toBeUndefined()
+  })
+
+  it('sends nothing for a session that does not run in the VS Code extension', () => {
+    for (const entrypoint of ['cli', 'sdk-ts', '', 'Claude-VSCode', 'claude-vscode ', undefined]) {
+      expect(tabFocusUri(extensionView({ entrypoint }), 'pid', true)).toBeUndefined()
+    }
+  })
+
+  it('sends nothing for a session id that is not a UUID', () => {
+    for (const sessionId of [
+      '',
+      'abc',
+      `${SESSION_ID}&x=1`,
+      `${SESSION_ID}\n`,
+      ` ${SESSION_ID}`,
+      '../../etc',
+      '0b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6', // egy karakterrel rövidebb
+      '0b5c1d7e3f2a4c8b9e6d1a2b3c4d5e6f', // kötőjelek nélkül
+      'zb5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f',
+    ]) {
+      expect(tabFocusUri(extensionView({ sessionId }), 'pid', true)).toBeUndefined()
+    }
+  })
+
+  it('sends nothing when the setting is off', () => {
+    expect(tabFocusUri(extensionView(), 'pid', false)).toBeUndefined()
+  })
+
+  it('waits a short, bounded time before sending, so VS Code registers the window as last-active', () => {
+    expect(TAB_FOCUS_SETTLE_MS).toBeGreaterThanOrEqual(150)
+    expect(TAB_FOCUS_SETTLE_MS).toBeLessThanOrEqual(300)
   })
 })
 

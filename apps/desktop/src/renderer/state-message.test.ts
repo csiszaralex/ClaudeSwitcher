@@ -53,6 +53,26 @@ describe('parseStateMessage', () => {
     })
     expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'c' }])
   })
+
+  it('keeps a session carrying an entrypoint string, and drops one whose entrypoint is not a string', () => {
+    // Opcionális: egy régebbi daemon nem küldi. Ha jön, szövegnek kell lennie.
+    const message = JSON.stringify({
+      type: 'state',
+      payload: {
+        sessions: [
+          { sessionId: 'a', entrypoint: 'claude-vscode' },
+          { sessionId: 'b', entrypoint: 42 },
+          { sessionId: 'c', entrypoint: null },
+          { sessionId: 'd' },
+        ],
+        rateLimits: {},
+      },
+    })
+    expect(parseStateMessage(message)?.sessions).toEqual([
+      { sessionId: 'a', entrypoint: 'claude-vscode' },
+      { sessionId: 'd' },
+    ])
+  })
 })
 
 describe('sanitizeState', () => {

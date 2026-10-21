@@ -20,9 +20,19 @@ export interface Config {
    * (az eredeti kérés), de kikapcsolható: „néha jól jön, hogy ott van és csak A-kat kell nyomni".
    */
   hideAfterLastDecision: boolean
+  /**
+   * A fókuszálás a session pontos Claude Code tabját is előhozza-e, nem csak az ablakát. Alapból
+   * igen; kikapcsolva a viselkedés pontosan az M1-es: csak az ablak jön elő.
+   */
+  jumpToTab: boolean
 }
 
-const DEFAULT_CONFIG: Config = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true }
+const DEFAULT_CONFIG: Config = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true, jumpToTab: true }
+
+/** Egy logikai kulcs értéke, vagy az alapértéke, ha hiányzik vagy nem logikai érték. */
+function booleanOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
 
 /** A config fájl útvonala az Electron `userData` könyvtárában. */
 export function configPath(dir: string): string {
@@ -71,9 +81,9 @@ async function writeObject(dir: string, value: Record<string, unknown>): Promise
  * szerkesztés maradjon meg, hogy ki lehessen javítani. Egy írhatatlan könyvtár sem
  * akadályozza meg az indulást.
  *
- * A kulcsokat egyenként olvassuk: egy hibás gyorsbillentyű nem viszi el a jó auto-hide
- * értéket, és egy régebbi, a kulcsot még nem ismerő fájl az alapértékkel töltődik be —
- * átírás nélkül.
+ * A kulcsokat egyenként olvassuk: egy hibás gyorsbillentyű nem viszi el a jó auto-hide vagy
+ * tab-ugrás értéket, és egy régebbi, egy kulcsot még nem ismerő fájl arra a kulcsra az
+ * alapértékkel töltődik be — átírás nélkül.
  */
 export async function loadConfig(dir: string): Promise<Config> {
   const raw = await readRaw(configPath(dir))
@@ -81,11 +91,11 @@ export async function loadConfig(dir: string): Promise<Config> {
   if (raw !== undefined) {
     const parsed = parseObject(raw)
     if (parsed === undefined) return { ...DEFAULT_CONFIG }
-    const { hotkey, hideAfterLastDecision } = parsed
+    const { hotkey, hideAfterLastDecision, jumpToTab } = parsed
     return {
       hotkey: typeof hotkey === 'string' && hotkey.trim() !== '' ? hotkey : DEFAULT_HOTKEY,
-      hideAfterLastDecision:
-        typeof hideAfterLastDecision === 'boolean' ? hideAfterLastDecision : DEFAULT_CONFIG.hideAfterLastDecision,
+      hideAfterLastDecision: booleanOr(hideAfterLastDecision, DEFAULT_CONFIG.hideAfterLastDecision),
+      jumpToTab: booleanOr(jumpToTab, DEFAULT_CONFIG.jumpToTab),
     }
   }
 

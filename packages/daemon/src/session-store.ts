@@ -295,6 +295,7 @@ export class SessionStore {
         windowPid: session.window?.pid,
         workspaceFolder: session.window?.workspaceFolders[0],
         bridgeSessionId: session.record.bridgeSessionId,
+        entrypoint: session.record.entrypoint,
         // A hook-források pontosabbak; a registry csak akkor, ha egyikük sem tud a várakozásról.
         waitingSince: wait?.since ?? pending ?? registryWait,
         notificationText: wait?.text,

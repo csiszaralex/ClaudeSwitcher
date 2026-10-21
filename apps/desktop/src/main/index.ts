@@ -5,7 +5,7 @@ import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@c
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
 import { configPath, loadConfig, updateConfig } from './config.js'
-import { focusSessionWindow, isFastFocusAvailable } from './focus-window.js'
+import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { registerHotkey } from './hotkey.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
 import { stopWithin } from './shutdown.js'
@@ -69,6 +69,19 @@ function createOverlay(): BrowserWindow {
   return window
 }
 
+/**
+ * Elküldi a tab-fókusz URI-t a VSCode-nak, `TAB_FOCUS_SETTLE_MS` várakozás után. Soha nem dob:
+ * egy elbukott megnyitás csak naplózódik — az ablak ilyenkor is elöl van, mint az M1-ben.
+ */
+async function openTabFocusUri(uri: string): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, TAB_FOCUS_SETTLE_MS))
+  try {
+    await shell.openExternal(uri)
+  } catch (error) {
+    console.error('[focus] could not open the tab focus URI; the window stays focused', error)
+  }
+}
+
 app.whenReady().then(async () => {
   // A token tartós, a port rögzített: a telepített hookok és a statusLine ezeket kapják
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
@@ -77,6 +90,8 @@ app.whenReady().then(async () => {
   const config = await loadConfig(userData)
   // Futás közben a tálcapipa állítja; a renderer minden appból hozott döntés után innen kérdezi.
   let hideAfterLastDecision = config.hideAfterLastDecision
+  // Ugyanígy: a tálcapipa azonnal átállítja, a következő fókuszkérés már az új értéket látja.
+  let jumpToTab = config.jumpToTab
   const token = await loadOrCreateToken(userData)
   // Egy helyi, nem-null konstans: a kezelők ezt fogják be, így nincs szükség `!`-re, és a típus
   // garantálja, hogy indulás után minden kezelő ugyanazt a futó daemont látja. A modulszintű
@@ -110,9 +125,13 @@ app.whenReady().then(async () => {
     // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van —
     // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
     // tálcagombot villogtatná. Ha így is elbukik, a `code -r` tartalék megoldja.
-    const focused = await focusSessionWindow(view)
+    const outcome = await focusSessionWindow(view)
     overlay?.hide()
-    return focused
+    // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
+    // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
+    const uri = tabFocusUri(view, outcome, jumpToTab)
+    if (uri !== undefined) void openTabFocusUri(uri)
+    return outcome !== 'failed'
   })
 
   ipcMain.handle('overlay:hide', () => {
@@ -159,6 +178,11 @@ app.whenReady().then(async () => {
       // ennek a futásnak a végéig.
       hideAfterLastDecision = enabled
       void updateConfig(userData, { hideAfterLastDecision: enabled })
+    },
+    jumpToTab,
+    onToggleJumpToTab: (enabled) => {
+      jumpToTab = enabled
+      void updateConfig(userData, { jumpToTab: enabled })
     },
     onOpen: () => {
       showOverlay()

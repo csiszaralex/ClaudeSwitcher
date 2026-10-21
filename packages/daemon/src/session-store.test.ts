@@ -26,6 +26,17 @@ describe('SessionStore', () => {
     expect(view!.bridgeSessionId).toBe('session_01x')
   })
 
+  it('carries the registry entrypoint, so the app can tell an extension session from a CLI one', () => {
+    // A tab-fókusz URI csak a VSCode bővítményben futó sessionnek mehet: egy CLI sessionnek
+    // a bővítmény egy ÚJ tabot nyitna.
+    const store = new SessionStore()
+    store.applySnapshot([live('s1', { entrypoint: 'claude-vscode' }), live('s2', { entrypoint: 'cli' }), live('s3')], noActivity)
+    const byId = new Map(store.views().map((v) => [v.sessionId, v]))
+    expect(byId.get('s1')!.entrypoint).toBe('claude-vscode')
+    expect(byId.get('s2')!.entrypoint).toBe('cli')
+    expect(byId.get('s3')!.entrypoint).toBeUndefined()
+  })
+
   it('falls back to the directory name when the session has no name', () => {
     const store = new SessionStore()
     store.applySnapshot([live('s1', { name: undefined })], noActivity)

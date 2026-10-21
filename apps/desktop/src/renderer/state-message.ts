@@ -79,7 +79,9 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
         isObject(view) &&
         typeof view['sessionId'] === 'string' &&
         // Opcionális: egy régebbi daemon nem küldi. Ha jön, számnak kell lennie — időt számolnak belőle.
-        (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number'),
+        (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number') &&
+        // Ugyanígy opcionális; ha jön, szöveg — a registry nyers `entrypoint` értéke.
+        (view['entrypoint'] === undefined || typeof view['entrypoint'] === 'string'),
     ),
     // A `five_hour !== undefined` vizsgálat egy `null`-ra IGAZ, az App pedig utána a
     // `.used_percentage`-en dobna. Itt kiszűrve a megjelenítésnek nem kell erre gondolnia.

@@ -217,15 +217,78 @@ function focusByCli(folder: string): Promise<boolean> {
 }
 
 /**
- * Előtérbe hozza a session VSCode ablakát.
+ * Melyik úton jött elő az ablak. A tab-fókusznak ez kell, nem egy puszta „sikerült":
+ * - `pid`: a gyors út, és az előtérbe került ablakot ellenőriztük (`foregroundWindow() === hwnd`);
+ * - `workspace`: a `code -r` a lock fájl mappáját kapta, az ablakot a VSCode maga oldotta fel;
+ * - `cwd`: a `code -r` a session cwd-jét kapta, mert a mappa ismeretlen. Ez egy VADONATÚJ
+ *   ablakot is nyithatott, tehát nem tudjuk, hogy a session ablaka van-e elöl;
+ * - `failed`: egyik út sem vezetett eredményre.
+ */
+export type FocusOutcome = 'pid' | 'workspace' | 'cwd' | 'failed'
+
+/** A két fókuszlépés, hogy a `focusWith` sorrendje tesztelhető legyen ablak előhozása nélkül. */
+export interface FocusSteps {
+  byPid(pid: number): boolean
+  byCli(folder: string): Promise<boolean>
+}
+
+/**
+ * A `focusSessionWindow` döntési logikája, befecskendezett lépésekkel.
  *
  * Elsőként a lock fájlból ismert pid alapján, mert az azonnali — de csak akkor, ha annak a
  * pidnek pontosan egy ablaka van (lásd `findMainWindow`: egy VSCode főprocessz több ablakot
  * is birtokolhat, és ilyenkor a pid nem azonosít ablakot). Több ablak esetén, és ha a gyors
  * út bármiért nem vezet eredményre, a `code -r` dönt a mappa alapján.
  */
-export async function focusSessionWindow(view: SessionView): Promise<boolean> {
-  if (view.windowPid !== undefined && focusByPid(view.windowPid)) return true
-  const folder = view.workspaceFolder ?? view.cwd
-  return focusByCli(folder)
+export async function focusWith(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
+  if (view.windowPid !== undefined && steps.byPid(view.windowPid)) return 'pid'
+  if (view.workspaceFolder !== undefined) {
+    return (await steps.byCli(view.workspaceFolder)) ? 'workspace' : 'failed'
+  }
+  return (await steps.byCli(view.cwd)) ? 'cwd' : 'failed'
+}
+
+/** Előtérbe hozza a session VSCode ablakát, és megmondja, melyik úton (lásd `FocusOutcome`). */
+export function focusSessionWindow(view: SessionView): Promise<FocusOutcome> {
+  return focusWith(view, { byPid: focusByPid, byCli: focusByCli })
+}
+
+/**
+ * Ennyit várunk az ablak előhozása és a tab-fókusz URI között. A URI a legfelső, utoljára
+ * aktív VSCode ablakhoz megy (a felhasználó mérése, 2026-10-21): a várakozás alatt a VSCode
+ * feldolgozza a fókuszváltást, és a session ablakát jegyzi utoljára aktívnak — enélkül a URI
+ * még az előző ablakhoz érkezhetne, ami egy új tabot nyitna. Rövid, mert a felhasználó vár rá.
+ */
+export const TAB_FOCUS_SETTLE_MS = 200
+
+/** A VSCode bővítményben futó session registry-beli `entrypoint` értéke. */
+const VSCODE_ENTRYPOINT = 'claude-vscode'
+
+/** Egy kanonikus UUID (8-4-4-4-12 hexa). A Claude Code session azonosítói ilyenek. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * A Claude Code bővítmény URI-ja, ami a session meglévő tabját hozza előre — vagy `undefined`,
+ * ha nem biztonságos elküldeni. Tiszta függvény: a hívó csak elküldi, amit kap.
+ *
+ * A bővítmény a URI-t a legfelső VSCode ablakban kezeli, és ha abban nincs meg a session, egy
+ * ÚJ tabot nyit neki. Ez soha nem történhet meg, ezért csak akkor küldjük, ha MIND igaz:
+ * - az ablak előjött, és tudjuk, hogy a session ablaka: a `pid` út ellenőrizte az előtérbe
+ *   került ablakot, a `workspace` úton a VSCode a lock fájl mappájából maga oldotta fel. A
+ *   `cwd` út nem elég: a `code -r <cwd>` egy új ablakot nyithatott, és a URI ott a futó session
+ *   egy másodpéldányát nyitná meg. `failed` esetén a legfelső ablak bármelyik lehet;
+ * - a session ablaka ismert (`windowPid` vagy `workspaceFolder`) — a kimenettől függetlenül is,
+ *   hogy egy ellentmondó kimenet se nyisson tabot;
+ * - a session a VSCode bővítményben fut: egy CLI vagy terminál sessionre a bővítmény egy új
+ *   tabot nyitna;
+ * - az azonosító UUID: ellenőrizetlen szöveg nem kerül egy `openExternal`-lel megnyitott URL-be;
+ * - a beállítás be van kapcsolva.
+ */
+export function tabFocusUri(view: SessionView, outcome: FocusOutcome, enabled: boolean): string | undefined {
+  if (!enabled) return undefined
+  if (outcome !== 'pid' && outcome !== 'workspace') return undefined
+  if (view.windowPid === undefined && view.workspaceFolder === undefined) return undefined
+  if (view.entrypoint !== VSCODE_ENTRYPOINT) return undefined
+  if (!UUID.test(view.sessionId)) return undefined
+  return `vscode://anthropic.claude-code/open?session=${encodeURIComponent(view.sessionId)}`
 }

@@ -39,6 +39,10 @@ export function createTray(options: {
   hideAfterLastDecision: boolean
   /** A pipa új állapota; a hívó menti el és adja tovább az overlaynek. */
   onToggleHideAfterLastDecision: (enabled: boolean) => void
+  /** A tab-ugrás kezdőállapota a configból. */
+  jumpToTab: boolean
+  /** A pipa új állapota; a hívó menti el, és a következő fókuszkérés már ezt használja. */
+  onToggleJumpToTab: (enabled: boolean) => void
 }): TrayHandle {
   const idle = loadIcon('tray.png')
   const waiting = loadIcon('tray-waiting.png')
@@ -67,6 +71,15 @@ export function createTray(options: {
         checked: options.hideAfterLastDecision,
         click: (item) => {
           options.onToggleHideAfterLastDecision(item.checked)
+        },
+      },
+      {
+        // Kikapcsolva csak az ablak jön elő, a tab nem — pontosan az M1-es viselkedés.
+        label: 'Ugrás a pontos Claude-tabra',
+        type: 'checkbox',
+        checked: options.jumpToTab,
+        click: (item) => {
+          options.onToggleJumpToTab(item.checked)
         },
       },
       { type: 'separator' },
