@@ -26,8 +26,8 @@ nem — vagyis pont a releváns halmazt hagyja ki.
 ## 2. Célok
 
 1. Egy helyen látni minden futó Claude Code sessiont és az állapotát. — **✅ M1**
-2. Egy gombnyomással a megfelelő VSCode **ablakra és tabra** ugrani. — **ablak ✅ M1, tab:
-   M3**
+2. Egy gombnyomással a megfelelő VSCode **ablakra és tabra** ugrani. — **ablak ✅ M1, tab ✅
+   M3 (2026-10-21, saját bővítmény nélkül)**
 3. Az appon belül approve-olni, ablakváltás nélkül — és nemcsak egyszer, hanem
    projekt- vagy gépszinten is engedélyezni. — **M2; a spike szerint megvalósítható,
    kivéve a terv jóváhagyását** (§10). A felhasználó kérésére bővült: kérdésre válasz és
@@ -234,8 +234,10 @@ claudeswitcher/                    pnpm workspace + Nx
 │                          — tiszta TS, IO nélkül
 ├─ packages/daemon/        hook HTTP endpoint, WS hub, fájlfigyelők, DecisionBroker
 ├─ apps/desktop/           Electron: tray, global hotkey, overlay
-└─ apps/vscode-ext/        companion extension
 ```
+
+(Az eredetileg tervezett `apps/vscode-ext` companion extension nem készült el, és nem is
+kell: a tabfókuszt a Claude Code saját URI-ja adja — lásd §7 és §11.)
 
 **Stack:** 100% TypeScript. Electron (nem Tauri — a memória-érv 64 GB mellett
 nem áll, és Tauri Rustot keverne egy egyébként tiszta TS repóba). A
@@ -358,13 +360,24 @@ visszajelzés-mező, a szabályhoz szerkeszthető előnézet. A billentyűzetes 
 megmarad (nyilak, Enter, Esc), az overlay a döntés után sem zárul be automatikusan, ha más
 is vár. ~~Limitsávok~~ — csak ha van adat (§3.5).
 
-### `apps/vscode-ext` (M3)
+### Tabfókusz (M3) — saját bővítmény nélkül
 
-Csatlakozik a hubhoz, bejelenti `{workspaceFolders, pid}`. Egyetlen képessége a
-tabfókusz (jelölt: `claude-vscode.editor.openLast` + `claude-vscode.focus`) — hogy ez egy
-adott Claude Code tabot elő tud-e hozni, azt az M3 első lépése, egy mérés dönti el (§11).
-Döntési felület a VSCode ablakában **nincs** (döntés 2026-10-20): a natív prompt ott amúgy
-is látszik, egy második felület csak duplikáció és hibaforrás.
+A Claude Code bővítmény (2.1.304, kódból olvasva) URI-kezelője:
+`vscode://anthropic.claude-code/open?session=<sessionId>` → `claude-vscode.primaryEditor.open`
+→ ha a sessionnek van tabja, `reveal()`; ha a sidebar tartja, ott mutatja; különben **új** tabot
+nyit. Mérve (2026-10-21): a URI a **legfelső, utoljára aktív** VSCode ablakhoz megy — ha az a
+session ablaka, a jó tabra vált (akkor is, ha nem a VSCode van előtérben); ha másik, ott új tab
+nyílik.
+
+Ezért az app (`focus-window.ts`, `tabFocusUri`) előbb az ablakot hozza elő (M1 útvonal), és
+csak akkor küldi a URI-t (`shell.openExternal`, ~200 ms várakozás után), ha az ablak a `pid`
+úton ellenőrzötten, vagy a `code -r <workspaceFolder>` úton jött elő; a `cwd`-s `code -r`
+(esetleg új ablak) és a sikertelen fókusz kizárva. Csak `entrypoint: claude-vscode` sessionre,
+csak UUID-ra, és csak bekapcsolt „Ugrás a pontos Claude-tabra" tálcapipánál. Bármelyik feltétel
+hiányában a viselkedés az M1-é: csak ablak.
+
+Döntési felület a VSCode ablakában **nincs** (döntés 2026-10-20): a natív prompt ott amúgy is
+látszik, egy második felület csak duplikáció és hibaforrás.
 
 ## 8. Hibakezelés
 
@@ -455,10 +468,13 @@ megválaszolása, terv elutasítása visszajelzéssel. Az első lépés a §10 n
 mérése. Az M1 telepítéséből kikerül a soha nem tüzelő `SessionStart` HTTP-hook (az
 eltávolítás a régi bejegyzést továbbra is felismeri és kiveszi).
 
-**M3 — companion extension.** Döntés (2026-10-20): mérő spike-kal indul — előre tud-e hozni
-a saját bővítményünk egy adott Claude Code tabot. A VSCode-on belüli döntési felület kikerül:
-a natív promptot duplikálná. A subagent-átiratok olvasása (`subagents/agent-*.jsonl`, hogy az
-overlay a futó subagent munkáját is mutassa) nem igényli a bővítményt, külön is jöhet.
+**M3 — tabfókusz. ✅ Kész (2026-10-21), saját bővítmény nélkül.** A mérés előtti
+kódolvasás megtalálta a Claude Code saját URI-kezelőjét (§7, „Tabfókusz"); a felhasználó mérése
+szerint a jó ablak előhozása után ez a pontos tabra vált. A tervezett companion extension
+emiatt elmaradt; a VSCode-on belüli döntési felület már korábban kikerült (2026-10-20).
+
+**Következő:** a subagent-átiratok olvasása (`subagents/agent-*.jsonl`), hogy a sor
+összefoglalója a futó subagent munkáját is mutassa, ne csak a fő session „Agent" eszközét.
 
 Az M1 halasztott tételei (a daemon blokkoló PowerShell-hívása, CSP-szűkítés stb.) a
 `.superpowers/sdd/…/progress.md` naplóban vannak; az M2 tervezésekor kell eldönteni, mi
