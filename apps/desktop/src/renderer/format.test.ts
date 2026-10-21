@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, formatResetsIn, summarize } from './format.js'
+import { formatDuration, formatResetsIn, subagentTooltip, summarize, toolLabel } from './format.js'
 
 describe('formatDuration', () => {
   it('renders seconds under a minute', () => {
@@ -64,5 +64,68 @@ describe('summarize', () => {
     const broken = { status: 'idle' } as unknown as Parameters<typeof summarize>[0]
     expect(() => summarize(broken)).not.toThrow()
     expect(summarize(broken)).toBe('—')
+  })
+})
+
+describe('toolLabel', () => {
+  it('names a tool with nothing more to say as running', () => {
+    expect(toolLabel('Bash')).toBe('Bash fut')
+  })
+
+  it('shows the command of a shell tool after a colon', () => {
+    expect(toolLabel('Bash', 'pnpm test')).toBe('Bash: pnpm test')
+    expect(toolLabel('PowerShell', 'Get-Date')).toBe('PowerShell: Get-Date')
+  })
+
+  it('quotes the subject of any other tool', () => {
+    expect(toolLabel('Grep', 'createPanel')).toBe('Grep „createPanel"')
+  })
+})
+
+describe('summarize — a tool részlete és a subagentek', () => {
+  const searching = { agentId: 'a1', description: 'Final-review fix wave', runningTool: 'Grep', toolDetail: 'createPanel', updatedAt: 2 }
+  const reading = { agentId: 'a2', agentType: 'Explore', runningTool: 'Read', toolDetail: 'x.ts', updatedAt: 1 }
+
+  it('names what the main session tool works on', () => {
+    expect(summarize({ status: 'working', activity: { runningTool: 'Bash', toolDetail: 'pnpm test' } })).toBe('Bash: pnpm test')
+  })
+
+  it('shows the work of an active subagent instead of the main session', () => {
+    const line = summarize({ status: 'working', activity: { runningTool: 'Agent' }, subagents: [searching] })
+    expect(line).toBe('↳ Final-review fix wave · Grep „createPanel"')
+  })
+
+  it('shows the most recent subagent and a count of the others', () => {
+    const line = summarize({ status: 'idle', activity: {}, subagents: [searching, reading] })
+    expect(line).toBe('↳ +1 · Final-review fix wave · Grep „createPanel"')
+  })
+
+  it('falls back to the agent type, then to a generic name, and shows a subagent between tools', () => {
+    expect(summarize({ status: 'idle', activity: {}, subagents: [reading] })).toBe('↳ Explore · Read „x.ts"')
+    expect(summarize({ status: 'idle', activity: {}, subagents: [{ agentId: 'a3', updatedAt: 1 }] })).toBe('↳ subagent')
+  })
+
+  it('keeps the notification text of a waiting session over the subagents', () => {
+    const line = summarize({ status: 'waiting', notificationText: 'Engedély kell', activity: {}, subagents: [searching] })
+    expect(line).toBe('Engedély kell')
+  })
+
+  it('ignores an empty subagent list', () => {
+    expect(summarize({ status: 'idle', activity: { lastAssistantText: 'Kész.' }, subagents: [] })).toBe('Kész.')
+  })
+})
+
+describe('subagentTooltip', () => {
+  it('lists every active subagent, one per line', () => {
+    const tooltip = subagentTooltip([
+      { agentId: 'a1', description: 'Első', runningTool: 'Bash', toolDetail: 'ls', updatedAt: 2 },
+      { agentId: 'a2', agentType: 'Explore', updatedAt: 1 },
+    ])
+    expect(tooltip).toBe('↳ Első · Bash: ls\n↳ Explore')
+  })
+
+  it('has no tooltip without subagents', () => {
+    expect(subagentTooltip(undefined)).toBeUndefined()
+    expect(subagentTooltip([])).toBeUndefined()
   })
 })

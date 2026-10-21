@@ -36,7 +36,20 @@ export type SessionStatus = 'waiting' | 'working' | 'idle' | 'unknown'
 export interface SessionActivity {
   lastAssistantText?: string | undefined
   runningTool?: string | undefined
+  /** Röviden, min dolgozik a futó tool (parancs, minta, fájlnév…) — lásd `toolDetail`. */
+  toolDetail?: string | undefined
   lastEventAt?: number | undefined
+}
+
+/** Egy aktív subagent, ahogy a UI kapja: mit csinál épp a session háttérmunkása. */
+export interface SubagentView {
+  agentId: string
+  agentType?: string | undefined
+  description?: string | undefined
+  runningTool?: string | undefined
+  toolDetail?: string | undefined
+  /** A subagent transcriptjének utolsó írása (ms). */
+  updatedAt: number
 }
 
 export interface LiveSession {
@@ -66,9 +79,15 @@ export interface SessionView {
   /**
    * A session utolsó `Stop` eseményének ideje (ms), amíg azóta nem mutatott új tevékenységet
    * (PreToolUse, PermissionRequest, várakozó Notification, futó tool a pillanatképben). Ebből
-   * látszik, hogy „épp végzett" — a `status` maga ilyenkor is `idle`.
+   * látszik, hogy „épp végzett" — a `status` maga ilyenkor is `idle`. Aktív subagent mellett
+   * nincs: a háttérmunka a fő kör Stop-ja után is tart, és egy subagent futó toolja törli is.
    */
   stoppedAt?: number | undefined
+  /**
+   * A session aktív subagentjei, a legutóbb írt elöl; csak ha van ilyen. Aktív: a meta-ja nem
+   * mondja, hogy kész, és a transcriptje `SUBAGENT_STALE_MS`-en belül íródott. Csak megjelenítés.
+   */
+  subagents?: SubagentView[] | undefined
 }
 
 export interface RateLimitWindow {

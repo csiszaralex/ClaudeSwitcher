@@ -1,4 +1,4 @@
-import type { LiveSession, SessionActivity, SessionView } from '@claudeswitcher/core'
+import type { LiveSession, SessionActivity, SessionView, SubagentView } from '@claudeswitcher/core'
 import type { LifecycleEvent, NotificationEvent } from './hook-server.js'
 
 /**
@@ -49,6 +49,8 @@ function displayName(record: LiveSession['record']): string {
 export class SessionStore {
   #sessions = new Map<string, LiveSession>()
   #activities = new Map<string, SessionActivity>()
+  /** Sessionönként az aktív subagentek a legutóbbi pillanatképből. Csak megjelenítés. */
+  #subagents: ReadonlyMap<string, readonly SubagentView[]> = new Map()
   readonly #waiting = new Map<string, WaitState>()
   /** Sessionönként a legrégebbi függő (vagy elengedett, de még nyitott) döntés kezdete. */
   #pending: ReadonlyMap<string, number> = new Map()
@@ -134,10 +136,15 @@ export class SessionStore {
     }
   }
 
+  /**
+   * @param subagents — sessionönként az aktív subagentek, a legutóbb írt elöl (a scanner adja).
+   * Egy hiányzó bejegyzés: a sessionnek nincs aktív subagentje.
+   */
   applySnapshot(
     sessions: LiveSession[],
     activities: Map<string, SessionActivity>,
     now: number = Date.now(),
+    subagents: ReadonlyMap<string, readonly SubagentView[]> = new Map(),
   ): void {
     const ids = new Set(sessions.map((s) => s.record.sessionId))
     // A registry `waiting`-je a pillanatképpel jön és megy: a várakozás vége innen is eredhet.
@@ -145,10 +152,15 @@ export class SessionStore {
       this.#sessions = new Map(sessions.map((s) => [s.record.sessionId, s]))
     })
     this.#activities = activities
+    this.#subagents = subagents
 
     // Futó tool a pillanatképben: a session a Stop után újra dolgozik.
     for (const [id, activity] of activities) {
       if (activity.runningTool !== undefined) this.#stoppedAt.delete(id)
+    }
+    // Ugyanígy egy subagent futó toolja: a háttér-subagent a fő kör Stop-ja után is dolgozik.
+    for (const [id, list] of subagents) {
+      if (list.some((subagent) => subagent.runningTool !== undefined)) this.#stoppedAt.delete(id)
     }
     // Ugyanígy egy, a Stop UTÁN kezdődött registry-`busy` vagy -`waiting`: új kör indult. A Stop
     // előtti a lemaradt pillanatkép maradéka, az nem törli az „épp végzett"-et.
@@ -279,10 +291,13 @@ export class SessionStore {
       const wait = this.#waiting.get(sessionId)
       const pending = this.#pending.get(sessionId)
       const registryWait = this.#registryWaitSince(sessionId)
+      const subagents = this.#subagents.get(sessionId) ?? []
+      const subagentWorking = subagents.some((subagent) => subagent.runningTool !== undefined)
 
+      // A várakozás (hook, döntés, registry) a subagent munkája előtt is nyer.
       const status =
         wait !== undefined || pending !== undefined || registryWait !== undefined ? 'waiting'
-        : activity.runningTool !== undefined || this.#registryBusy(sessionId) ? 'working'
+        : activity.runningTool !== undefined || subagentWorking || this.#registryBusy(sessionId) ? 'working'
         : 'idle'
 
       views.push({
@@ -299,7 +314,11 @@ export class SessionStore {
         // A hook-források pontosabbak; a registry csak akkor, ha egyikük sem tud a várakozásról.
         waitingSince: wait?.since ?? pending ?? registryWait,
         notificationText: wait?.text,
-        stoppedAt: this.#stoppedAt.get(sessionId),
+        // Aktív subagent mellett nincs „épp végzett": a háttérmunka a fő kör Stop-ja után is tart.
+        // Csak elfedjük, nem töröljük — a két tool közt gondolkodó subagent nem új tevékenység, és
+        // ha eltűnik, a régi Stop újra látszik.
+        stoppedAt: subagents.length > 0 ? undefined : this.#stoppedAt.get(sessionId),
+        ...(subagents.length > 0 ? { subagents: [...subagents] } : {}),
       })
     }
 

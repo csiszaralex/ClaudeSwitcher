@@ -1,18 +1,24 @@
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
   type LiveSession,
   type ProcessProbe,
   type SessionActivity,
   type SessionRecord,
+  type SubagentMeta,
+  type SubagentView,
   type IdeLock,
+  SUBAGENT_TAIL_BYTES,
   findTranscriptPath,
   ideDir,
   parseIdeLock,
   parseSessionRecord,
+  parseSubagentMeta,
+  pickRecentSubagentFiles,
   readActivityFromLines,
   resolveLiveSessions,
   sessionsDir,
+  subagentIdFromFile,
   tailLines,
 } from '@claudeswitcher/core'
 
@@ -54,30 +60,139 @@ async function readLocks(claudeDir: string): Promise<IdeLock[]> {
   return locks.filter((l): l is IdeLock => l !== null)
 }
 
-/** Egy teljes állapot-pillanatkép: élő sessionök, párosított ablakok, aktivitás. */
+/**
+ * Az útvonalak, amelyek hibájáról már szóltunk. A poll 3 másodpercenként fut: egy tartósan
+ * olvashatatlan fájl különben percenként húszszor írná tele a logot ugyanazzal.
+ */
+const reported = new Set<string>()
+
+function reportOnce(filePath: string, what: string, error: unknown): void {
+  if (reported.has(filePath)) return
+  reported.add(filePath)
+  console.error(`[scan] ${what} failed for ${filePath}`, error)
+}
+
+/** Nincs ilyen fájl vagy könyvtár — subagenteknél ez a normális eset, nem hiba. */
+function isMissing(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+async function readSubagentMeta(metaPath: string): Promise<SubagentMeta> {
+  let raw: string
+  try {
+    raw = await readFile(metaPath, 'utf8')
+  } catch (error) {
+    // Hiányzó meta: nincs címke, de a subagent attól még futhat — az elavulási ablak határolja.
+    if (!isMissing(error)) reportOnce(metaPath, 'subagent meta read', error)
+    return { finished: false }
+  }
+  try {
+    return parseSubagentMeta(JSON.parse(raw))
+  } catch (error) {
+    reportOnce(metaPath, 'subagent meta parse', error)
+    return { finished: false }
+  }
+}
+
+/**
+ * A session aktív subagentjei, a legutóbb írt elöl. Költség pollonként: egy readdir, egy stat
+ * minden `agent-*.jsonl`-re (a legfrissebbek kiválasztásához kell), és csak a legfrissebb
+ * `SUBAGENT_SCAN_LIMIT` darab, elavulási ablakon belüli subagentre egy meta-olvasás; a
+ * transcript végét csak a nem kész subagenteknél olvassuk. Soha nem dob: egy hibás fájl csak a
+ * saját subagentjét viszi el.
+ */
+async function readSubagents(transcript: string, now: number): Promise<SubagentView[]> {
+  const dir = path.join(path.dirname(transcript), path.basename(transcript, '.jsonl'), 'subagents')
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch (error) {
+    if (!isMissing(error)) reportOnce(dir, 'subagent listing', error)
+    return []
+  }
+
+  const files = await Promise.all(
+    names.map(async (name) => {
+      const agentId = subagentIdFromFile(name)
+      if (agentId === undefined) return undefined
+      const file = path.join(dir, name)
+      try {
+        const info = await stat(file)
+        return info.isFile() ? { agentId, mtimeMs: info.mtimeMs, file } : undefined
+      } catch (error) {
+        // A readdir és a stat között törölt fájl normális; minden más egyszer a logba.
+        if (!isMissing(error)) reportOnce(file, 'subagent stat', error)
+        return undefined
+      }
+    }),
+  )
+  const picked = pickRecentSubagentFiles(
+    files.filter((file) => file !== undefined),
+    now,
+  )
+
+  const views = await Promise.all(
+    picked.map(async ({ agentId, mtimeMs, file }): Promise<SubagentView | undefined> => {
+      const meta = await readSubagentMeta(path.join(dir, `agent-${agentId}.meta.json`))
+      if (meta.finished) return undefined
+      const activity = readActivityFromLines(await tailLines(file, SUBAGENT_TAIL_BYTES))
+      return {
+        agentId,
+        agentType: meta.agentType,
+        description: meta.description,
+        runningTool: activity.runningTool,
+        toolDetail: activity.toolDetail,
+        updatedAt: mtimeMs,
+      }
+    }),
+  )
+  return views.filter((view) => view !== undefined)
+}
+
+/** Egy session olvasott állapota: a fő transcript aktivitása és az aktív subagentjei. */
+interface SessionReading {
+  activity: SessionActivity
+  subagents: SubagentView[]
+}
+
+/** Egy teljes állapot-pillanatkép: élő sessionök, párosított ablakok, aktivitás, aktív subagentek. */
 export async function scanSessions(
   claudeDir: string,
   probe: ProcessProbe,
-): Promise<{ sessions: LiveSession[]; activities: Map<string, SessionActivity> }> {
+  now: number = Date.now(),
+): Promise<{
+  sessions: LiveSession[]
+  activities: Map<string, SessionActivity>
+  /** Csak a legalább egy aktív subagenttel bíró sessionök szerepelnek benne. */
+  subagents: Map<string, SubagentView[]>
+}> {
   const [records, locks] = await Promise.all([readRecords(claudeDir), readLocks(claudeDir)])
   const sessions = resolveLiveSessions(records, locks, probe)
 
   const entries = await Promise.all(
-    sessions.map(async ({ record }): Promise<[string, SessionActivity]> => {
+    sessions.map(async ({ record }): Promise<[string, SessionReading]> => {
       try {
         const transcript = await findTranscriptPath(claudeDir, record.sessionId)
-        if (transcript === undefined) return [record.sessionId, {}]
-        return [record.sessionId, readActivityFromLines(await tailLines(transcript))]
+        if (transcript === undefined) return [record.sessionId, { activity: {}, subagents: [] }]
+        const [lines, subagents] = await Promise.all([tailLines(transcript), readSubagents(transcript, now)])
+        return [record.sessionId, { activity: readActivityFromLines(lines), subagents }]
       } catch (error) {
         // Védelem mélységben. A `Promise.all` egyetlen elutasításra eldobná az
         // egész szkennelést, vagyis MINDEN session eltűnne a listáról egy
         // olvashatatlan transcript miatt. A hívottak már best-effortok; ez arra
         // véd, ha egy későbbi módosítás behoz ide valami dobni képeset.
         console.error(`[scan] activity read failed for ${record.sessionId}`, error)
-        return [record.sessionId, {}]
+        return [record.sessionId, { activity: {}, subagents: [] }]
       }
     }),
   )
 
-  return { sessions, activities: new Map(entries) }
+  return {
+    sessions,
+    activities: new Map(entries.map(([id, reading]) => [id, reading.activity])),
+    subagents: new Map(
+      entries.filter(([, reading]) => reading.subagents.length > 0).map(([id, reading]) => [id, reading.subagents]),
+    ),
+  }
 }

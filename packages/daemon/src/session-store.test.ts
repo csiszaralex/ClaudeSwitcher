@@ -1,4 +1,4 @@
-import type { LiveSession, SessionActivity } from '@claudeswitcher/core'
+import type { LiveSession, SessionActivity, SubagentView } from '@claudeswitcher/core'
 import { describe, expect, it, vi } from 'vitest'
 import { SessionStore } from './session-store.js'
 
@@ -575,5 +575,66 @@ describe('SessionStore — „busy" a registry-ből', () => {
     store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'permission_prompt' }, 1_000)
     store.applySnapshot([live('s1', { status: 'busy', statusUpdatedAt: 900 })], noActivity, 2_000)
     expect(store.views()[0]?.status).toBe('waiting')
+  })
+})
+
+describe('SessionStore — subagentek', () => {
+  const searching: SubagentView = {
+    agentId: 'a1', agentType: 'general-purpose', description: 'Teszt hullám',
+    runningTool: 'Grep', toolDetail: 'createPanel', updatedAt: 4_000,
+  }
+  const thinking: SubagentView = { agentId: 'a2', description: 'Gondolkodó', updatedAt: 3_000 }
+
+  it('carries the active subagents into the view, and nothing when there are none', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1'), live('s2', { name: 'bravo' })], noActivity, 5_000, new Map([['s1', [searching, thinking]]]))
+    const byId = new Map(store.views().map((v) => [v.sessionId, v]))
+    expect(byId.get('s1')?.subagents).toEqual([searching, thinking])
+    expect(byId.get('s2')?.subagents).toBeUndefined()
+    expect('subagents' in (byId.get('s2') ?? {})).toBe(false)
+  })
+
+  it('reports working while a subagent runs a tool, even after the main Stop', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 1_000)
+    store.applyLifecycle({ sessionId: 's1', cwd: 'c', kind: 'stop' }, 2_000)
+    expect(store.views()[0]?.status).toBe('idle')
+
+    store.applySnapshot([live('s1')], noActivity, 3_000, new Map([['s1', [searching]]]))
+    expect(store.views()[0]?.status).toBe('working')
+    expect(store.views()[0]?.stoppedAt).toBeUndefined()
+  })
+
+  it('does not show "just finished" while a background subagent is active, even between its tools', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 1_000)
+    store.applyLifecycle({ sessionId: 's1', cwd: 'c', kind: 'stop' }, 2_000)
+    store.applySnapshot([live('s1')], noActivity, 3_000, new Map([['s1', [thinking]]]))
+    expect(store.views()[0]?.status).toBe('idle')
+    expect(store.views()[0]?.stoppedAt).toBeUndefined()
+
+    // A subagent tool nélkül nem friss tevékenység: ha eltűnik, a régi Stop ismét látszik.
+    store.applySnapshot([live('s1')], noActivity, 4_000)
+    expect(store.views()[0]?.stoppedAt).toBe(2_000)
+  })
+
+  it('keeps a hook or registry wait over a working subagent', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 500)
+    store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'permission_prompt' }, 1_000)
+    store.applySnapshot([live('s1')], noActivity, 2_000, new Map([['s1', [searching]]]))
+    expect(store.views()[0]?.status).toBe('waiting')
+
+    const other = new SessionStore()
+    other.applySnapshot([registryWaiting('s1', 1_500)], noActivity, 2_000, new Map([['s1', [searching]]]))
+    expect(other.views()[0]?.status).toBe('waiting')
+  })
+
+  it('forgets the subagents of a session once the snapshot no longer has them', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity, 1_000, new Map([['s1', [searching]]]))
+    store.applySnapshot([live('s1')], noActivity, 2_000)
+    expect(store.views()[0]?.subagents).toBeUndefined()
+    expect(store.views()[0]?.status).toBe('idle')
   })
 })

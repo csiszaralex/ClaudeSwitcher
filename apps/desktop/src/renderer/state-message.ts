@@ -1,4 +1,4 @@
-import type { RateLimits, SessionView } from '@claudeswitcher/core'
+import type { RateLimits, SessionView, SubagentView } from '@claudeswitcher/core'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 
 export interface DaemonState {
@@ -52,6 +52,27 @@ function isDecision(value: unknown): value is PendingDecisionView {
   )
 }
 
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string'
+}
+
+/**
+ * Egy aktív subagent a daemontól. Szigorú: egy rossz típusú mező a sor szövegébe `[object Object]`-et
+ * vagy számot írna, és a hiányzó kötelező mező (`agentId`, `updatedAt`) eltérő daemon-verziót jelez.
+ * Mint a többi mezőnél: a hibás session kiesik, nem a renderelés dob.
+ */
+function isSubagent(value: unknown): value is SubagentView {
+  return (
+    isObject(value) &&
+    typeof value['agentId'] === 'string' &&
+    typeof value['updatedAt'] === 'number' &&
+    optionalString(value['agentType']) &&
+    optionalString(value['description']) &&
+    optionalString(value['runningTool']) &&
+    optionalString(value['toolDetail'])
+  )
+}
+
 /**
  * Megtisztít egy állapot-payloadot, vagy `undefined`-ot ad. Soha nem dob.
  *
@@ -81,7 +102,9 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
         // Opcionális: egy régebbi daemon nem küldi. Ha jön, számnak kell lennie — időt számolnak belőle.
         (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number') &&
         // Ugyanígy opcionális; ha jön, szöveg — a registry nyers `entrypoint` értéke.
-        (view['entrypoint'] === undefined || typeof view['entrypoint'] === 'string'),
+        (view['entrypoint'] === undefined || typeof view['entrypoint'] === 'string') &&
+        // Opcionális; ha jön, minden eleme olyan alakú, amit a sor összefoglalója olvas.
+        (view['subagents'] === undefined || (Array.isArray(view['subagents']) && view['subagents'].every(isSubagent))),
     ),
     // A `five_hour !== undefined` vizsgálat egy `null`-ra IGAZ, az App pedig utána a
     // `.used_percentage`-en dobna. Itt kiszűrve a megjelenítésnek nem kell erre gondolnia.

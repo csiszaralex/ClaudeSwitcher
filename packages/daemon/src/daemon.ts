@@ -156,8 +156,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     if (refreshing !== undefined) return refreshing
     refreshing = (async () => {
       try {
-        const snapshot = await scanSessions(claudeDir, probe)
-        sessions.applySnapshot(snapshot.sessions, snapshot.activities)
+        const now = Date.now()
+        const snapshot = await scanSessions(claudeDir, probe, now)
+        sessions.applySnapshot(snapshot.sessions, snapshot.activities, now, snapshot.subagents)
         // Csak sikeres szkennelés után: egy elbukott szkennelés nem „eltűnt minden session".
         decisions.pruneAbsent(new Set(snapshot.sessions.map((session) => session.record.sessionId)))
         // Életjel MINDEN sikeres szkennelés után, akkor is, ha a pillanatkép nem változott.

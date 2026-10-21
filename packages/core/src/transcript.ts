@@ -1,11 +1,13 @@
 import { open, readdir } from 'node:fs/promises'
 import path from 'node:path'
+import { toolDetail } from './tool-detail.js'
 import type { SessionActivity } from './types.js'
 
 interface ContentBlock {
   type?: unknown
   text?: unknown
   name?: unknown
+  input?: unknown
 }
 
 function blocks(rec: Record<string, unknown>): ContentBlock[] {
@@ -52,12 +54,15 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
         }
         if (block.type === 'tool_use' && typeof block.name === 'string') {
           activity.runningTool = block.name
+          // A részlet ugyanahhoz a blokkhoz tartozik: egy részlet nélküli új tool ne örökölje az előzőét.
+          activity.toolDetail = toolDetail(block.input)
         }
       }
     } else if (rec['type'] === 'user') {
       // Egy tool_result lezárja a futó toolt.
       if (blocks(rec).some((b) => b.type === 'tool_result')) {
         activity.runningTool = undefined
+        activity.toolDetail = undefined
       }
     }
   }

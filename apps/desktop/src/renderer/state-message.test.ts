@@ -73,6 +73,36 @@ describe('parseStateMessage', () => {
       { sessionId: 'd' },
     ])
   })
+
+  it('keeps a session carrying well-formed subagents, and drops one whose subagents are malformed', () => {
+    // Opcionális: egy régebbi daemon nem küldi. Ha jön, minden elemének a sor által olvasott alakja kell legyen.
+    const good = { agentId: 'a1', agentType: 'general-purpose', description: 'd', runningTool: 'Grep', toolDetail: 'x', updatedAt: 5 }
+    const bare = { agentId: 'a2', updatedAt: 6 }
+    const message = JSON.stringify({
+      type: 'state',
+      payload: {
+        sessions: [
+          { sessionId: 'a', subagents: [good, bare] },
+          { sessionId: 'b', subagents: 'sok' },
+          { sessionId: 'c', subagents: [null] },
+          { sessionId: 'd', subagents: [{ ...good, agentId: 7 }] },
+          { sessionId: 'e', subagents: [{ ...good, updatedAt: 'most' }] },
+          { sessionId: 'f', subagents: [{ ...good, runningTool: 3 }] },
+          { sessionId: 'g', subagents: [{ ...good, toolDetail: {} }] },
+          { sessionId: 'h', subagents: [{ ...good, description: null }] },
+          { sessionId: 'i', subagents: [{ ...good, agentType: false }] },
+          { sessionId: 'j', subagents: [] },
+          { sessionId: 'k' },
+        ],
+        rateLimits: {},
+      },
+    })
+    expect(parseStateMessage(message)?.sessions).toEqual([
+      { sessionId: 'a', subagents: [good, bare] },
+      { sessionId: 'j', subagents: [] },
+      { sessionId: 'k' },
+    ])
+  })
 })
 
 describe('sanitizeState', () => {

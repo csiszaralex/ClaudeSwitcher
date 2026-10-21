@@ -2,7 +2,7 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, formatResetsIn, summarize } from './format.js'
+import { formatDuration, formatResetsIn, subagentTooltip, summarize } from './format.js'
 import { activeDecision, buildRows, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
@@ -141,7 +141,11 @@ export function App(): JSX.Element {
                   </span>
                 )}
               </span>
-              <span className="summary">
+              <span
+                className="summary"
+                // A függő döntés felülírja a sort; a tooltip addig is az összes aktív subagentet sorolja.
+                title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
+              >
                 {pending !== undefined
                   ? `${pending.toolName}: ${pending.summary}`
                   : row.session !== undefined

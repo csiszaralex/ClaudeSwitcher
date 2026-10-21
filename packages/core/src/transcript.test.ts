@@ -103,6 +103,55 @@ describe('readActivityFromLines', () => {
     })
     expect(readActivityFromLines([line]).runningTool).toBe('Bash')
   })
+
+  it('carries a short detail of what the running tool works on', () => {
+    expect(readActivityFromLines([assistantTool]).toolDetail).toBe('pnpm test')
+  })
+
+  it('takes the detail from the same block as the running tool', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'tool_use', name: 'Bash', input: { command: 'ls' } },
+          { type: 'tool_use', name: 'Grep', input: { pattern: 'createPanel' } },
+        ],
+      },
+    })
+    const a = readActivityFromLines([line])
+    expect(a.runningTool).toBe('Grep')
+    expect(a.toolDetail).toBe('createPanel')
+  })
+
+  it('drops a stale detail when the next tool has none', () => {
+    const bare = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'TodoWrite', input: {} }] } })
+    const a = readActivityFromLines([assistantTool, bare])
+    expect(a.runningTool).toBe('TodoWrite')
+    expect(a.toolDetail).toBeUndefined()
+  })
+
+  it('clears the detail together with the running tool', () => {
+    const result = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x' }] } })
+    expect(readActivityFromLines([assistantTool, result]).toolDetail).toBeUndefined()
+  })
+
+  it('reads a subagent transcript, skipping its non-message lines', () => {
+    // Konstruált sorok a mért subagent-alakban: agentId, isSidechain, és api-request zaj.
+    const sidechain = { agentId: 'a1', isSidechain: true, sessionId: 'sid-1' }
+    const lines = [
+      JSON.stringify({ ...sidechain, type: 'api-request', timestamp: '2026-10-21T10:00:00.000Z', request: {} }),
+      JSON.stringify({
+        ...sidechain,
+        type: 'assistant',
+        timestamp: '2026-10-21T10:00:01.000Z',
+        message: { content: [{ type: 'tool_use', name: 'Grep', input: { pattern: 'createPanel' } }] },
+      }),
+      JSON.stringify({ ...sidechain, type: 'api-request', timestamp: '2026-10-21T10:00:02.000Z' }),
+    ]
+    const a = readActivityFromLines(lines)
+    expect(a.runningTool).toBe('Grep')
+    expect(a.toolDetail).toBe('createPanel')
+  })
 })
 
 describe('findTranscriptPath', () => {

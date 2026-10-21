@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ProcessProbe } from '@claudeswitcher/core'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { scanSessions } from './scanner.js'
 
 // A ProcessProbe-nak `imageName`-je is van a Task 3 óta: a lock fájlok nem
@@ -88,5 +88,115 @@ describe('scanSessions', () => {
     const { sessions, activities } = await scanSessions(dir, aliveProbe)
     expect(sessions).toHaveLength(1)
     expect(activities.get('sid-100')).toEqual({})
+  })
+})
+
+// Konstruált subagent-fájlok a mért alakban (Claude Code 2.1.30x, 2026-10-21) — nem valódi tartalom.
+function subagentLine(tool: string, input: Record<string, unknown>): string {
+  return JSON.stringify({
+    type: 'assistant',
+    agentId: 'x',
+    isSidechain: true,
+    sessionId: 'sid-100',
+    timestamp: '2026-10-21T10:00:00.000Z',
+    message: { content: [{ type: 'tool_use', name: tool, input }] },
+  })
+}
+
+async function addSubagent(
+  dir: string,
+  agentId: string,
+  opts: { meta?: string | Record<string, unknown> | undefined; lines?: string[]; ageMs?: number },
+): Promise<void> {
+  const sub = path.join(dir, 'projects', 'encoded-alpha', 'sid-100', 'subagents')
+  await mkdir(sub, { recursive: true })
+  const jsonl = path.join(sub, `agent-${agentId}.jsonl`)
+  const noise = JSON.stringify({ type: 'api-request', agentId, isSidechain: true })
+  await writeFile(jsonl, [noise, ...(opts.lines ?? [])].join('\n') + '\n')
+  if (opts.meta !== undefined) {
+    const meta = typeof opts.meta === 'string' ? opts.meta : JSON.stringify(opts.meta)
+    await writeFile(path.join(sub, `agent-${agentId}.meta.json`), meta)
+  }
+  const at = (Date.now() - (opts.ageMs ?? 0)) / 1000
+  await utimes(jsonl, at, at)
+}
+
+const runningMeta = { agentType: 'general-purpose', description: 'Teszt hullám', toolUseId: 'toolu_c1', spawnDepth: 1 }
+
+describe('scanSessions — subagents', () => {
+  it('reports an active subagent with its running tool and detail', async () => {
+    const dir = await fixture()
+    await addSubagent(dir, 'a1', { meta: runningMeta, lines: [subagentLine('Grep', { pattern: 'createPanel' })] })
+
+    const { subagents } = await scanSessions(dir, aliveProbe)
+    const list = subagents.get('sid-100') ?? []
+    expect(list).toHaveLength(1)
+    expect(list[0]).toMatchObject({
+      agentId: 'a1',
+      agentType: 'general-purpose',
+      description: 'Teszt hullám',
+      runningTool: 'Grep',
+      toolDetail: 'createPanel',
+    })
+    expect(Math.abs((list[0]?.updatedAt ?? 0) - Date.now())).toBeLessThan(60_000)
+  })
+
+  it('leaves out a finished subagent', async () => {
+    const dir = await fixture()
+    await addSubagent(dir, 'a1', { meta: { ...runningMeta, finished: true }, lines: [subagentLine('Bash', { command: 'x' })] })
+    expect((await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []).toEqual([])
+  })
+
+  it('leaves out a stale subagent that never wrote finished (crashed)', async () => {
+    const dir = await fixture()
+    await addSubagent(dir, 'a1', { meta: runningMeta, lines: [subagentLine('Bash', { command: 'x' })], ageMs: 6 * 60_000 })
+    expect((await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []).toEqual([])
+  })
+
+  it('looks at no more than the three most recently written subagents, newest first', async () => {
+    const dir = await fixture()
+    for (const [i, id] of ['a0', 'a1', 'a2', 'a3', 'a4'].entries()) {
+      await addSubagent(dir, id, { meta: runningMeta, lines: [subagentLine('Bash', { command: id })], ageMs: i * 10_000 })
+    }
+    const list = (await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []
+    expect(list.map((s) => s.agentId)).toEqual(['a0', 'a1', 'a2'])
+  })
+
+  it('treats a missing subagents directory as normal, without logging', async () => {
+    const dir = await fixture()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { subagents } = await scanSessions(dir, aliveProbe)
+      expect(subagents.get('sid-100') ?? []).toEqual([])
+      expect(errorSpy).not.toHaveBeenCalled()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('keeps a subagent whose meta is missing or broken, without its labels, and logs the broken one once', async () => {
+    const dir = await fixture()
+    await addSubagent(dir, 'nometa', { lines: [subagentLine('Read', { file_path: 'P:\\a\\b.ts' })] })
+    await addSubagent(dir, 'broken', { meta: '{ not json', lines: [subagentLine('Bash', { command: 'ls' })], ageMs: 1_000 })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const first = (await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []
+      await scanSessions(dir, aliveProbe)
+      expect(first.map((s) => [s.agentId, s.runningTool, s.agentType])).toEqual([
+        ['nometa', 'Read', undefined],
+        ['broken', 'Bash', undefined],
+      ])
+      expect(errorSpy).toHaveBeenCalledOnce()
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
+
+  it('skips a directory that carries a subagent transcript name', async () => {
+    const dir = await fixture()
+    await addSubagent(dir, 'a1', { meta: runningMeta, lines: [subagentLine('Bash', { command: 'x' })] })
+    await mkdir(path.join(dir, 'projects', 'encoded-alpha', 'sid-100', 'subagents', 'agent-dir.jsonl'))
+    const list = (await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []
+    expect(list.map((s) => s.agentId)).toEqual(['a1'])
   })
 })
