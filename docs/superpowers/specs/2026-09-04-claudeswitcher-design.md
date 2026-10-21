@@ -77,6 +77,12 @@ pid önmagában nem elég** — a `~/.claude/ide/` mappában jelenleg 20 lock f�
 van, és a 8108-as pid két különböző workspace-szel is szerepel (pid-újra-
 hasznosítás). Liveness = pid létezik **és** a process creation time egyezik.
 
+**Claude Code 2.1.296-tól** (mérve, 2026-10-20) a fájl állapotot is hordoz: `status`
+(`idle` | `busy` | `waiting`), `waitingFor` (pl. `"permission prompt"`) és `statusUpdatedAt`
+(ms). Az app ezt csak megjelenítésre használja: újraindulás után így látszik várakozónak egy
+session, amelynek a kérése még az app indulása előtt érkezett (döntés nincs hozzá — azt csak
+a VSCode hozhatja); a `busy` dolgozónak számít.
+
 ### 3.2 VSCode-ablak leképezés (nem dokumentált)
 
 `~/.claude/ide/<port>.lock`:
@@ -354,11 +360,11 @@ is vár. ~~Limitsávok~~ — csak ha van adat (§3.5).
 
 ### `apps/vscode-ext` (M3)
 
-Csatlakozik a hubhoz, bejelenti `{workspaceFolders, pid}`. Két képessége van:
-tabfókusz (`claude-vscode.editor.openLast` + `claude-vscode.focus`) és
-a döntési felület megjelenítése a saját ablakában. Mivel a natív prompt a VSCode-ban
-amúgy is látszik, ennek értéke a projekt/gép szintű szabály és a kérdés-válasz egységes
-felülete, nem a puszta jóváhagyás.
+Csatlakozik a hubhoz, bejelenti `{workspaceFolders, pid}`. Egyetlen képessége a
+tabfókusz (jelölt: `claude-vscode.editor.openLast` + `claude-vscode.focus`) — hogy ez egy
+adott Claude Code tabot elő tud-e hozni, azt az M3 első lépése, egy mérés dönti el (§11).
+Döntési felület a VSCode ablakában **nincs** (döntés 2026-10-20): a natív prompt ott amúgy
+is látszik, egy második felület csak duplikáció és hibaforrás.
 
 ## 8. Hibakezelés
 
@@ -434,16 +440,25 @@ Code-hibával), átírt szabály projekt- és gépszinten ✅.
 Limitek: a bővítményben nem működik (§3.5). A session-felderítés élesben stabilnak bizonyult
 (14 session, egy közös VSCode-pid mellett is helyes ablakválasztással).
 
-**M2 — approve.** `PermissionRequest` + `PreToolUse` + `PostToolUse` hook,
+**M2 — approve. ✅ Kész (2026-10-20).** Elkészült: engedélyezés, tiltás indoklással,
+projekt- és gépszintű szabály, kérdés megválaszolása, terv elutasítása; az A–M elfogadási teszt
+lefutott. Utójavítások: állapotpöttyök, Remote Control-pötty, alul rögzített gombsor, a
+legrégebbi várakozó kijelölése (opcionális automatikus elrejtéssel), a teljes ág review-jának
+javításai, újraindulás után a registry-alapú várakozás (§3.1). A fájlírásnál (Write, Edit,
+MultiEdit, NotebookEdit) a panel előnézetet mutat: új tartalom, illetve `-`/`+` sorok
+(a §5 „diff-összegzése"), méretkorláttal.
+
+Az eredeti terv: `PermissionRequest` + `PreToolUse` + `PostToolUse` hook,
 `DecisionModel`, `DecisionBroker`, az overlay döntési felülete (§5 táblázata): engedélyezés,
 tiltás indoklással, projekt- és gépszintű szabály szerkeszthető előnézettel, kérdés
 megválaszolása, terv elutasítása visszajelzéssel. Az első lépés a §10 nyitott pontjainak
 mérése. Az M1 telepítéséből kikerül a soha nem tüzelő `SessionStart` HTTP-hook (az
 eltávolítás a régi bejegyzést továbbra is felismeri és kiveszi).
 
-**M3 — companion extension.** Tabfókusz és a döntési felület a VSCode ablakban is.
-Mellette: a subagent-átiratok olvasása (`subagents/agent-*.jsonl`), hogy az overlay a futó
-subagent munkáját is mutassa.
+**M3 — companion extension.** Döntés (2026-10-20): mérő spike-kal indul — előre tud-e hozni
+a saját bővítményünk egy adott Claude Code tabot. A VSCode-on belüli döntési felület kikerül:
+a natív promptot duplikálná. A subagent-átiratok olvasása (`subagents/agent-*.jsonl`, hogy az
+overlay a futó subagent munkáját is mutassa) nem igényli a bővítményt, külön is jöhet.
 
 Az M1 halasztott tételei (a daemon blokkoló PowerShell-hívása, CSP-szűkítés stb.) a
 `.superpowers/sdd/…/progress.md` naplóban vannak; az M2 tervezésekor kell eldönteni, mi

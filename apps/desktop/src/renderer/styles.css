@@ -96,6 +96,12 @@ body {
   word-break: break-word;
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
 }
+/* A fájlírás előnézete (edit-preview.ts): `-` piros, `+` zöld, a változatlan környezet halvány. */
+.edit-preview .diff-line { display: block; min-height: 1.4em; }
+.edit-preview .diff-add { color: #8fbf7a; background: #8fbf7a1a; }
+.edit-preview .diff-remove { color: #e0796b; background: #e0796b1a; }
+.edit-preview .diff-same { color: #a8a6a2; }
+.edit-preview p { margin: 0 0 8px; }
 .decision-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 .decision-error { margin: 6px 0 0; color: #e0796b; }
 .decision button {

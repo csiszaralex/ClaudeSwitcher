@@ -12,7 +12,8 @@ import {
 import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
-import { DETAILS_LIMIT, formatToolInput, showsDetails } from './tool-details.js'
+import { LINE_MARK, panelContent } from './edit-preview.js'
+import { DETAILS_LIMIT } from './tool-details.js'
 
 const KIND_LABEL = {
   tool: 'Engedélyt kér',
@@ -228,11 +229,14 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
     }
   }
 
-  // Az App másodpercenként újrarenderel (az órák miatt); egy nagy szkript formázása ne fusson
-  // le minden tikkre.
-  const details = useMemo(
-    () => (showsDetails(decision) ? formatToolInput(decision.toolInput) : undefined),
-    [decision],
+  // Az App másodpercenként újrarenderel (az órák miatt); egy nagy szkript formázása vagy egy
+  // fájl soronkénti összevetése ne fusson le minden tikkre.
+  const { preview, details } = useMemo(() => panelContent(decision), [decision])
+  const limitNote = (
+    <p className="muted">
+      Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik — a teljes
+      szöveg a VSCode-ban.
+    </p>
   )
 
   const agent = decision.agentType === undefined ? undefined : `subagent · ${decision.agentType}`
@@ -252,6 +256,34 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
       <div className="decision-scroll">
         <pre className="decision-summary">{decision.summary}</pre>
         {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
+        {preview !== undefined && (
+          // Alapból nyitva: ez maga a jóváhagyandó tartalom. Natív <details>, hogy összecsukható legyen.
+          <details className="decision-details edit-preview" open>
+            <summary>Előnézet</summary>
+            {preview.blocks.map((block) => (
+              <div key={block.title}>
+                <div className="muted">
+                  {block.title}
+                  {block.notes.length > 0 && ` · ${block.notes.join(' · ')}`}
+                </div>
+                {block.lines.length > 0 && (
+                  <pre>
+                    {block.lines.map((line, index) => (
+                      // A <pre> tartalma csak szövegszintű elem lehet: blokk-span, nem <div>.
+                      <span key={index} className={`diff-line diff-${line.sign}`}>
+                        {LINE_MARK[line.sign]} {line.text}
+                      </span>
+                    ))}
+                  </pre>
+                )}
+                {block.hiddenLines > 0 && (
+                  <p className="muted">… {block.hiddenLines.toLocaleString('hu-HU')} további sor</p>
+                )}
+              </div>
+            ))}
+            {preview.truncated && limitNote}
+          </details>
+        )}
         {details !== undefined && details.blocks.length > 0 && (
           // Natív <details>: billentyűzetről (Tab, Szóköz) saját kód nélkül nyitható.
           <details className="decision-details">
@@ -262,12 +294,7 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
                 <pre>{block.text}</pre>
               </div>
             ))}
-            {details.truncated && (
-              <p className="muted">
-                Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik — a teljes
-                szöveg a VSCode-ban.
-              </p>
-            )}
+            {details.truncated && limitNote}
           </details>
         )}
       </div>
