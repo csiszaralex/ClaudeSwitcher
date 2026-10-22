@@ -8,8 +8,8 @@ import { scanSessions } from './scanner.js'
 // A ProcessProbe-nak `imageName`-je is van a Task 3 óta: a lock fájlok nem
 // tárolnak `procStart`-ot, így csak az image név árulja el, ha egy elárvult lock
 // pidjét időközben egy másik processz kapta meg.
-const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code' }
-const deadProbe: ProcessProbe = { isAlive: () => false, imageName: () => undefined }
+const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code', refresh: () => Promise.resolve() }
+const deadProbe: ProcessProbe = { isAlive: () => false, imageName: () => undefined, refresh: () => Promise.resolve() }
 
 async function fixture(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'cs-scan-'))
@@ -52,6 +52,22 @@ describe('scanSessions', () => {
     expect(sessions[0]!.record.sessionId).toBe('sid-100')
     expect(sessions[0]!.window?.pid).toBe(900)
     expect(activities.get('sid-100')?.runningTool).toBe('Bash')
+  })
+
+  it('refreshes the probe once, before resolving sessions', async () => {
+    // A probe szinkron válaszai a legutóbbi pillanatképből jönnek; a szkennelésnek
+    // előbb frissítenie kell, különben egy már nem élő listából dolgozna.
+    const dir = await fixture()
+    let fresh = false
+    const refresh = vi.fn(() => {
+      fresh = true
+      return Promise.resolve()
+    })
+    const probe: ProcessProbe = { isAlive: () => fresh, imageName: () => (fresh ? 'Code' : undefined), refresh }
+    const { sessions } = await scanSessions(dir, probe)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]!.window?.pid).toBe(900)
   })
 
   it('returns nothing when no process is alive', async () => {

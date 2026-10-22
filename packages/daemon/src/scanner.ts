@@ -176,7 +176,9 @@ export async function scanSessions(
   /** Csak a legalább egy aktív subagenttel bíró sessionök szerepelnek benne. */
   subagents: Map<string, SubagentView[]>
 }> {
-  const [records, locks] = await Promise.all([readRecords(claudeDir), readLocks(claudeDir)])
+  // A probe szinkron válaszai a legutóbbi pillanatképből jönnek, ezért előbb frissítünk —
+  // a fájlolvasással párhuzamosan. A frissítés nem blokkol, és soha nem utasít el.
+  const [records, locks] = await Promise.all([readRecords(claudeDir), readLocks(claudeDir), probe.refresh()])
   const sessions = resolveLiveSessions(records, locks, probe)
 
   const entries = await Promise.all(

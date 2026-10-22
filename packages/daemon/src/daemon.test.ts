@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { startDaemon, type Daemon } from './daemon.js'
 
-const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code' }
+const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code', refresh: () => Promise.resolve() }
 let running: Daemon | undefined
 
 afterEach(async () => {

@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { createWin32ProcessProbe, resolveLiveSessions, type ProcessProbe } from './liveness.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  createSnapshotProbe,
+  createWin32ProcessProbe,
+  parsePowerShellSnapshot,
+  resolveLiveSessions,
+  type ProcessProbe,
+  type ProcessSnapshot,
+} from './liveness.js'
 import type { IdeLock, SessionRecord } from './types.js'
 
 function session(over: Partial<SessionRecord> = {}): SessionRecord {
@@ -33,6 +40,7 @@ function probeFor(processes: Record<number, FakeProcess>): ProcessProbe {
       return procStart === undefined || proc.procStart === procStart
     },
     imageName: (pid) => processes[pid]?.image,
+    refresh: () => Promise.resolve(),
   }
 }
 
@@ -129,22 +137,199 @@ describe('resolveLiveSessions', () => {
   })
 })
 
+interface FakeEntry {
+  image: string
+  /** Hiányzik: a pid listázható, de az indulási ideje nem kérdezhető le (pl. access denied). */
+  start?: string
+}
+
+function fakeSnapshot(entries: Record<number, FakeEntry>): ProcessSnapshot {
+  const map = new Map(Object.entries(entries).map(([pid, entry]) => [Number(pid), entry]))
+  return {
+    size: map.size,
+    imageName: (pid) => map.get(pid)?.image,
+    startFileTime: (pid) => map.get(pid)?.start,
+  }
+}
+
+const CLAUDE = { 100: { image: 'claude', start: 'ps-100' } }
+
+/** Kézzel feloldható ígéret, hogy egy futó refresh-t meg lehessen tartani. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+describe('createSnapshotProbe', () => {
+  let clock = 0
+  const now = (): number => clock
+
+  afterEach(() => {
+    clock = 0
+    vi.restoreAllMocks()
+  })
+
+  it('answers from an empty snapshot before the first refresh, without taking one', () => {
+    const take = vi.fn(() => Promise.resolve(fakeSnapshot(CLAUDE)))
+    const probe = createSnapshotProbe(take, { now })
+    expect(probe.isAlive(100)).toBe(false)
+    expect(probe.imageName(100)).toBeUndefined()
+    // A szinkron válaszok soha nem indítanak lekérdezést: ez a fagyás oka volt.
+    expect(take).not.toHaveBeenCalled()
+  })
+
+  it('answers from the latest snapshot after a refresh', async () => {
+    const probe = createSnapshotProbe(() => Promise.resolve(fakeSnapshot(CLAUDE)), { now })
+    await probe.refresh()
+    expect(probe.isAlive(100, 'ps-100')).toBe(true)
+    expect(probe.isAlive(100, 'someone-else')).toBe(false)
+    expect(probe.isAlive(100)).toBe(true)
+    expect(probe.imageName(100)).toBe('claude')
+    expect(probe.isAlive(200)).toBe(false)
+  })
+
+  it('treats a listed pid without a readable start time as unverifiable', async () => {
+    const probe = createSnapshotProbe(() => Promise.resolve(fakeSnapshot({ 300: { image: 'svchost' } })), { now })
+    await probe.refresh()
+    // procStart-tal nem tudjuk igazolni, hogy ugyanaz a processz: halott.
+    expect(probe.isAlive(300, 'ps-300')).toBe(false)
+    // procStart nélkül a pid listázva van, tehát él.
+    expect(probe.isAlive(300)).toBe(true)
+    expect(probe.imageName(300)).toBe('svchost')
+  })
+
+  it('shares one in-flight refresh between concurrent callers', async () => {
+    const pending = deferred<ProcessSnapshot>()
+    const take = vi.fn(() => pending.promise)
+    const probe = createSnapshotProbe(take, { now })
+    const first = probe.refresh()
+    const second = probe.refresh()
+    expect(take).toHaveBeenCalledTimes(1)
+    pending.resolve(fakeSnapshot(CLAUDE))
+    await Promise.all([first, second])
+    expect(probe.isAlive(100, 'ps-100')).toBe(true)
+  })
+
+  it('does not take a new snapshot within the TTL', async () => {
+    const take = vi.fn(() => Promise.resolve(fakeSnapshot(CLAUDE)))
+    const probe = createSnapshotProbe(take, { now, ttlMs: 2000 })
+    await probe.refresh()
+    clock = 1999
+    await probe.refresh()
+    expect(take).toHaveBeenCalledTimes(1)
+    clock = 2000
+    await probe.refresh()
+    expect(take).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries every 250 ms until the first snapshot succeeds', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const take = vi.fn(() => Promise.reject(new Error('boom')))
+    const probe = createSnapshotProbe(take, { now, ttlMs: 2000 })
+    await probe.refresh()
+    clock = 249
+    await probe.refresh()
+    expect(take).toHaveBeenCalledTimes(1)
+    clock = 250
+    await probe.refresh()
+    expect(take).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the previous snapshot when a refresh fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const take = vi
+      .fn<() => Promise<ProcessSnapshot>>()
+      .mockResolvedValueOnce(fakeSnapshot(CLAUDE))
+      .mockRejectedValueOnce(new Error('ETIMEDOUT'))
+    const probe = createSnapshotProbe(take, { now, ttlMs: 2000 })
+    await probe.refresh()
+    clock = 2000
+    await probe.refresh()
+    expect(take).toHaveBeenCalledTimes(2)
+    expect(probe.isAlive(100, 'ps-100')).toBe(true)
+  })
+
+  it('keeps the previous snapshot when a refresh returns an empty one', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const take = vi
+      .fn<() => Promise<ProcessSnapshot>>()
+      .mockResolvedValueOnce(fakeSnapshot(CLAUDE))
+      .mockResolvedValueOnce(fakeSnapshot({}))
+    const probe = createSnapshotProbe(take, { now, ttlMs: 2000 })
+    await probe.refresh()
+    clock = 2000
+    await probe.refresh()
+    expect(probe.isAlive(100, 'ps-100')).toBe(true)
+  })
+
+  it('logs a failure streak once, and a new streak again', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const take = vi
+      .fn<() => Promise<ProcessSnapshot>>()
+      .mockRejectedValueOnce(new Error('one'))
+      .mockRejectedValueOnce(new Error('two'))
+      .mockRejectedValueOnce(new Error('three'))
+      .mockResolvedValueOnce(fakeSnapshot(CLAUDE))
+      .mockRejectedValueOnce(new Error('four'))
+    const probe = createSnapshotProbe(take, { now, ttlMs: 2000 })
+    for (let i = 0; i < 5; i++) {
+      clock = i * 2000
+      await probe.refresh()
+    }
+    expect(take).toHaveBeenCalledTimes(5)
+    expect(error).toHaveBeenCalledTimes(2)
+  })
+
+  it('never rejects, even when taking the snapshot throws synchronously', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const probe = createSnapshotProbe(() => {
+      throw new Error('sync')
+    }, { now })
+    await expect(probe.refresh()).resolves.toBeUndefined()
+  })
+})
+
+describe('parsePowerShellSnapshot', () => {
+  it('reads pid, start time and name, skipping malformed lines', () => {
+    const snapshot = parsePowerShellSnapshot(
+      '100\t133000000000000000\tclaude\r\nnot a line\r\nabc\t1\tx\r\n900\t133000000000000001\tCode - Insiders\r\n',
+    )
+    expect(snapshot.size).toBe(2)
+    expect(snapshot.imageName(100)).toBe('claude')
+    expect(snapshot.startFileTime(100)).toBe('133000000000000000')
+    expect(snapshot.imageName(900)).toBe('Code - Insiders')
+    expect(snapshot.imageName(200)).toBeUndefined()
+  })
+})
+
 describe('createWin32ProcessProbe', () => {
   const onWindows = process.platform === 'win32'
 
-  it.skipIf(!onWindows)('reports the current process as alive', () => {
-    expect(createWin32ProcessProbe().isAlive(process.pid)).toBe(true)
-  })
+  it.skipIf(!onWindows)('reports the current process as alive after a refresh', async () => {
+    const probe = createWin32ProcessProbe()
+    await probe.refresh()
+    expect(probe.isAlive(process.pid)).toBe(true)
+  }, 20_000)
 
-  it.skipIf(!onWindows)('reports an implausible pid as dead', () => {
-    expect(createWin32ProcessProbe().isAlive(999_999_998)).toBe(false)
-  })
+  it.skipIf(!onWindows)('reports an implausible pid as dead', async () => {
+    const probe = createWin32ProcessProbe()
+    await probe.refresh()
+    expect(probe.isAlive(999_999_998)).toBe(false)
+  }, 20_000)
 
-  it.skipIf(!onWindows)('returns an image name for the current process', () => {
-    expect(createWin32ProcessProbe().imageName(process.pid)).toMatch(/\S/)
-  })
+  it.skipIf(!onWindows)('returns an image name for the current process', async () => {
+    const probe = createWin32ProcessProbe()
+    await probe.refresh()
+    expect(probe.imageName(process.pid)).toMatch(/\S/)
+  }, 20_000)
 
-  it.skipIf(!onWindows)('rejects the current pid when the start time disagrees', () => {
-    expect(createWin32ProcessProbe().isAlive(process.pid, 'not-a-filetime')).toBe(false)
-  })
+  it.skipIf(!onWindows)('rejects the current pid when the start time disagrees', async () => {
+    const probe = createWin32ProcessProbe()
+    await probe.refresh()
+    expect(probe.isAlive(process.pid, 'not-a-filetime')).toBe(false)
+  }, 20_000)
 })

@@ -7,6 +7,7 @@ import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } fr
 import { configPath, loadConfig, updateConfig } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { registerHotkey } from './hotkey.js'
+import { createNativeProcessProbe } from './process-probe.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
@@ -82,7 +83,20 @@ async function openTabFocusUri(uri: string): Promise<void> {
   }
 }
 
+/**
+ * Egyszerre egy példány. Egy második példány a fix porton elbukna (hibadialógussal), és a
+ * közös `userData` miatt a Chromium cache-t is összeakasztaná („Unable to move the cache:
+ * Access is denied"). Ezért a második példány csendben kilép, még a port lefoglalása és
+ * bármilyen ablak előtt; az első a `second-instance` eseményre megmutatja az overlayt.
+ */
+const isPrimaryInstance = app.requestSingleInstanceLock()
+if (!isPrimaryInstance) {
+  console.log('[claudeswitcher] another instance is already running; quitting')
+  app.quit()
+}
+
 app.whenReady().then(async () => {
+  if (!isPrimaryInstance) return
   // A token tartós, a port rögzített: a telepített hookok és a statusLine ezeket kapják
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
@@ -96,9 +110,11 @@ app.whenReady().then(async () => {
   // Egy helyi, nem-null konstans: a kezelők ezt fogják be, így nincs szükség `!`-re, és a típus
   // garantálja, hogy indulás után minden kezelő ugyanazt a futó daemont látja. A modulszintű
   // `daemon` csak a `before-quit`-nek kell.
+  // A natív probe az elsődleges; a PowerShell csak tartalék, ha a koffi nem tölthető be.
+  const nativeProbe = createNativeProcessProbe()
   const running = await startDaemon({
     claudeDir: resolveClaudeDir(),
-    probe: createWin32ProcessProbe(),
+    probe: nativeProbe ?? createWin32ProcessProbe(),
     port: DAEMON_PORT,
     token,
   })
@@ -146,7 +162,8 @@ app.whenReady().then(async () => {
   console.log(
     `[claudeswitcher] daemon on 127.0.0.1:${running.port}, ` +
       `${running.state().sessions.length} session(s) discovered, ` +
-      `fast focus ${isFastFocusAvailable() ? 'available' : 'UNAVAILABLE'}`,
+      `fast focus ${isFastFocusAvailable() ? 'available' : 'UNAVAILABLE'}, ` +
+      `process probe ${nativeProbe === undefined ? 'PowerShell (fallback)' : 'native'}`,
   )
 
   overlay = createOverlay()
@@ -257,6 +274,11 @@ app.whenReady().then(async () => {
     if (overlay?.isVisible() === true) overlay.hide()
     else showOverlay()
   }
+
+  // Egy második indítás (pl. a parancsikonra kattintva) a futó példányt hozza elő.
+  app.on('second-instance', () => {
+    showOverlay()
+  })
 
   // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
   // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
