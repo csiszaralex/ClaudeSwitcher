@@ -26,6 +26,95 @@ describe('editPreview — Write', () => {
   })
 })
 
+describe('editPreview — Write of a notebook', () => {
+  // A mért alak: így írta a Claude Code az `m3-nb.ipynb`-t a cs-spike live teszten.
+  const measured =
+    '{"cells":[{"cell_type":"code","execution_count":null,"metadata":{},"outputs":[],"source":["print(\\"hello\\")"]}],' +
+    '"metadata":{"kernelspec":{"display_name":"Python 3","language":"python","name":"python3"},' +
+    '"language_info":{"name":"python"}},"nbformat":4,"nbformat_minor":5}'
+
+  it('shows the measured notebook as its cells, not as nbformat JSON', () => {
+    expect(editPreview('Write', { file_path: 'p:\\cs-spike\\m3-nb.ipynb', content: measured })).toEqual({
+      blocks: [{ title: '1. kódcella', notes: [], lines: [same('print("hello")')], hiddenLines: 0 }],
+      truncated: false,
+    })
+  })
+
+  it('numbers the cells, names them by type, and joins an array source as-is', () => {
+    const content = JSON.stringify({
+      cells: [
+        { cell_type: 'markdown', metadata: {}, source: ['# Cím\n', 'szöveg'] },
+        { cell_type: 'code', metadata: {}, outputs: [{ output_type: 'stream', text: ['kimenet'] }], source: 'a = 1\nb = 2\n' },
+        { cell_type: 'raw', metadata: {}, source: [] },
+      ],
+      metadata: {},
+      nbformat: 4,
+      nbformat_minor: 5,
+    })
+    expect(editPreview('Write', { file_path: 'N.IPYNB', content })).toEqual({
+      blocks: [
+        { title: '1. markdown-cella', notes: [], lines: [same('# Cím'), same('szöveg')], hiddenLines: 0 },
+        { title: '2. kódcella', notes: [], lines: [same('a = 1'), same('b = 2')], hiddenLines: 0 },
+        { title: '3. nyers cella', notes: [], lines: [], hiddenLines: 0 },
+      ],
+      truncated: false,
+    })
+  })
+
+  it('shows an unknown cell type by its name', () => {
+    const content = JSON.stringify({ cells: [{ cell_type: 'widget', source: 'x' }] })
+    expect(editPreview('Write', { file_path: 'n.ipynb', content })?.blocks[0]?.title).toBe('1. widget-cella')
+  })
+
+  it('says so when the notebook has no cells', () => {
+    expect(editPreview('Write', { file_path: 'n.ipynb', content: '{"cells":[]}' })).toEqual({
+      blocks: [{ title: 'új jegyzetfüzet', notes: ['nincs cellája'], lines: [], hiddenLines: 0 }],
+      truncated: false,
+    })
+  })
+
+  it('falls back to the raw text for anything that is not nbformat, and never throws', () => {
+    const raw = (content: string): unknown => editPreview('Write', { file_path: 'n.ipynb', content })?.blocks
+    const asText = (content: string): unknown => editPreview('Write', { file_path: 'n.txt', content })?.blocks
+    for (const content of [
+      '',
+      'not json',
+      '{"cells":',
+      'null',
+      '[1,2]',
+      '"cells"',
+      '{"cells":{}}',
+      '{"metadata":{}}',
+      '{"cells":[1]}',
+      '{"cells":[{"cell_type":"code"}]}',
+      '{"cells":[{"cell_type":"code","source":[1]}]}',
+      '{"cells":[{"cell_type":1,"source":"x"}]}',
+      '{"cells":[{"source":"x"}]}',
+    ]) {
+      expect(raw(content)).toEqual(asText(content))
+    }
+  })
+
+  it('treats only a .ipynb path as a notebook', () => {
+    for (const file_path of ['n.json', 'n.ipynb.bak', 'ipynb']) {
+      expect(editPreview('Write', { file_path, content: measured })?.blocks[0]?.title).toBe('új tartalom')
+    }
+    // Útvonal nélkül sem jegyzetfüzet — a Write előnézete eddig sem kérte az útvonalat.
+    expect(editPreview('Write', { content: measured })?.blocks[0]?.title).toBe('új tartalom')
+  })
+
+  it('applies the same caps to the cells', () => {
+    const source = Array.from({ length: PREVIEW_LINES + 3 }, (_, i) => `l${i}`).join('\n')
+    const content = JSON.stringify({ cells: [{ cell_type: 'code', source }, { cell_type: 'code', source: 'tail' }] })
+    const preview = editPreview('Write', { file_path: 'n.ipynb', content }, 12)
+    expect(preview?.truncated).toBe(true)
+    expect(preview?.blocks).toHaveLength(1)
+    const big = editPreview('Write', { file_path: 'n.ipynb', content })?.blocks[0]
+    expect(big?.lines).toHaveLength(PREVIEW_LINES)
+    expect(big?.hiddenLines).toBe(3)
+  })
+})
+
 describe('editPreview — Edit', () => {
   it('shows the changed lines as - and +, the shared ones around them as context', () => {
     const preview = editPreview('Edit', {

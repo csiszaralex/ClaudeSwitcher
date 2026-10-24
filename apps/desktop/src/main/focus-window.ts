@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process'
 import { createRequire } from 'node:module'
-import type { SessionView } from '@claudeswitcher/core'
+import type { PermissionRequestInfo, SessionView } from '@claudeswitcher/core'
 
 // Nem `require`-nek nevezzük: a CJS bundle modulburkolójában a `require` már
 // paraméterként létezik, és egy azonos nevű `const` ütközne vele.
@@ -282,10 +282,20 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * - a session a VSCode bővítményben fut: egy CLI vagy terminál sessionre a bővítmény egy új
  *   tabot nyitna;
  * - az azonosító UUID: ellenőrizetlen szöveg nem kerül egy `openExternal`-lel megnyitott URL-be;
- * - a beállítás be van kapcsolva.
+ * - a beállítás be van kapcsolva;
+ * - a sessionnek nincs függő fájlírás-kérése (`edit` fajta, akár tartott, akár visszaengedett).
+ *   Ilyenkor a VSCode a javasolt módosítást egy osztott diff tabon mutatja, és a natív kérdés
+ *   is nyitva van; a URI a chat tabra váltana el a diffről, amit a felhasználó épp meg akar
+ *   nézni (live teszt, 2026-10-22). Ekkor csak az ablak jön elő.
  */
-export function tabFocusUri(view: SessionView, outcome: FocusOutcome, enabled: boolean): string | undefined {
+export function tabFocusUri(
+  view: SessionView,
+  outcome: FocusOutcome,
+  enabled: boolean,
+  decisions: readonly Pick<PermissionRequestInfo, 'sessionId' | 'kind'>[],
+): string | undefined {
   if (!enabled) return undefined
+  if (decisions.some((d) => d.sessionId === view.sessionId && d.kind === 'edit')) return undefined
   if (outcome !== 'pid' && outcome !== 'workspace') return undefined
   if (view.windowPid === undefined && view.workspaceFolder === undefined) return undefined
   if (view.entrypoint !== VSCODE_ENTRYPOINT) return undefined

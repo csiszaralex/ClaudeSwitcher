@@ -104,13 +104,60 @@ function notebookBlock(input: Record<string, unknown>): PreviewBlock | undefined
   return { title: 'új cellatartalom', notes, lines: contextLines(source), hiddenLines: 0 }
 }
 
+/** A cellatípusok magyar neve a blokk címében; ismeretlen típus `<típus>-cella` lesz. */
+const CELL_TITLE: Record<string, string> = { code: 'kódcella', markdown: 'markdown-cella', raw: 'nyers cella' }
+
+/** Egy nbformat cella `source`-a: szöveg, vagy szövegek tömbje, amit úgy, ahogy van, összefűzünk. */
+function cellSource(source: unknown): string | undefined {
+  if (typeof source === 'string') return source
+  if (!Array.isArray(source)) return undefined
+  let text = ''
+  for (const part of source) {
+    if (typeof part !== 'string') return undefined
+    text += part
+  }
+  return text
+}
+
+/**
+ * Egy `.ipynb`-be írt tartalom cellánként, ahogy a VSCode is mutatja — vagy `undefined`, ha a
+ * tartalom nem nbformat (nem JSON, nincs `cells` tömbje, vagy egy cellája olvashatatlan). A
+ * kimenetek és a metaadatok nem látszanak: a jóváhagyandó tartalom a cellák forrása.
+ */
+function notebookCells(path: unknown, content: string): PreviewBlock[] | undefined {
+  if (typeof path !== 'string' || !path.toLowerCase().endsWith('.ipynb')) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    return undefined
+  }
+  if (!isPlainObject(parsed) || !Array.isArray(parsed['cells'])) return undefined
+  const cells: unknown[] = parsed['cells']
+  if (cells.length === 0) return [{ title: 'új jegyzetfüzet', notes: ['nincs cellája'], lines: [], hiddenLines: 0 }]
+  const blocks: PreviewBlock[] = []
+  for (const [index, cell] of cells.entries()) {
+    // Ahogy a MultiEditnél: egy cella kihagyása a jóváhagyandó tartalom egy részét rejtené el.
+    if (!isPlainObject(cell)) return undefined
+    const { cell_type: cellType } = cell
+    const source = cellSource(cell['source'])
+    if (typeof cellType !== 'string' || source === undefined) return undefined
+    const title = `${index + 1}. ${CELL_TITLE[cellType] ?? `${cellType}-cella`}`
+    blocks.push({ title, notes: [], lines: contextLines(source), hiddenLines: 0 })
+  }
+  return blocks
+}
+
 /** A blokkok a korlát nélkül; `undefined`, ha az alak ismeretlen. */
 function rawBlocks(toolName: string, input: Record<string, unknown>): PreviewBlock[] | undefined {
   switch (toolName) {
     case 'Write': {
       // A hook nem mondja meg, új-e a fájl vagy felülíródik — ezért „új tartalom", nem „új fájl".
-      const { content } = input
+      const { content, file_path: path } = input
       if (typeof content !== 'string') return undefined
+      // Egy jegyzetfüzet nyers nbformat JSON-ja olvashatatlan; ami nem az, a nyers szövegnézetbe kerül.
+      const cells = notebookCells(path, content)
+      if (cells !== undefined) return cells
       const lines = contextLines(content)
       return [{ title: 'új tartalom', notes: lines.length === 0 ? ['üres'] : [], lines, hiddenLines: 0 }]
     }

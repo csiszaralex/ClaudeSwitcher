@@ -144,8 +144,9 @@ app.whenReady().then(async () => {
     const outcome = await focusSessionWindow(view)
     overlay?.hide()
     // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
+    // A döntéseket a fókusz UTÁN olvassuk: a várakozás alatt egy fájlírás-kérés is beérkezhetett.
     // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
-    const uri = tabFocusUri(view, outcome, jumpToTab)
+    const uri = tabFocusUri(view, outcome, jumpToTab, running.state().decisions)
     if (uri !== undefined) void openTabFocusUri(uri)
     return outcome !== 'failed'
   })

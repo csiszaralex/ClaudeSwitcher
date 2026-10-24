@@ -270,8 +270,10 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
                   <pre>
                     {block.lines.map((line, index) => (
                       // A <pre> tartalma csak szövegszintű elem lehet: blokk-span, nem <div>.
-                      <span key={index} className={`diff-line diff-${line.sign}`}>
-                        {LINE_MARK[line.sign]} {line.text}
+                      // Az előjel egy CSS pszeudo-elem (`data-mark`), nem szöveg: így a kimásolt
+                      // sorok pontosan a fájl tartalmát adják, előjel- és szóközoszlop nélkül.
+                      <span key={index} className={`diff-line diff-${line.sign}`} data-mark={LINE_MARK[line.sign]}>
+                        {line.text}
                       </span>
                     ))}
                   </pre>

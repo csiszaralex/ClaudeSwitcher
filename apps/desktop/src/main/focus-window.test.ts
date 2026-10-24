@@ -252,31 +252,31 @@ describe('tabFocusUri', () => {
   const expected = `vscode://anthropic.claude-code/open?session=${SESSION_ID}`
 
   it('builds the extension URI after the fast path or the workspace path focused the window', () => {
-    expect(tabFocusUri(extensionView(), 'pid', true)).toBe(expected)
-    expect(tabFocusUri(extensionView(), 'workspace', true)).toBe(expected)
+    expect(tabFocusUri(extensionView(), 'pid', true, [])).toBe(expected)
+    expect(tabFocusUri(extensionView(), 'workspace', true, [])).toBe(expected)
   })
 
   it('sends nothing when the window focus failed', () => {
     // A URI a legfelső VSCode ablakhoz megy: ha nem a session ablaka jött elő, az egy új tabot nyitna.
-    expect(tabFocusUri(extensionView(), 'failed', true)).toBeUndefined()
+    expect(tabFocusUri(extensionView(), 'failed', true, [])).toBeUndefined()
   })
 
   it('sends nothing after a cwd fallback, which may have opened a brand-new window', () => {
-    expect(tabFocusUri(extensionView(), 'cwd', true)).toBeUndefined()
+    expect(tabFocusUri(extensionView(), 'cwd', true, [])).toBeUndefined()
     expect(
-      tabFocusUri(extensionView({ windowPid: undefined, workspaceFolder: undefined }), 'cwd', true),
+      tabFocusUri(extensionView({ windowPid: undefined, workspaceFolder: undefined }), 'cwd', true, []),
     ).toBeUndefined()
   })
 
   it('sends nothing when the session window is unknown, whatever the outcome claims', () => {
     const view = extensionView({ windowPid: undefined, workspaceFolder: undefined })
-    expect(tabFocusUri(view, 'pid', true)).toBeUndefined()
-    expect(tabFocusUri(view, 'workspace', true)).toBeUndefined()
+    expect(tabFocusUri(view, 'pid', true, [])).toBeUndefined()
+    expect(tabFocusUri(view, 'workspace', true, [])).toBeUndefined()
   })
 
   it('sends nothing for a session that does not run in the VS Code extension', () => {
     for (const entrypoint of ['cli', 'sdk-ts', '', 'Claude-VSCode', 'claude-vscode ', undefined]) {
-      expect(tabFocusUri(extensionView({ entrypoint }), 'pid', true)).toBeUndefined()
+      expect(tabFocusUri(extensionView({ entrypoint }), 'pid', true, [])).toBeUndefined()
     }
   })
 
@@ -292,12 +292,35 @@ describe('tabFocusUri', () => {
       '0b5c1d7e3f2a4c8b9e6d1a2b3c4d5e6f', // kötőjelek nélkül
       'zb5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f',
     ]) {
-      expect(tabFocusUri(extensionView({ sessionId }), 'pid', true)).toBeUndefined()
+      expect(tabFocusUri(extensionView({ sessionId }), 'pid', true, [])).toBeUndefined()
     }
   })
 
   it('sends nothing when the setting is off', () => {
-    expect(tabFocusUri(extensionView(), 'pid', false)).toBeUndefined()
+    expect(tabFocusUri(extensionView(), 'pid', false, [])).toBeUndefined()
+  })
+
+  it('sends nothing while the session has a pending file edit, so the proposed diff stays in front', () => {
+    // A VSCode a fájlírásnál egy osztott diff tabot nyit; a tab URI a chat tabra váltana el róla.
+    // Visszaengedett (`released`) kérésnél is: a natív kérdés és a diff akkor is nyitva van.
+    expect(tabFocusUri(extensionView(), 'pid', true, [{ sessionId: SESSION_ID, kind: 'edit' }])).toBeUndefined()
+    expect(
+      tabFocusUri(extensionView(), 'workspace', true, [
+        { sessionId: SESSION_ID, kind: 'tool' },
+        { sessionId: SESSION_ID, kind: 'edit' },
+      ]),
+    ).toBeUndefined()
+  })
+
+  it('still sends the URI when the pending edit belongs to another session', () => {
+    const other = '1b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f'
+    expect(tabFocusUri(extensionView(), 'pid', true, [{ sessionId: other, kind: 'edit' }])).toBe(expected)
+  })
+
+  it('still sends the URI for the other decision kinds', () => {
+    for (const kind of ['tool', 'question', 'plan'] as const) {
+      expect(tabFocusUri(extensionView(), 'pid', true, [{ sessionId: SESSION_ID, kind }])).toBe(expected)
+    }
   })
 
   it('waits a short, bounded time before sending, so VS Code registers the window as last-active', () => {

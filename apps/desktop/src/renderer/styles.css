@@ -98,6 +98,9 @@ body {
 }
 /* A fájlírás előnézete (edit-preview.ts): `-` piros, `+` zöld, a változatlan környezet halvány. */
 .edit-preview .diff-line { display: block; min-height: 1.4em; }
+/* Az előjel és az utána álló szóköz nem része a kijelölhető szövegnek: a pszeudo-elem tartalma
+   nem kerül a vágólapra, így a másolás a fájl pontos tartalmát adja. */
+.edit-preview .diff-line::before { content: attr(data-mark) " "; user-select: none; }
 .edit-preview .diff-add { color: #8fbf7a; background: #8fbf7a1a; }
 .edit-preview .diff-remove { color: #e0796b; background: #e0796b1a; }
 .edit-preview .diff-same { color: #a8a6a2; }
