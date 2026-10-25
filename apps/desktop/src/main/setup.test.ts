@@ -167,6 +167,17 @@ describe('applyIntegration', () => {
     expect(removeIntegration({ hooks })).toEqual(existing)
   })
 
+  it('keeps a foreign loopback hook on our path but another port, through install and uninstall', () => {
+    // Egy másik helyi eszköz ugyanilyen útvonalat használhat. Port nélkül a tartalék
+    // felismerés a mienknek nézné, és a telepítés némán törölné.
+    const theirs = { type: 'http', url: 'http://127.0.0.1:8080/hooks/notification' }
+    const existing = { hooks: { Notification: [{ hooks: [theirs] }] } }
+
+    const hooks = applyIntegration(existing, OPTIONS).settings['hooks'] as HookGroups
+    expect(hooks['Notification']!.flatMap((group) => group.hooks)).toContainEqual(theirs)
+    expect(removeIntegration({ hooks })).toEqual(existing)
+  })
+
   it('gives PermissionRequest the 600 s timeout the decision broker releases inside', () => {
     const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as HookGroups
     const permission = hooks['PermissionRequest']![0]!.hooks[0]!
