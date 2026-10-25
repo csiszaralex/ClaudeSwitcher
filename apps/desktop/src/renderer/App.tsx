@@ -4,7 +4,7 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, formatResetsIn, pendingRowText, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
-import { activeDecision, buildRows, waitsOutsideApp } from './rows.js'
+import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 import { useDaemonState } from './useDaemonState.js'
@@ -140,6 +140,7 @@ export function App(): JSX.Element {
           const pending = activeDecision(row.decisions)
           // A pillanatképből még ismeretlen session sora: a függő kérés tartja, tehát várakozó.
           const marker = statusMarker(row.session ?? { status: row.status }, row.decisions)
+          const badge = pendingBadge(row.decisions)
           return (
             <li
               key={row.sessionId}
@@ -163,6 +164,11 @@ export function App(): JSX.Element {
                 {row.session !== undefined && hasRemoteControl(row.session) && (
                   <span className="remote" title="Remote Control: telefonról is elérhető">
                     ●
+                  </span>
+                )}
+                {badge !== undefined && (
+                  <span className="pending-count" title="Ennyi kérése vár az appban">
+                    {badge}
                   </span>
                 )}
               </span>

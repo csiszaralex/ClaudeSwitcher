@@ -34,6 +34,18 @@ body {
 .name { display: flex; align-items: baseline; min-width: 0; font-weight: 600; }
 .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .remote { flex: none; margin-left: 4px; color: #5fa8e8; font-size: 9px; font-weight: 400; cursor: default; }
+/* „2 vár" (rows.ts `pendingBadge`): a név csonkolódik helyette, a szám mindig látszik. */
+.pending-count {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #d977572e;
+  color: #d97757;
+  font-size: 10px;
+  font-weight: 400;
+  cursor: default;
+}
 .summary { color: #a8a6a2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .age { color: #6b6a67; text-align: right; font-variant-numeric: tabular-nums; }
 .empty { padding: 24px; text-align: center; color: #6b6a67; }

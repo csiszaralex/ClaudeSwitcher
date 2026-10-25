@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeDecision, buildRows, waitsOutsideApp } from './rows.js'
+import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, selectOnShow } from './selection.js'
 
 type Status = 'waiting' | 'working' | 'idle' | 'unknown'
@@ -116,5 +116,22 @@ describe('selection over merged rows', () => {
     expect(selectOnShow(rows, decisions, 'k')).toBe('ghost')
     expect(moveSelection(rows.map((r) => r.sessionId), 'ghost', 1)).toBe('i')
     expect(nextAfterDecision(rows, decisions, decisions[0]!, true)).toEqual({ hide: true })
+  })
+})
+
+describe('pendingBadge', () => {
+  it('counts the requests the app can still decide once there is more than one', () => {
+    expect(pendingBadge([decision('a', 's', 1), decision('b', 's', 2)])).toBe('2 vár')
+    expect(pendingBadge([decision('a', 's', 1), decision('b', 's', 2), decision('c', 's', 3)])).toBe('3 vár')
+  })
+
+  it('has no badge for one request or none', () => {
+    expect(pendingBadge([decision('a', 's', 1)])).toBeUndefined()
+    expect(pendingBadge([])).toBeUndefined()
+  })
+
+  it('leaves out released requests, which only VS Code can decide', () => {
+    expect(pendingBadge([decision('a', 's', 1, true), decision('b', 's', 2)])).toBeUndefined()
+    expect(pendingBadge([decision('a', 's', 1, true), decision('b', 's', 2), decision('c', 's', 3)])).toBe('2 vár')
   })
 })

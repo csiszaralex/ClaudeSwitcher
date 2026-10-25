@@ -45,6 +45,15 @@ export function waitsOutsideApp(row: { status: SessionStatus; decisions: readonl
   return row.status === 'waiting' && row.decisions.length === 0
 }
 
+/**
+ * A sor „N vár" jelzése, ha az appból egynél több kérése dönthető. Az elengedett kérés nem
+ * számít: azt már csak a VSCode döntheti el, és az állapotjel úgyis mutatja.
+ */
+export function pendingBadge(decisions: readonly { released: boolean }[]): string | undefined {
+  const count = decisions.filter((decision) => !decision.released).length
+  return count > 1 ? `${String(count)} vár` : undefined
+}
+
 function lastSegment(cwd: string): string | undefined {
   const parts = cwd.split(/[\\/]/).filter((part) => part !== '')
   return parts[parts.length - 1]
