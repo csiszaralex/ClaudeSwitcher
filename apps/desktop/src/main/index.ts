@@ -325,10 +325,14 @@ app.whenReady().then(async () => {
     tray.setWaiting(running.state().sessions.filter((s) => s.status === 'waiting').length)
   }
   syncTray()
-  setInterval(syncTray, 1000).unref()
+  const trayTimer = setInterval(syncTray, 1000)
+  trayTimer.unref()
 
-  // A kilépéskori takarítás a lenti, egyetlen `before-quit` kezelőé — az fut le pontosan egyszer.
+  // A kilépéskori takarítás a lenti, egyetlen `before-quit` kezelőé, az fut le pontosan egyszer.
+  // Az időzítőt a tálca ELŐTT állítjuk le: a kilépés még legfeljebb STOP_TIMEOUT_MS-ig vár a
+  // daemonra, és egy közben lefutó `syncTray` egy megsemmisült tálcaikont érne el.
   cleanup = () => {
+    clearInterval(trayTimer)
     globalShortcut.unregisterAll()
     tray.destroy()
   }
