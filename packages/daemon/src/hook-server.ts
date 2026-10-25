@@ -78,7 +78,9 @@ function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
   if (sessionId === undefined || toolName === undefined || toolUseId === undefined || !isRecord(toolInput)) {
     return undefined
   }
-  return { sessionId, toolName, toolInput, toolUseId }
+  // Subagentnél ott van; a mezőnév a mért permissionRequest_subagent és subagentStop fixture-ökből.
+  const agentId = str(b['agent_id'])
+  return { sessionId, ...(agentId === undefined ? {} : { agentId }), toolName, toolInput, toolUseId }
 }
 
 /**

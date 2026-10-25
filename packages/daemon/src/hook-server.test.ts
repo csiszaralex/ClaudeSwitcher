@@ -268,6 +268,22 @@ describe('M2 decision routes — measured payloads', () => {
     })
   })
 
+  it('forwards the agent_id of a subagent\'s PreToolUse', async () => {
+    // A mezőnév a mért subagent-fixture-ökből (permissionRequest_subagent, subagentStop).
+    const agentId = (payload('permissionRequest_subagent') as Record<string, unknown>)['agent_id']
+    expect(agentId).toBe('ad0b11acf46ef176e')
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', { ...(payload('preToolUse_bash') as object), agent_id: agentId })
+    expect(ev.onPreToolUse).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'ad0b11acf46ef176e' }))
+  })
+
+  it('leaves agentId out of a main-agent PreToolUse', async () => {
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', payload('preToolUse_bash'))
+    const [event] = vi.mocked(ev.onPreToolUse).mock.calls[0] ?? []
+    expect(event !== undefined && 'agentId' in event).toBe(false)
+  })
+
   it('forwards a PostToolUse with the same tool_use_id', async () => {
     const ev = events()
     await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', payload('postToolUse_bash'))

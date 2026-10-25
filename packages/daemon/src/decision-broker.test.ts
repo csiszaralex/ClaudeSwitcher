@@ -364,6 +364,44 @@ describe('DecisionBroker', () => {
     expect(first.done).toBe(true)
   })
 
+  it('keeps the main agent and a subagent apart when they run the same command in parallel', async () => {
+    // A subagent a szülő session_id-jával jön, csak az agent_id különbözteti meg. Pre(fő),
+    // Pre(sub), majd a sub kérése érkezik elsőnek: agent_id nélkül a fő hívás azonosítóját vinné el.
+    const broker = new DecisionBroker(fakeClock())
+    const pre = toolUse('preToolUse_bash')
+    const subagentId = request('permissionRequest_subagent').agentId
+    expect(subagentId).toBe(payload('subagentStop')['agent_id'])
+    broker.preToolUse({ ...pre, toolUseId: 'toolu_main' })
+    broker.preToolUse({ ...pre, agentId: subagentId, toolUseId: 'toolu_sub' })
+    const subagent = observe(broker.hold({ ...request('permissionRequest_bashCorrelated'), agentId: subagentId }))
+    const main = observe(broker.hold(request('permissionRequest_bashCorrelated')))
+
+    broker.postToolUse({ sessionId: pre.sessionId, toolUseId: 'toolu_main' })
+    await flush()
+    expect([main.done, subagent.done]).toEqual([true, false])
+    broker.postToolUse({ sessionId: pre.sessionId, toolUseId: 'toolu_sub' })
+    await flush()
+    expect(subagent.done).toBe(true)
+  })
+
+  it('does not pair a request with the Pre of an earlier auto-allowed identical call', async () => {
+    // Az első hívás engedély nélkül futott le (Pre, majd Post, PermissionRequest nélkül). Ha a Pre-je
+    // a 60 mp-es sorban marad, a következő azonos hívás kérése az ő régi azonosítóját kapná.
+    const clock = fakeClock()
+    const broker = new DecisionBroker(clock)
+    const pre = toolUse('preToolUse_bash')
+    broker.preToolUse({ ...pre, toolUseId: 'toolu_auto' })
+    broker.postToolUse({ sessionId: pre.sessionId, toolUseId: 'toolu_auto' })
+    clock.advance(10_000)
+
+    broker.preToolUse({ ...pre, toolUseId: 'toolu_asked' })
+    const held = observe(broker.hold(request('permissionRequest_bashCorrelated')))
+    broker.postToolUse({ sessionId: pre.sessionId, toolUseId: 'toolu_asked' })
+    await flush()
+    expect(held.done).toBe(true)
+    expect(broker.views()).toEqual([])
+  })
+
   it('answers a request that arrives after releaseAll at once, so shutdown cannot hang', async () => {
     const broker = new DecisionBroker(fakeClock())
     broker.releaseAll()

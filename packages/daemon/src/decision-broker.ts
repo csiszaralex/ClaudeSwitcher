@@ -37,6 +37,8 @@ export interface PendingDecisionView extends PermissionRequestInfo {
 /** Egy tool-hívás a PreToolUse / PostToolUse hookból. */
 export interface ToolUseEvent {
   sessionId: string
+  /** A subagent `agent_id`-ja; a fő agent hívásánál nincs. A subagent a szülő session_id-jával jön. */
+  agentId?: string | undefined
   toolName: string
   toolInput: Record<string, unknown>
   toolUseId: string
@@ -86,8 +88,18 @@ function stable(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function callKey(sessionId: string, toolName: string, toolInput: Record<string, unknown>): string {
-  return `${sessionId}\u0000${toolName}\u0000${stable(toolInput)}`
+/**
+ * A Pre és a PermissionRequest párosításának kulcsa. Az `agentId` azért van benne, mert egy subagent
+ * a szülő session_id-jával kér: nélküle a fő agent és egy subagent azonos parallel hívása egymás
+ * azonosítóját vihetné el.
+ */
+function callKey(
+  sessionId: string,
+  agentId: string | undefined,
+  toolName: string,
+  toolInput: Record<string, unknown>,
+): string {
+  return `${sessionId}\u0000${agentId ?? ''}\u0000${toolName}\u0000${stable(toolInput)}`
 }
 
 /**
@@ -129,7 +141,7 @@ export class DecisionBroker {
     if (this.#closed || signal?.aborted === true) return Promise.resolve(undefined)
 
     const id = randomUUID()
-    const key = callKey(request.sessionId, request.toolName, request.toolInput)
+    const key = callKey(request.sessionId, request.agentId, request.toolName, request.toolInput)
     const toolUseId = this.#takeRecentPre(key)
 
     return new Promise<HookDecisionBody | undefined>((resolve) => {
@@ -176,7 +188,7 @@ export class DecisionBroker {
 
   /** A PreToolUse hozza a `tool_use_id`-t, ami a PermissionRequest-ből hiányzik. */
   preToolUse(event: ToolUseEvent): void {
-    const key = callKey(event.sessionId, event.toolName, event.toolInput)
+    const key = callKey(event.sessionId, event.agentId, event.toolName, event.toolInput)
     // Ha a PermissionRequest valamiért előbb ért ide, most kötjük hozzá.
     for (const pending of this.#pending.values()) {
       if (pending.key === key && pending.toolUseId === undefined) {
@@ -191,8 +203,14 @@ export class DecisionBroker {
     this.#recentPre.push({ key, toolUseId: event.toolUseId, at: now })
   }
 
-  /** A tool lefutott — a döntés tehát máshol (VSCode, telefon) már megszületett. */
+  /**
+   * A tool lefutott (sikerrel vagy hibával), a döntés tehát máshol (VSCode, telefon) már megszületett.
+   *
+   * A hívás Pre-je is kikerül a sorból, ha még ott van: egy engedély nélkül lefutott hívásé ott
+   * maradna 60 mp-ig, és egy azonos, de már engedélyt kérő hívás a régi azonosítót kapná.
+   */
   postToolUse(event: { sessionId: string; toolUseId: string }): void {
+    this.#recentPre = this.#recentPre.filter((entry) => entry.toolUseId !== event.toolUseId)
     this.#closeWhere((pending) => pending.toolUseId === event.toolUseId)
   }
 
