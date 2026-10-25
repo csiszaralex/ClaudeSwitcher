@@ -29,6 +29,12 @@ export interface IdeLock {
   workspaceFolders: string[]
   ideName?: string | undefined
   transport?: string | undefined
+  /**
+   * A lock fájl utolsó írása (epoch ms, a fájl `mtimeMs`-e), ha a szkenner le tudta kérdezni.
+   * Nem a fájl tartalmából jön: a lock nem tárol időt. Ebből látszik, ha a pid azóta egy később
+   * indult processzé lett (lásd `lockPredatesProcess`).
+   */
+  mtimeMs?: number | undefined
 }
 
 export type SessionStatus = 'waiting' | 'working' | 'idle' | 'unknown'

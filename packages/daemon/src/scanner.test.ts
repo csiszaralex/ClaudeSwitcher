@@ -2,14 +2,24 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ProcessProbe } from '@claudeswitcher/core'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { scanSessions } from './scanner.js'
 
-// A ProcessProbe-nak `imageName`-je is van a Task 3 óta: a lock fájlok nem
-// tárolnak `procStart`-ot, így csak az image név árulja el, ha egy elárvult lock
-// pidjét időközben egy másik processz kapta meg.
-const aliveProbe: ProcessProbe = { isAlive: () => true, imageName: () => 'Code', refresh: () => Promise.resolve() }
-const deadProbe: ProcessProbe = { isAlive: () => false, imageName: () => undefined, refresh: () => Promise.resolve() }
+// A lock fájlok nem tárolnak `procStart`-ot, ezért a ProcessProbe `imageName`-je és
+// `startedAtMs`-e árulja el, ha egy elárvult lock pidjét időközben egy másik processz
+// kapta meg. Az ismeretlen indulási idő (`undefined`) nem dob el lockot.
+const aliveProbe: ProcessProbe = {
+  isAlive: () => true,
+  imageName: () => 'Code',
+  startedAtMs: () => undefined,
+  refresh: () => Promise.resolve(),
+}
+const deadProbe: ProcessProbe = {
+  isAlive: () => false,
+  imageName: () => undefined,
+  startedAtMs: () => undefined,
+  refresh: () => Promise.resolve(),
+}
 
 async function fixture(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'cs-scan-'))
@@ -63,7 +73,12 @@ describe('scanSessions', () => {
       fresh = true
       return Promise.resolve()
     })
-    const probe: ProcessProbe = { isAlive: () => fresh, imageName: () => (fresh ? 'Code' : undefined), refresh }
+    const probe: ProcessProbe = {
+      isAlive: () => fresh,
+      imageName: () => (fresh ? 'Code' : undefined),
+      startedAtMs: () => undefined,
+      refresh,
+    }
     const { sessions } = await scanSessions(dir, probe)
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(sessions).toHaveLength(1)
@@ -89,6 +104,27 @@ describe('scanSessions', () => {
     const dir = await fixture()
     const { sessions } = await scanSessions(dir, aliveProbe)
     expect(sessions[0]!.window?.port).toBe(50269)
+  })
+
+  it('records when each lock file was last written', async () => {
+    const dir = await fixture()
+    onTestFinished(() => rm(dir, { recursive: true, force: true }))
+    const written = new Date('2026-10-01T08:00:00.000Z')
+    await utimes(path.join(dir, 'ide', '50269.lock'), written, written)
+    const { sessions } = await scanSessions(dir, aliveProbe)
+    expect(sessions[0]!.window?.mtimeMs).toBe(written.getTime())
+  })
+
+  it('drops a lock whose pid now belongs to a process started after the lock was written', async () => {
+    // Pid-újrahasznosítás: a lock egy azóta kilépett VS Code-é, a pidet egy később indult Code.exe kapta.
+    const dir = await fixture()
+    onTestFinished(() => rm(dir, { recursive: true, force: true }))
+    const written = new Date('2026-10-01T08:00:00.000Z')
+    await utimes(path.join(dir, 'ide', '50269.lock'), written, written)
+    const recycled: ProcessProbe = { ...aliveProbe, startedAtMs: () => written.getTime() + 3_600_000 }
+    const { sessions } = await scanSessions(dir, recycled)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]!.window).toBeUndefined()
   })
 
   it('still returns the session when its transcript is not a readable file', async () => {

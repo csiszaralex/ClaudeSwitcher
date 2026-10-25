@@ -49,14 +49,31 @@ async function readRecords(claudeDir: string): Promise<SessionRecord[]> {
   return records.filter((r): r is SessionRecord => r !== null)
 }
 
+/** A fájl utolsó írása (ms), vagy `undefined`, ha nem kérdezhető le. Soha nem dob. */
+async function mtimeOf(filePath: string): Promise<number | undefined> {
+  try {
+    return (await stat(filePath)).mtimeMs
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Az IDE lock fájlok, mindegyik az utolsó írása idejével (`mtimeMs`). Az idő a pid-újrahasznosítás
+ * felismeréséhez kell (lásd core `lockPredatesProcess`). Csak olvasunk: a `~/.claude` nem a miénk,
+ * egy elavult lockot sem törlünk, csak nem párosítunk vele.
+ */
 async function readLocks(claudeDir: string): Promise<IdeLock[]> {
   const dir = ideDir(claudeDir)
   const names = (await listDir(dir)).filter((n) => n.endsWith('.lock'))
   const locks = await Promise.all(
-    names.map(async (name) => {
+    names.map(async (name): Promise<IdeLock | null> => {
       const port = Number.parseInt(path.basename(name, '.lock'), 10)
       if (Number.isNaN(port)) return null
-      return parseIdeLock(await readJson(path.join(dir, name)), port)
+      const file = path.join(dir, name)
+      const [raw, mtimeMs] = await Promise.all([readJson(file), mtimeOf(file)])
+      const lock = parseIdeLock(raw, port)
+      return lock === null ? null : { ...lock, mtimeMs }
     }),
   )
   return locks.filter((l): l is IdeLock => l !== null)

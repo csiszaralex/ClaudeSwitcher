@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  LOCK_MTIME_SLACK_MS,
   createSnapshotProbe,
   createWin32ProcessProbe,
+  fileTimeToEpochMs,
   parsePowerShellSnapshot,
   resolveLiveSessions,
   type ProcessProbe,
@@ -29,6 +31,8 @@ interface FakeProcess {
   procStart?: string
   /** A Get-Process `Name` megfelelője. */
   image?: string
+  /** A processz indulása epoch ms-ban; hiányzik, ha nem kérdezhető le. */
+  startedAtMs?: number
 }
 
 /** Csak a felsorolt pidek élnek. Ami nincs a táblában, az halott. */
@@ -40,6 +44,7 @@ function probeFor(processes: Record<number, FakeProcess>): ProcessProbe {
       return procStart === undefined || proc.procStart === procStart
     },
     imageName: (pid) => processes[pid]?.image,
+    startedAtMs: (pid) => processes[pid]?.startedAtMs,
     refresh: () => Promise.resolve(),
   }
 }
@@ -137,6 +142,65 @@ describe('resolveLiveSessions', () => {
   })
 })
 
+describe('resolveLiveSessions with lock file times', () => {
+  const WRITTEN = 1_700_000_000_000
+
+  it('rejects a lock written before its pid process started, because the pid was recycled', () => {
+    // A lock írásakor a pid még egy másik processzé volt: a mostani Code.exe később indult.
+    const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code', startedAtMs: WRITTEN + 60_000 } })
+    const stale = lock({ ideName: 'Visual Studio Code', mtimeMs: WRITTEN })
+    expect(resolveLiveSessions([session()], [stale], probe)[0]!.window).toBeUndefined()
+  })
+
+  it('keeps a lock written after its process started', () => {
+    const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code', startedAtMs: WRITTEN - 60_000 } })
+    const fresh = lock({ ideName: 'Visual Studio Code', mtimeMs: WRITTEN })
+    expect(resolveLiveSessions([session()], [fresh], probe)[0]!.window?.pid).toBe(900)
+  })
+
+  it('allows a few seconds of slack between the lock time and the process start', () => {
+    const atSlack = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code', startedAtMs: WRITTEN + LOCK_MTIME_SLACK_MS } })
+    expect(resolveLiveSessions([session()], [lock({ mtimeMs: WRITTEN })], atSlack)[0]!.window?.pid).toBe(900)
+    const pastSlack = probeFor({
+      100: { procStart: 'ps-100' },
+      900: { image: 'Code', startedAtMs: WRITTEN + LOCK_MTIME_SLACK_MS + 1 },
+    })
+    expect(resolveLiveSessions([session()], [lock({ mtimeMs: WRITTEN })], pastSlack)[0]!.window).toBeUndefined()
+  })
+
+  it('keeps a lock when its write time or the process start time is unknown', () => {
+    const noStart = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code' } })
+    expect(resolveLiveSessions([session()], [lock({ mtimeMs: WRITTEN })], noStart)[0]!.window?.pid).toBe(900)
+    const started = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code', startedAtMs: WRITTEN + 60_000 } })
+    expect(resolveLiveSessions([session()], [lock()], started)[0]!.window?.pid).toBe(900)
+  })
+
+  it('does not let a recycled stale lock with a longer folder win over a valid one', () => {
+    // A review esete: az elavult lock mappája hosszabb, ezért a régi kód azt választotta.
+    const probe = probeFor({
+      100: { procStart: 'ps-100' },
+      900: { image: 'Code', startedAtMs: WRITTEN - 60_000 },
+      901: { image: 'Code', startedAtMs: WRITTEN + 60_000 },
+    })
+    const valid = lock({ port: 1000, pid: 900, workspaceFolders: ['p:\\proj'], mtimeMs: WRITTEN })
+    const stale = lock({ port: 1001, pid: 901, workspaceFolders: ['p:\\proj\\alpha'], mtimeMs: WRITTEN })
+    expect(resolveLiveSessions([session()], [stale, valid], probe)[0]!.window?.port).toBe(1000)
+  })
+})
+
+describe('fileTimeToEpochMs', () => {
+  it('converts a decimal FILETIME to epoch milliseconds', () => {
+    expect(fileTimeToEpochMs('116444736000000000')).toBe(0)
+    expect(fileTimeToEpochMs('133000000000000000')).toBe(1_655_526_400_000)
+  })
+
+  it('returns undefined for anything that is not a decimal FILETIME', () => {
+    for (const bad of ['', 'ps-100', '-1', '12.5', ' 133000000000000000', '0x1F']) {
+      expect(fileTimeToEpochMs(bad)).toBeUndefined()
+    }
+  })
+})
+
 interface FakeEntry {
   image: string
   /** Hiányzik: a pid listázható, de az indulási ideje nem kérdezhető le (pl. access denied). */
@@ -199,6 +263,18 @@ describe('createSnapshotProbe', () => {
     // procStart nélkül a pid listázva van, tehát él.
     expect(probe.isAlive(300)).toBe(true)
     expect(probe.imageName(300)).toBe('svchost')
+  })
+
+  it('answers the process start time in epoch ms from the snapshot FILETIME', async () => {
+    const probe = createSnapshotProbe(
+      () => Promise.resolve(fakeSnapshot({ 900: { image: 'Code', start: '133000000000000000' }, 300: { image: 'svchost' } })),
+      { now },
+    )
+    expect(probe.startedAtMs(900)).toBeUndefined()
+    await probe.refresh()
+    expect(probe.startedAtMs(900)).toBe(1_655_526_400_000)
+    expect(probe.startedAtMs(300)).toBeUndefined()
+    expect(probe.startedAtMs(200)).toBeUndefined()
   })
 
   it('shares one in-flight refresh between concurrent callers', async () => {

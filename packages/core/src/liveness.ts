@@ -10,11 +10,17 @@ export interface ProcessProbe {
   isAlive(pid: number, procStart?: string): boolean
   /**
    * A processz image neve (a `Get-Process` `Name` oszlopa), vagy `undefined`,
-   * ha a pid nem él. A lock fájlok nem tárolnak `procStart`-ot, így náluk ez az
-   * egyetlen fogódzó annak eldöntésére, hogy a pid tényleg a bejegyzett IDE-hez
-   * tartozik-e, vagy időközben újrahasznosították.
+   * ha a pid nem él. A lock fájlok nem tárolnak `procStart`-ot, így náluk ez és a
+   * `startedAtMs` a két fogódzó annak eldöntésére, hogy a pid tényleg a bejegyzett
+   * IDE-hez tartozik-e, vagy időközben újrahasznosították.
    */
   imageName(pid: number): string | undefined
+  /**
+   * A processz indulása epoch ms-ban, vagy `undefined`, ha a pid nem él, vagy az indulási ideje
+   * nem kérdezhető le. A lock fájloknál ezzel vehető észre, ha a pidet a lock írása után egy
+   * újonnan indult processz kapta meg (lásd `lockPredatesProcess`).
+   */
+  startedAtMs(pid: number): number | undefined
   /**
    * Új pillanatképet vesz, ha az előző elavult. Az `isAlive` és az `imageName` szinkron,
    * és mindig a legutóbbi pillanatképből válaszol — a lekérdezés soha nem fut bennük,
@@ -40,17 +46,53 @@ function isWithin(child: string, parent: string): boolean {
 }
 
 /**
+ * Ennyivel indulhat a processz a lock fájl utolsó írása UTÁN úgy, hogy a lockot még az övének
+ * tekintjük. A fájl időbélyegét és a processz indulási idejét két külön mechanizmus rögzíti, eltérő
+ * felbontással; néhány másodperc tűrés ezt elnyeli. Egy pid-újrahasznosítás ennél jóval nagyobb
+ * különbséget ad: a review mérésén (2026-10-25) a 139 lockból 116 hét napnál régebbi volt.
+ */
+export const LOCK_MTIME_SLACK_MS = 5000
+
+/** A FILETIME (100 ns-os egységek 1601-01-01 óta) és az epoch közötti eltolás ms-ban. */
+const FILETIME_EPOCH_OFFSET_MS = 11_644_473_600_000n
+
+/**
+ * Egy decimális FILETIME string (a `ProcessSnapshot.startFileTime` formátuma) epoch ms-ban, vagy
+ * `undefined`, ha nem csupa számjegy. BigInt-tel számol, mert a FILETIME nagyobb, mint amit egy
+ * `number` pontosan tárol.
+ */
+export function fileTimeToEpochMs(fileTime: string): number | undefined {
+  if (!/^\d+$/.test(fileTime)) return undefined
+  return Number(BigInt(fileTime) / 10_000n - FILETIME_EPOCH_OFFSET_MS)
+}
+
+/**
+ * Igaz, ha a lock fájlt azelőtt írták utoljára, hogy a pidje mostani processze elindult (a
+ * `LOCK_MTIME_SLACK_MS` tűrésen túl). Ilyenkor a lockot egy azóta kilépett processz hagyta itt, és
+ * a pidjét egy később indult processz kapta meg. A lockba írt pid processze az írás pillanatában
+ * már futott, tehát egy élő lockra ez nem igaz. Ha bármelyik idő ismeretlen, hamis: tipp alapján
+ * nem dobunk el lockot.
+ */
+export function lockPredatesProcess(lockMtimeMs: number | undefined, processStartMs: number | undefined): boolean {
+  if (lockMtimeMs === undefined || processStartMs === undefined) return false
+  return processStartMs > lockMtimeMs + LOCK_MTIME_SLACK_MS
+}
+
+/**
  * Igaz, ha a lock pidje tényleg az a fajta processz, aminek a lock mondja.
  *
  * A veszélyes eset, ami ellen véd: egy elárvult lock ugyanarra a workspace-re,
  * aminek a pidjét időközben egy független processz kapta meg. A pid él, az
- * útvonal egyezik — csak az image név árulja el, hogy nem VSCode ablak. Ismeretlen
- * IDE-nél nem szűrünk: inkább párosítunk, mint hogy egy támogatott szerkesztőt
- * kizárjunk egy tipp alapján.
+ * útvonal egyezik. Két jel árulja el:
+ * - az idő: a processz a lock utolsó írása után indult (`lockPredatesProcess`). Ez akkor is
+ *   működik, ha a pidet egy másik `Code.exe` segédprocessz kapta meg, amin az image név átmenne;
+ * - az image név: nem VSCode processz. Ismeretlen IDE-nél ezt nem nézzük: inkább párosítunk,
+ *   mint hogy egy támogatott szerkesztőt kizárjunk egy tipp alapján.
  */
 function ownsLock(lock: IdeLock, probe: ProcessProbe): boolean {
   const image = probe.imageName(lock.pid)
   if (image === undefined) return false
+  if (lockPredatesProcess(lock.mtimeMs, probe.startedAtMs(lock.pid))) return false
   if (lock.ideName === undefined || !/visual studio code/i.test(lock.ideName)) return true
   return VSCODE_IMAGE_NAMES.has(image.toLowerCase())
 }
@@ -177,6 +219,10 @@ export function createSnapshotProbe(
     },
     imageName(pid) {
       return snapshot.imageName(pid)
+    },
+    startedAtMs(pid) {
+      const fileTime = snapshot.startFileTime(pid)
+      return fileTime === undefined ? undefined : fileTimeToEpochMs(fileTime)
     },
     refresh() {
       if (inFlight !== undefined) return inFlight
