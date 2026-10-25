@@ -6,7 +6,7 @@ import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
 import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
 import { configPath, loadConfig, updateConfig } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
-import { registerHotkey } from './hotkey.js'
+import { hotkeyLogText, registerHotkeyOrDefault } from './hotkey.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
 import { stopWithin } from './shutdown.js'
@@ -203,12 +203,17 @@ app.whenReady().then(async () => {
     error instanceof Error ? error.message : String(error)
 
   // A gyorsbillentyűt a tálca ELŐTT foglaljuk le, mert a menü megjeleníti az eredményt.
-  // A showOverlay/toggleOverlay függvénydeklarációk, tehát hoistolódnak — a lentebbi
-  // definíciójuk ekkor már hívható.
-  const hotkeyRegistered = registerHotkey(config.hotkey, toggleOverlay)
+  // A showOverlay/toggleOverlay függvénydeklarációk, tehát hoistolódnak: a lentebbi
+  // definíciójuk ekkor már hívható. Egy érvénytelen (elgépelt) érték nem állítja meg az
+  // indulást: helyette az alapérték él, és a tálca megmondja, mit kell javítani.
+  const hotkey = registerHotkeyOrDefault(
+    (accelerator, handler) => globalShortcut.register(accelerator, handler),
+    config.hotkey,
+    toggleOverlay,
+  )
 
   const tray = createTray({
-    hotkey: { accelerator: config.hotkey, registered: hotkeyRegistered },
+    hotkey,
     // A config fájl megnyitása a rendszer szerkesztőjével. Enélkül az „állítható"
     // gyakorlatban azt jelentené, hogy a felhasználónak ki kell találnia egy útvonalat az
     // AppData alatt.
@@ -314,10 +319,7 @@ app.whenReady().then(async () => {
   // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
   // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
   // megjelenik, a tálcaikon látható képet kapott.
-  console.log(
-    `[claudeswitcher] tray ready, hotkey ${config.hotkey} ` +
-      (hotkeyRegistered ? 'registered' : 'NOT registered (taken by another application)'),
-  )
+  console.log(`[claudeswitcher] tray ready, ${hotkeyLogText(hotkey)}`)
 
   const syncTray = (): void => {
     tray.setWaiting(running.state().sessions.filter((s) => s.status === 'waiting').length)

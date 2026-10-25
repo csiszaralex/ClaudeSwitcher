@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Menu, Tray, nativeImage } from 'electron'
+import { hotkeyLabel, type HotkeyRegistration } from './hotkey.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 const resources = path.join(dirname, '../../resources')
@@ -33,8 +34,8 @@ export function createTray(options: {
   onUninstall: () => void
   /** Megnyitja a config fájlt, hogy a gyorsbillentyű átírható legyen. */
   onEditHotkey: () => void
-  /** A gyorsbillentyű, és hogy sikerült-e lefoglalni. */
-  hotkey: { accelerator: string; registered: boolean }
+  /** A gyorsbillentyű foglalásának eredménye (lásd `registerHotkeyOrDefault`). */
+  hotkey: HotkeyRegistration
   /** Az auto-hide kezdőállapota a configból. */
   hideAfterLastDecision: boolean
   /** A pipa új állapota; a hívó menti el és adja tovább az overlaynek. */
@@ -51,16 +52,11 @@ export function createTray(options: {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Megnyitás', click: options.onOpen },
-      // A gyorsbillentyű állapota látszik, nem csak a naplóban. Ha a foglalás nem sikerül —
-      // amit ezen a gépen le is mértünk —, a felhasználó különben csak azt tapasztalná,
-      // hogy megnyomja és nem történik semmi, magyarázat nélkül. A tálca ilyenkor az
-      // egyetlen megmaradt belépési pont, tehát itt kell megmondani.
-      {
-        label: options.hotkey.registered
-          ? `Gyorsbillentyű: ${options.hotkey.accelerator}`
-          : `Gyorsbillentyű: ${options.hotkey.accelerator} — FOGLALT, nem működik`,
-        enabled: false,
-      },
+      // A gyorsbillentyű állapota látszik, nem csak a naplóban. Ha a foglalás nem sikerül
+      // (ezen a gépen le is mértük), vagy a config.json-ban elgépelt érték áll, a felhasználó
+      // különben csak azt tapasztalná, hogy megnyomja és nem történik semmi, magyarázat
+      // nélkül. A tálca ilyenkor az egyetlen megmaradt belépési pont, tehát itt kell megmondani.
+      { label: hotkeyLabel(options.hotkey), enabled: false },
       { label: 'Gyorsbillentyű átállítása… (újraindítás után él)', click: options.onEditHotkey },
       { type: 'separator' },
       {
