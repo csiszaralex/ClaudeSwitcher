@@ -8,6 +8,8 @@ const resources = path.join(dirname, '../../resources')
 
 export interface TrayHandle {
   setWaiting(count: number): void
+  /** Egy figyelmeztető sor a menüben (például elavult integráció); `undefined` leveszi. */
+  setNotice(text: string | undefined): void
   destroy(): void
 }
 
@@ -49,7 +51,14 @@ export function createTray(options: {
   const waiting = loadIcon('tray-waiting.png')
 
   const tray = new Tray(idle)
-  tray.setContextMenu(
+  // A menü egy figyelmeztető sor miatt újraépülhet. A pipák állapotát ezért itt követjük: az
+  // újraépített menü különben a kezdőállapotot mutatná, nem azt, amit a felhasználó azóta beállított.
+  let hideAfterLastDecision = options.hideAfterLastDecision
+  let jumpToTab = options.jumpToTab
+  let notice: string | undefined
+  let destroyed = false
+
+  const buildMenu = (): Menu =>
     Menu.buildFromTemplate([
       { label: 'Megnyitás', click: options.onOpen },
       // A gyorsbillentyű állapota látszik, nem csak a naplóban. Ha a foglalás nem sikerül
@@ -64,8 +73,9 @@ export function createTray(options: {
         // állapot. Azonnal hat, újraindítás nélkül: az overlay minden döntés után a mainből kérdezi.
         label: 'Elrejtés az utolsó döntés után',
         type: 'checkbox',
-        checked: options.hideAfterLastDecision,
+        checked: hideAfterLastDecision,
         click: (item) => {
+          hideAfterLastDecision = item.checked
           options.onToggleHideAfterLastDecision(item.checked)
         },
       },
@@ -73,18 +83,21 @@ export function createTray(options: {
         // Kikapcsolva csak az ablak jön elő, a tab nem — pontosan az M1-es viselkedés.
         label: 'Ugrás a pontos Claude-tabra',
         type: 'checkbox',
-        checked: options.jumpToTab,
+        checked: jumpToTab,
         click: (item) => {
+          jumpToTab = item.checked
           options.onToggleJumpToTab(item.checked)
         },
       },
       { type: 'separator' },
+      // Közvetlenül a telepítés fölött, mert az a teendő.
+      ...(notice === undefined ? [] : [{ label: notice, enabled: false }]),
       { label: 'Claude Code integráció telepítése', click: options.onInstall },
       { label: 'Claude Code integráció eltávolítása', click: options.onUninstall },
       { type: 'separator' },
       { label: 'Kilépés', click: options.onQuit },
-    ]),
-  )
+    ])
+  tray.setContextMenu(buildMenu())
   tray.on('click', options.onOpen)
 
   let lastCount = -1
@@ -97,7 +110,14 @@ export function createTray(options: {
         count > 0 ? `ClaudeSwitcher — ${count} session vár rád` : 'ClaudeSwitcher',
       )
     },
+    setNotice(text) {
+      // Az olvasás aszinkron: egy kilépés közben érkező eredmény már egy megsemmisült ikont érne el.
+      if (destroyed || text === notice) return
+      notice = text
+      tray.setContextMenu(buildMenu())
+    },
     destroy() {
+      destroyed = true
       tray.destroy()
     },
   }

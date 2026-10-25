@@ -1,13 +1,20 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   applyIntegration,
+  hookInstallState,
   installIntegration,
+  integrationNotice,
+  readHookInstallState,
   removeIntegration,
   uninstallIntegration,
 } from './setup.js'
+
+function without<T>(source: Record<string, T>, keys: readonly string[]): Record<string, T> {
+  return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))
+}
 
 const OPTIONS = {
   port: 47821,
@@ -259,6 +266,81 @@ describe('removeIntegration', () => {
 
   it('is harmless on settings that never had the integration', () => {
     expect(removeIntegration(USER_SETTINGS)).toEqual(USER_SETTINGS)
+  })
+})
+
+describe('hookInstallState', () => {
+  const installedHooks = (): HookGroups => applyIntegration({}, OPTIONS).settings['hooks'] as HookGroups
+
+  it('reports a fresh install as current', () => {
+    expect(hookInstallState(installedHooks())).toEqual({ kind: 'current' })
+  })
+
+  it('reports no integration when none of our hooks is there, foreign ones included', () => {
+    expect(hookInstallState(undefined)).toEqual({ kind: 'not-installed' })
+    expect(hookInstallState({})).toEqual({ kind: 'not-installed' })
+    expect(hookInstallState({ Notification: [FOREIGN_NOTIFICATION] })).toEqual({ kind: 'not-installed' })
+  })
+
+  it('lists the events an older install lacks', () => {
+    // A 4.1/4.2 előtti telepítés: a két hibás végű esemény nincs benne.
+    const older = without(installedHooks(), ['PostToolUseFailure', 'StopFailure'])
+    expect(hookInstallState(older)).toEqual({ kind: 'stale', missing: ['StopFailure', 'PostToolUseFailure'] })
+  })
+
+  it('counts our hook on the wrong route or the wrong port as missing', () => {
+    const hooks = installedHooks()
+    const wrongRoute = { ...hooks['Stop']![0]!.hooks[0]!, url: 'http://127.0.0.1:47821/hooks/lifecycle/end' }
+    const wrongPort = { ...hooks['PreToolUse']![0]!.hooks[0]!, url: 'http://127.0.0.1:11111/hooks/pre-tool-use' }
+    const state = hookInstallState({ ...hooks, Stop: [{ hooks: [wrongRoute] }], PreToolUse: [{ hooks: [wrongPort] }] })
+    expect(state).toEqual({ kind: 'stale', missing: ['Stop', 'PreToolUse'] })
+  })
+
+  it('finds our hook beside foreign ones in the same event', () => {
+    const hooks = installedHooks()
+    expect(hookInstallState({ ...hooks, Notification: [FOREIGN_NOTIFICATION, ...hooks['Notification']!] })).toEqual({
+      kind: 'current',
+    })
+  })
+})
+
+describe('integrationNotice', () => {
+  it('names the missing hook count only for a stale install', () => {
+    expect(integrationNotice({ kind: 'stale', missing: ['PostToolUseFailure', 'StopFailure'] })).toBe(
+      'Integráció elavult, telepítsd újra (2 hiányzó hook)',
+    )
+    expect(integrationNotice({ kind: 'current' })).toBeUndefined()
+    expect(integrationNotice({ kind: 'not-installed' })).toBeUndefined()
+    expect(integrationNotice({ kind: 'unknown' })).toBeUndefined()
+  })
+})
+
+describe('readHookInstallState on a real file', () => {
+  it('reads a fresh install as current, and an absent file as not installed', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    expect(await readHookInstallState(dir)).toEqual({ kind: 'not-installed' })
+    await installIntegration(dir, OPTIONS)
+    expect(await readHookInstallState(dir)).toEqual({ kind: 'current' })
+  })
+
+  it('treats an unreadable or unparsable file as unknown, not as stale', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    await writeFile(path.join(dir, 'settings.json'), '{ not json')
+    expect(await readHookInstallState(dir)).toEqual({ kind: 'unknown' })
+
+    const asDir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    await mkdir(path.join(asDir, 'settings.json'))
+    expect(await readHookInstallState(asDir)).toEqual({ kind: 'unknown' })
+  })
+
+  it('never writes the file it reads', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    const file = path.join(dir, 'settings.json')
+    const raw = JSON.stringify({ hooks: { Notification: [FOREIGN_NOTIFICATION] } })
+    await writeFile(file, raw)
+    await readHookInstallState(dir)
+    expect(await readFile(file, 'utf8')).toBe(raw)
+    expect(await readdir(dir)).toEqual(['settings.json'])
   })
 })
 

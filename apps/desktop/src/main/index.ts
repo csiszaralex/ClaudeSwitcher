@@ -10,7 +10,13 @@ import { hotkeyLogText, registerHotkeyOrDefault } from './hotkey.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
-import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
+import {
+  DAEMON_PORT,
+  installIntegration,
+  integrationNotice,
+  readHookInstallState,
+  uninstallIntegration,
+} from './setup.js'
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
@@ -283,6 +289,7 @@ app.whenReady().then(async () => {
         .catch((error: unknown) => {
           dialog.showErrorBox('A telepítés nem sikerült', describeError(error))
         })
+        .finally(syncIntegrationNotice)
     },
     onUninstall: () => {
       uninstallIntegration(resolveClaudeDir())
@@ -296,8 +303,29 @@ app.whenReady().then(async () => {
         .catch((error: unknown) => {
           dialog.showErrorBox('Az eltávolítás nem sikerült', describeError(error))
         })
+        .finally(syncIntegrationNotice)
     },
   })
+
+  /**
+   * Elavult-e a telepített integráció. Egy korábbi verzió telepítésében nincs benne az azóta
+   * hozzáadott hook, és ez magától nem derül ki: az új hook egyszerűen nem tüzel. Indításkor és
+   * minden telepítés vagy eltávolítás után fut; a settings.json-t csak olvassa.
+   */
+  function syncIntegrationNotice(): void {
+    readHookInstallState(resolveClaudeDir())
+      .then((state) => {
+        console.log(
+          `[claudeswitcher] hook install state: ${state.kind}` +
+            (state.kind === 'stale' ? ` (missing: ${state.missing.join(', ')})` : ''),
+        )
+        tray.setNotice(integrationNotice(state))
+      })
+      .catch((error: unknown) => {
+        console.error('[claudeswitcher] hook install check failed', error)
+      })
+  }
+  syncIntegrationNotice()
 
   function showOverlay(): void {
     // Kilépés közben nem hozunk létre új ablakot, és nem mutatjuk a régit.

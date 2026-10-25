@@ -1,4 +1,5 @@
-import { transformSettingsFile, userSettingsPath } from '@claudeswitcher/core'
+import { readFile } from 'node:fs/promises'
+import { isNotFoundError, transformSettingsFile, userSettingsPath } from '@claudeswitcher/core'
 
 /**
  * A daemon rögzített portja. Nem ideiglenes, mert a telepített hookok és a statusLine ezt
@@ -162,13 +163,18 @@ export function isOurStatusLine(statusLine: unknown): boolean {
   return typeof command === 'string' && command.includes(STATUS_LINE_MARKER)
 }
 
-function ourHookEntry(port: number, { route, timeout }: HookRoute): Record<string, unknown> {
+/** A hook URL-je. A telepítés és az elavultság-ellenőrzés is innen veszi. */
+function hookUrl(port: number, { route }: HookRoute): string {
+  return `http://127.0.0.1:${String(port)}/hooks/${route}`
+}
+
+function ourHookEntry(port: number, hookRoute: HookRoute): Record<string, unknown> {
   return {
     hooks: [
       {
         type: 'http',
-        url: `http://127.0.0.1:${port}/hooks/${route}`,
-        timeout,
+        url: hookUrl(port, hookRoute),
+        timeout: hookRoute.timeout,
         headers: { Authorization: `Bearer $${TOKEN_ENV}` },
         allowedEnvVars: [TOKEN_ENV],
       },
@@ -260,6 +266,77 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
   }
 
   return settings
+}
+
+/**
+ * A telepített hookjaink állapota a settings.json szerint.
+ *
+ * - `not-installed`: egyik `HOOK_ROUTES` eseménynél sincs saját hookunk.
+ * - `current`: minden eseménynél van saját hookunk a helyes route-ra és a `DAEMON_PORT`-ra.
+ * - `stale`: a mieink ott vannak, de a `missing` eseményeknél hiányzik a hook, vagy rossz route-ra
+ *   vagy portra mutat. Egy korábbi verzió telepítése ilyen, ha azóta új esemény került a
+ *   `HOOK_ROUTES`-ba.
+ * - `unknown`: a fájl nem olvasható vagy nem értelmezhető. Ez nem „elavult": nem tudjuk.
+ */
+export type HookInstallState =
+  | { kind: 'not-installed' }
+  | { kind: 'current' }
+  | { kind: 'stale'; missing: string[] }
+  | { kind: 'unknown' }
+
+/** Egy esemény saját hookjai, a matcher-csoportokon át. Hibás alakú bejegyzés: nincs benne a mienk. */
+function ourHooksOf(groups: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(groups)) return []
+  return groups.flatMap((group) => {
+    if (!isPlainObject(group)) return []
+    const hooks = group['hooks']
+    if (!Array.isArray(hooks)) return []
+    return hooks.filter((hook): hook is Record<string, unknown> => isPlainObject(hook) && isOurHook(hook))
+  })
+}
+
+/**
+ * Tiszta függvény: a settings.json `hooks` szakaszából megmondja, mely eseményeink hiányoznak.
+ * Az elvárt URL ugyanabból a `HOOK_ROUTES`-ból és `hookUrl`-ből jön, amiből a telepítés is ír.
+ */
+export function hookInstallState(hooks: unknown, port: number = DAEMON_PORT): HookInstallState {
+  if (!isPlainObject(hooks)) return { kind: 'not-installed' }
+  let anyOurs = false
+  const missing: string[] = []
+  for (const [event, route] of Object.entries(HOOK_ROUTES)) {
+    const ours = ourHooksOf(hooks[event])
+    if (ours.length > 0) anyOurs = true
+    const expected = hookUrl(port, route)
+    if (!ours.some((hook) => hook['url'] === expected)) missing.push(event)
+  }
+  if (!anyOurs) return { kind: 'not-installed' }
+  return missing.length === 0 ? { kind: 'current' } : { kind: 'stale', missing }
+}
+
+/** A tálcán mutatott egy sor, vagy `undefined`, ha nincs mit mondani. */
+export function integrationNotice(state: HookInstallState): string | undefined {
+  if (state.kind !== 'stale') return undefined
+  return `Integráció elavult, telepítsd újra (${String(state.missing.length)} hiányzó hook)`
+}
+
+/**
+ * Csak olvas: a settings.json-t ugyanott keresi, ahová a telepítés ír (`userSettingsPath`), de soha
+ * nem írja. Hiányzó fájl: nincs telepítve. Minden más olvasási vagy értelmezési hiba `unknown`.
+ */
+export async function readHookInstallState(claudeDir: string): Promise<HookInstallState> {
+  let raw: string
+  try {
+    raw = await readFile(userSettingsPath(claudeDir), 'utf8')
+  } catch (error) {
+    return isNotFoundError(error) ? { kind: 'not-installed' } : { kind: 'unknown' }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { kind: 'unknown' }
+  }
+  return isPlainObject(parsed) ? hookInstallState(parsed['hooks']) : { kind: 'unknown' }
 }
 
 /** Telepít a felhasználó settings.json-jába. Az ütközések leírását adja vissza. */
