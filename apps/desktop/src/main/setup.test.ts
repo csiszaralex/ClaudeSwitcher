@@ -53,11 +53,33 @@ describe('applyIntegration', () => {
       'Notification',
       'PermissionRequest',
       'PostToolUse',
+      'PostToolUseFailure',
       'PreToolUse',
       'SessionEnd',
       'Stop',
+      'StopFailure',
       'SubagentStop',
     ])
+  })
+
+  it('sends a failed tool to the PostToolUse route and an API-error turn end to the Stop route', () => {
+    // A PostToolUseFailure ugyanazt a session_id-t és tool_use_id-t hozza, mint a PostToolUse, a
+    // StopFailure pedig ugyanúgy a fő kör végét jelenti, mint a Stop: új route nem kell.
+    const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as HookGroups
+    const failure = hooks['PostToolUseFailure']![0]!.hooks[0]!
+    const stopFailure = hooks['StopFailure']![0]!.hooks[0]!
+    expect(failure['url']).toBe('http://127.0.0.1:47821/hooks/post-tool-use')
+    expect(failure['timeout']).toBe(5)
+    expect(stopFailure['url']).toBe('http://127.0.0.1:47821/hooks/lifecycle/stop')
+    expect(stopFailure['timeout']).toBe(5)
+  })
+
+  it('removes the failure hooks on uninstall, even with allowedEnvVars pruned', () => {
+    const ours = (route: string) => ({ hooks: [{ type: 'http', url: `http://127.0.0.1:47821/hooks/${route}` }] })
+    const existing = {
+      hooks: { PostToolUseFailure: [ours('post-tool-use')], StopFailure: [ours('lifecycle/stop'), FOREIGN_NOTIFICATION] },
+    }
+    expect(removeIntegration(existing)).toEqual({ hooks: { StopFailure: [FOREIGN_NOTIFICATION] } })
   })
 
   it('points each hook at the fixed loopback port with the token header', () => {

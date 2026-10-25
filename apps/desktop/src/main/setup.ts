@@ -32,14 +32,24 @@ interface HookRoute {
  * 590 mp-nél előzi meg, hogy a lezárást mindig mi kezdeményezzük. A többi display-only, rövid
  * timeouttal. A `PreToolUse` / `PostToolUse` / `SubagentStop` azért kell, mert a VSCode-ban vagy
  * a telefonon hozott döntést csak ezekből lehet felismerni (spec §7).
+ *
+ * A két hibás végű esemény a sikeres párja route-ját kapja, mert ennek az appnak ugyanazt jelenti.
+ * A `PostToolUseFailure` egy elindult, de hibával zárult tool: a döntés megvolt, a sor zárul. A
+ * route csak a `session_id`-t és a `tool_use_id`-t olvassa, és a hookdokumentáció szerint mindkettő
+ * benne van. A `StopFailure` a Stop helyett jön, ha a kör API-hibával ért véget (rate limit,
+ * overloaded): a fő kör ugyanúgy véget ért. A válaszát a Claude Code a `terminalSequence`
+ * kivételével figyelmen kívül hagyja, így az üres 200 elég. Mindkettő illeszkedik az
+ * `OUR_HOOK_PATHS`-ra, tehát a telepítés és az eltávolítás külön kód nélkül kezeli őket.
  */
 const HOOK_ROUTES: Readonly<Record<string, HookRoute>> = {
   Notification: { route: 'notification', timeout: 5 },
   SessionEnd: { route: 'lifecycle/end', timeout: 5 },
   Stop: { route: 'lifecycle/stop', timeout: 5 },
+  StopFailure: { route: 'lifecycle/stop', timeout: 5 },
   PermissionRequest: { route: 'permission-request', timeout: 600 },
   PreToolUse: { route: 'pre-tool-use', timeout: 5 },
   PostToolUse: { route: 'post-tool-use', timeout: 5 },
+  PostToolUseFailure: { route: 'post-tool-use', timeout: 5 },
   SubagentStop: { route: 'subagent-stop', timeout: 5 },
 }
 

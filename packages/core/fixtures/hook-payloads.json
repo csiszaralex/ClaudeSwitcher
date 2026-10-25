@@ -513,5 +513,32 @@
     "last_assistant_message": "Lefuttattam az `echo spike-a > a.txt` parancsot, hiba nélkül végzett. Az [a.txt](a.txt) fájlnak most a `spike-a` szöveget kell tartalmaznia, de a tartalmát külön nem ellenőriztem.",
     "background_tasks": [],
     "session_crons": []
+  },
+  "postToolUseFailure_bash_constructed": {
+    "_note": "CONSTRUCTED from the hooks reference (code.claude.com/docs/en/hooks, PostToolUseFailure input example, read 2026-10-25), NOT measured. The session, tool_name, tool_input and tool_use_id are copied from the measured preToolUse_bash, so it pairs with permissionRequest_bashCorrelated as if that call had failed. error, is_interrupt and duration_ms follow the documented example. Shape confirmed by a capture on 2026-10-25 (Claude Code VS Code extension, a natively approved `node -e \"process.exit(1)\"`): the real payload carries session_id, tool_name, tool_input, tool_use_id, error (\"Exit code 1\"), is_interrupt (false) and duration_ms, plus fields the app does not read (prompt_id, scratchpad_dir, effort).",
+    "session_id": "2160705c-b755-4914-b3cb-d4a8047bdacb",
+    "transcript_path": "C:\\Users\\user\\.claude\\projects\\p--08-Apps-cs-spike\\2160705c-b755-4914-b3cb-d4a8047bdacb.jsonl",
+    "cwd": "P:\\08_Apps\\cs-spike",
+    "permission_mode": "default",
+    "hook_event_name": "PostToolUseFailure",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "echo spike-c2 > c3.txt",
+      "description": "Write spike-c2 to c3.txt"
+    },
+    "tool_use_id": "toolu_014XMiXFVTin7eyaeqBvxbLQ",
+    "error": "Exit code 1\nError: Cannot find module 'express'",
+    "is_interrupt": false,
+    "duration_ms": 4187
+  },
+  "stopFailure_rateLimit_constructed": {
+    "_note": "CONSTRUCTED from the hooks reference (code.claude.com/docs/en/hooks, StopFailure input example, read 2026-10-25), NOT measured. The session and paths are copied from the measured stop fixture; error, error_details and last_assistant_message follow the documented example. Replace with a captured payload when one is available.",
+    "session_id": "2160705c-b755-4914-b3cb-d4a8047bdacb",
+    "transcript_path": "C:\\Users\\user\\.claude\\projects\\p--08-Apps-cs-spike\\2160705c-b755-4914-b3cb-d4a8047bdacb.jsonl",
+    "cwd": "P:\\08_Apps\\cs-spike",
+    "hook_event_name": "StopFailure",
+    "error": "rate_limit",
+    "error_details": "429 Too Many Requests",
+    "last_assistant_message": "API Error: Rate limit reached"
   }
 }

@@ -277,6 +277,26 @@ describe('M2 decision routes — measured payloads', () => {
     })
   })
 
+  it('forwards a PostToolUseFailure on the PostToolUse route like a finished tool', async () => {
+    // A konstruált payload extra mezői (error, is_interrupt, duration_ms) nem számítanak.
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', payload('postToolUseFailure_bash_constructed'))
+    expect(ev.onPostToolUse).toHaveBeenCalledWith({
+      sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
+      toolUseId: 'toolu_014XMiXFVTin7eyaeqBvxbLQ',
+    })
+  })
+
+  it('forwards a StopFailure on the Stop route as the end of the main turn', async () => {
+    const ev = events()
+    await post(createHookApp(TOKEN, ev), '/hooks/lifecycle/stop', payload('stopFailure_rateLimit_constructed'))
+    expect(ev.onLifecycle).toHaveBeenCalledWith({
+      sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
+      cwd: 'P:\\08_Apps\\cs-spike',
+      kind: 'stop',
+    })
+  })
+
   it('forwards a SubagentStop with its agent_id', async () => {
     const ev = events()
     await post(createHookApp(TOKEN, ev), '/hooks/subagent-stop', payload('subagentStop'))

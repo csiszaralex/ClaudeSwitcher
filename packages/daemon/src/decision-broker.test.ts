@@ -133,6 +133,19 @@ describe('DecisionBroker', () => {
     expect(broker.views()).toEqual([])
   })
 
+  it('closes a natively allowed request whose tool then failed (PostToolUseFailure)', async () => {
+    // A konstruált fixture a mért preToolUse_bash hívás hibás vége: ugyanaz a tool_use_id.
+    const broker = new DecisionBroker(fakeClock())
+    broker.preToolUse(toolUse('preToolUse_bash'))
+    const held = observe(broker.hold(request('permissionRequest_bashCorrelated')))
+
+    broker.postToolUse(toolUse('postToolUseFailure_bash_constructed'))
+    await flush()
+    expect(held.done).toBe(true)
+    expect(held.value).toBeUndefined()
+    expect(broker.views()).toEqual([])
+  })
+
   it('ignores a PostToolUse of a different call', async () => {
     const broker = new DecisionBroker(fakeClock())
     broker.preToolUse(toolUse('preToolUse_bash'))

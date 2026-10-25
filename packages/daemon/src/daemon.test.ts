@@ -292,6 +292,42 @@ describe('startDaemon — held decisions', () => {
     expect(daemon.state().sessions[0]?.status).toBe('idle')
   })
 
+  it('closes the row and clears the wait when a natively allowed tool fails (PostToolUseFailure)', async () => {
+    // A PostToolUseFailure a PostToolUse route-jára jön: a hibás tool is lefutott, a döntés megvolt.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    await postHook(daemon, '/hooks/pre-tool-use', { ...payload('preToolUse_bash'), session_id: 'sid-100' })
+    const response = postHook(daemon, '/hooks/permission-request', {
+      ...payload('permissionRequest_bashCorrelated'),
+      session_id: 'sid-100',
+    })
+    await waitFor(() => daemon.state().decisions)
+    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    expect(daemon.state().sessions[0]?.status).toBe('waiting')
+
+    await postHook(daemon, '/hooks/post-tool-use', { ...payload('postToolUseFailure_bash_constructed'), session_id: 'sid-100' })
+    expect(await (await response).text()).toBe('')
+    expect(daemon.state().decisions).toEqual([])
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+  })
+
+  it('ends the main turn on StopFailure: the row closes, the wait clears, and the session just finished', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    const response = postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    await waitFor(() => daemon.state().decisions)
+    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+
+    const before = Date.now()
+    await postHook(daemon, '/hooks/lifecycle/stop', { ...payload('stopFailure_rateLimit_constructed'), session_id: 'sid-100' })
+    expect(await (await response).text()).toBe('')
+    expect(daemon.state().decisions).toEqual([])
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+    expect(daemon.state().sessions[0]?.stoppedAt).toBeGreaterThanOrEqual(before)
+  })
+
   it('reports when the session stopped, until a tool starts again', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
