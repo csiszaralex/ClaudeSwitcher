@@ -59,6 +59,27 @@ export function pendingRowText(pending: { toolName: string; summary: string }): 
   return clip(`${pending.toolName}: ${pending.summary}`)
 }
 
+/** Az Agent tool alapértelmezett típusa: szinte mindig ez, így önmagában semmit nem mond. */
+const DEFAULT_AGENT_TYPE = 'general-purpose'
+
+/**
+ * A panel fejlécében a kérő subagent: a feladatának leírása (a session `subagents` listájából,
+ * az `agentId` szerint), és a típusa, ha az nem az alapértelmezett. Leírás nélkül a típus.
+ * `undefined`, ha a kérés a fő sessioné.
+ */
+export function subagentLabel(
+  decision: { agentId?: string | undefined; agentType?: string | undefined },
+  subagents: readonly SubagentView[] | undefined,
+): string | undefined {
+  if (decision.agentId === undefined && decision.agentType === undefined) return undefined
+  const match = subagents?.find((subagent) => subagent.agentId === decision.agentId)
+  const type = decision.agentType ?? match?.agentType
+  const description = match?.description
+  if (description === undefined) return type === undefined ? 'subagent' : `subagent · ${type}`
+  const label = type === undefined || type === DEFAULT_AGENT_TYPE ? `subagent: ${description}` : `subagent · ${type}: ${description}`
+  return clip(label)
+}
+
 /**
  * A sor összefoglalója. Sorrend: egy várakozó session értesítése; az aktív subagent munkája
  * (a legutóbbi, és `+N`, ha több is fut) — a fő session ilyenkor csak az `Agent` toolt futtatja,

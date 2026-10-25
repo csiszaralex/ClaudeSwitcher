@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, formatResetsIn, pendingRowText, subagentTooltip, summarize, toolLabel } from './format.js'
+import { formatDuration, formatResetsIn, pendingRowText, subagentLabel, subagentTooltip, summarize, toolLabel } from './format.js'
 
 describe('formatDuration', () => {
   it('renders seconds under a minute', () => {
@@ -136,5 +136,37 @@ describe('pendingRowText', () => {
     const long = pendingRowText({ toolName: 'Bash', summary: `cat <<END\n${'x'.repeat(100_000)}\nEND` })
     expect(long).toHaveLength(80)
     expect(long.endsWith('…')).toBe(true)
+  })
+})
+
+describe('subagentLabel', () => {
+  const subagents = [
+    { agentId: 'a1', agentType: 'general-purpose', description: 'Fix the review findings', updatedAt: 2 },
+    { agentId: 'a2', agentType: 'Explore', description: 'Find the hook routes', updatedAt: 1 },
+  ]
+
+  it('has no label for a request of the main session', () => {
+    expect(subagentLabel({}, subagents)).toBeUndefined()
+  })
+
+  it('shows the task description of the default agent type instead of the type', () => {
+    expect(subagentLabel({ agentId: 'a1', agentType: 'general-purpose' }, subagents)).toBe(
+      'subagent: Fix the review findings',
+    )
+  })
+
+  it('keeps a type other than the default next to the description', () => {
+    expect(subagentLabel({ agentId: 'a2', agentType: 'Explore' }, subagents)).toBe('subagent · Explore: Find the hook routes')
+  })
+
+  it('falls back to the type when no description is known', () => {
+    expect(subagentLabel({ agentId: 'gone', agentType: 'general-purpose' }, subagents)).toBe('subagent · general-purpose')
+    expect(subagentLabel({ agentId: 'a1', agentType: 'Explore' }, undefined)).toBe('subagent · Explore')
+    expect(subagentLabel({ agentId: 'gone' }, [])).toBe('subagent')
+  })
+
+  it('clips a long description to one line', () => {
+    const label = subagentLabel({ agentId: 'a1' }, [{ agentId: 'a1', description: 'x'.repeat(200), updatedAt: 1 }])
+    expect(label).toHaveLength(80)
   })
 })

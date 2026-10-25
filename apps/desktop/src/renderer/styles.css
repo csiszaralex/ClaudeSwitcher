@@ -88,7 +88,15 @@ body {
 .decision-kind { color: #d97757; font-weight: 600; }
 .decision-tool { color: #a8a6a2; }
 .decision-lines { flex: none; color: #e3b341; font-size: 11px; }
-.decision-agent { color: #7aa2c4; margin-left: auto; }
+/* A subagent feladatleírása hosszú lehet: egy sorban, csonkolva; a teljes szöveg a tooltipben. */
+.decision-agent {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #7aa2c4;
+}
 .decision-warning { margin: 8px 0 0; color: #e0796b; font-weight: 600; }
 /* Egy láthatatlan karakter escape-je (summary-view.ts): elüt a parancs szövegétől. */
 .invisible-char { padding: 0 1px; border-radius: 2px; background: #e0796b33; color: #e0796b; }

@@ -29,6 +29,8 @@ type Mode = 'buttons' | 'deny' | 'rule-project' | 'rule-machine'
 
 interface Props {
   decision: PendingDecisionView
+  /** A kérő subagent felirata a fejlécben (format.ts `subagentLabel`); a fő sessionnél nincs. */
+  agentLabel: string | undefined
   /** Az App billentyű-előzménye: az overlay megjelenése és az utolsó szövegmezős leütés (key-guard.ts). */
   keyHistory: RefObject<KeyHistory>
   /** A daemon elfogadta a döntést — az App ebből lépteti a kijelölést, vagy rejti el az overlayt. */
@@ -41,7 +43,7 @@ interface Props {
  * Egy függő kérés döntési panelje. A döntést a main processzen át a daemon ellenőrzi és
  * továbbítja; siker esetén a következő állapot leveszi a kérést, és a panel eltűnik.
  */
-export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props): JSX.Element {
+export function DecisionPanel({ decision, agentLabel, keyHistory, onDecided, onJump }: Props): JSX.Element {
   const [mode, setMode] = useState<Mode>('buttons')
   const [denyText, setDenyText] = useState('')
   const [error, setError] = useState<string | undefined>()
@@ -286,7 +288,6 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
   // fájl soronkénti összevetése ne fusson le minden tikkre.
   const { preview, details } = useMemo(() => panelContent(decision), [decision])
   const summary = useMemo(() => summaryView(decision.summary), [decision])
-  const agent = decision.agentType === undefined ? undefined : `subagent · ${decision.agentType}`
   const limitNote = (
     <p className="muted">
       Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik — a teljes
@@ -306,7 +307,11 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
         <span className="decision-kind">{KIND_LABEL[decision.kind]}</span>
         <span className="decision-tool">{decision.toolName}</span>
         {summary.lines > 1 && <span className="decision-lines">{summary.lines.toLocaleString('hu-HU')} sor</span>}
-        {agent !== undefined && <span className="decision-agent">{agent}</span>}
+        {agentLabel !== undefined && (
+          <span className="decision-agent" title={agentLabel}>
+            {agentLabel}
+          </span>
+        )}
       </header>
       <div className="decision-scroll">
         {sandboxDisabled(decision.toolInput) && (

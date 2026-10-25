@@ -2,7 +2,7 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, formatResetsIn, pendingRowText, subagentTooltip, summarize } from './format.js'
+import { formatDuration, formatResetsIn, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
@@ -195,6 +195,7 @@ export function App(): JSX.Element {
         <DecisionPanel
           key={decision.id}
           decision={decision}
+          agentLabel={subagentLabel(decision, selectedRowView.session?.subagents)}
           keyHistory={keyHistory}
           onDecided={() => {
             afterDecision(decision).catch((error: unknown) => {
