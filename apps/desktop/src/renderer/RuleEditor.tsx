@@ -2,10 +2,13 @@ import type { PermissionRule } from '@claudeswitcher/core'
 import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
 import { isSubmitChord } from './decision-actions.js'
+import { broadRules, editorRows } from './rule-editor.js'
 
 interface Props {
   /** A Claude Code javaslata, soronként egy szabály — a felhasználó átírhatja. */
   initial: string
+  /** Hány javaslat maradt ki a kezdőszövegből, mert sortörés van benne (rule-editor.ts `ruleEditorSeed`). */
+  multilineSuggestions: number
   /** Gépszint: minden projektre és sessionre hat, ezért külön megerősítés kell. */
   machine: boolean
   busy: boolean
@@ -17,9 +20,12 @@ interface Props {
  * A szabály szerkeszthető előnézete. Amíg egy sor nem értelmezhető, nem lehet beküldeni: egy
  * csendben „javított" szabály más engedélyt adna, mint amit a felhasználó lát.
  */
-export function RuleEditor({ initial, machine, busy, onSubmit, onCancel }: Props): JSX.Element {
+export function RuleEditor({ initial, multilineSuggestions, machine, busy, onSubmit, onCancel }: Props): JSX.Element {
   const [text, setText] = useState(initial)
-  const [confirmed, setConfirmed] = useState(false)
+  const [machineConfirmed, setMachineConfirmed] = useState(false)
+  // Melyik széles szabálylistát erősítette meg a felhasználó. Ha a lista változik, a pipa nem
+  // viheti át a megerősítést egy másik, általa még nem látott szabályra.
+  const [broadConfirmedFor, setBroadConfirmedFor] = useState<string | undefined>()
 
   const parsed = parseRules(text)
   const rules = parsed.ok ? parsed.rules : []
@@ -28,7 +34,14 @@ export function RuleEditor({ initial, machine, busy, onSubmit, onCancel }: Props
     : rules.length === 0
       ? 'Legalább egy szabály kell.'
       : undefined
-  const canSubmit = problem === undefined && !busy && (!machine || confirmed)
+
+  const broad = broadRules(rules)
+  const broadKey = broad
+    .filter((warning) => warning.confirm)
+    .map((warning) => warning.rule)
+    .join('\n')
+  const broadConfirmed = broadKey === '' || broadConfirmedFor === broadKey
+  const canSubmit = problem === undefined && !busy && (!machine || machineConfirmed) && broadConfirmed
 
   return (
     <form
@@ -43,9 +56,16 @@ export function RuleEditor({ initial, machine, busy, onSubmit, onCancel }: Props
           ? 'Gépszintű szabály — minden projektre és sessionre érvényes (~/.claude/settings.json).'
           : 'Projekt-szabály — csak ebben a projektben (.claude/settings.local.json).'}
       </p>
+      {multilineSuggestions > 0 && (
+        <p className="decision-error">
+          {multilineSuggestions === 1 ? 'Egy javasolt szabály' : `${String(multilineSuggestions)} javasolt szabály`}{' '}
+          többsoros, ezért kimaradt: soronként egy szabályt olvasunk, így több, mást engedélyező
+          szabállyá esne szét. Írj egysoros szabályt, vagy dönts a VSCode-ban.
+        </p>
+      )}
       <textarea
         autoFocus
-        rows={3}
+        rows={editorRows(text)}
         spellCheck={false}
         value={text}
         onChange={(event) => {
@@ -63,13 +83,30 @@ export function RuleEditor({ initial, machine, busy, onSubmit, onCancel }: Props
         }}
       />
       {problem !== undefined && <p className="decision-error">{problem}</p>}
+      {broad.length > 0 && (
+        <p className="decision-error">
+          Az eszköz minden hívását engedélyezi: {broad.map((warning) => warning.rule).join(', ')}
+        </p>
+      )}
+      {broadKey !== '' && (
+        <label className="confirm">
+          <input
+            type="checkbox"
+            checked={broadConfirmed}
+            onChange={(event) => {
+              setBroadConfirmedFor(event.target.checked ? broadKey : undefined)
+            }}
+          />{' '}
+          Értem, hogy ez a szabály az eszköz minden hívását engedélyezi
+        </label>
+      )}
       {machine && (
         <label className="confirm">
           <input
             type="checkbox"
-            checked={confirmed}
+            checked={machineConfirmed}
             onChange={(event) => {
-              setConfirmed(event.target.checked)
+              setMachineConfirmed(event.target.checked)
             }}
           />{' '}
           Értem, hogy ez a gép minden sessionjére érvényes
@@ -79,6 +116,7 @@ export function RuleEditor({ initial, machine, busy, onSubmit, onCancel }: Props
         <button type="submit" disabled={!canSubmit}>
           Engedélyez és felveszi a szabályt
         </button>
+        <span className="muted">{rules.length.toLocaleString('hu-HU')} szabály</span>
         <button type="button" onClick={onCancel}>
           Mégse
         </button>

@@ -159,6 +159,21 @@ describe('sanitizeState', () => {
     expect(clean?.decisions).toEqual([good])
   })
 
+  it('keeps an unreadable decision, and drops one whose readable flag is missing or not a boolean', () => {
+    // A panel ebből dönti el, kínál-e engedélyezést; egy hiányzó jelző nem számíthat olvashatónak.
+    const good = decisionFrom('permissionRequest_bash')
+    expect(good['readable']).toBe(true)
+    const blind = { ...good, id: 'blind', readable: false }
+    const missing: Record<string, unknown> = { ...good, id: 'missing' }
+    delete missing['readable']
+    const clean = sanitizeState({
+      sessions: [],
+      rateLimits: {},
+      decisions: [good, blind, missing, { ...good, id: 'text', readable: 'yes' }],
+    })
+    expect(clean?.decisions).toEqual([good, blind])
+  })
+
   it('defaults decisions to an empty list when an older daemon omits them', () => {
     expect(sanitizeState({ sessions: [], rateLimits: {} })?.decisions).toEqual([])
   })

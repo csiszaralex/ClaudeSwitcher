@@ -52,6 +52,14 @@ function clip(raw: string): string {
 }
 
 /**
+ * Egy függő kérés a sorban: `Bash: <parancs>`, egy sorba vágva. Egy több száz kilobájtos parancs
+ * így nem kerül egészében a DOM-ba minden másodperces újrarenderelésnél; a teljes szöveg a panelé.
+ */
+export function pendingRowText(pending: { toolName: string; summary: string }): string {
+  return clip(`${pending.toolName}: ${pending.summary}`)
+}
+
+/**
  * A sor összefoglalója. Sorrend: egy várakozó session értesítése; az aktív subagent munkája
  * (a legutóbbi, és `+N`, ha több is fut) — a fő session ilyenkor csak az `Agent` toolt futtatja,
  * vagy a Stop után már semmit; a fő session futó toolja; végül az utolsó assistant-szöveg.

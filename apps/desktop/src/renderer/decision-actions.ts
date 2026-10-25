@@ -14,8 +14,13 @@ const SHORTCUTS: Readonly<Record<DecisionKind, Readonly<Record<string, DecisionA
   plan: {},
 }
 
-export function shortcutFor(kind: DecisionKind, key: string): DecisionAction | undefined {
-  return SHORTCUTS[kind][key.toLowerCase()]
+/**
+ * Olvashatatlan kérésnél (`readable === false`) csak a tiltás marad: engedélyezést a core
+ * `buildHookResponse` úgyis elutasítana.
+ */
+export function shortcutFor(kind: DecisionKind, key: string, readable: boolean): DecisionAction | undefined {
+  const action = SHORTCUTS[kind][key.toLowerCase()]
+  return readable || action === 'deny' ? action : undefined
 }
 
 /**

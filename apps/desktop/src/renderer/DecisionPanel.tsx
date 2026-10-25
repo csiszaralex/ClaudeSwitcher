@@ -1,5 +1,5 @@
 import type { UserDecision } from '@claudeswitcher/core'
-import { formatRule } from '@claudeswitcher/core/browser'
+import { UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
 import {
@@ -14,7 +14,9 @@ import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
 import { LINE_MARK, panelContent } from './edit-preview.js'
-import { DETAILS_LIMIT } from './tool-details.js'
+import { ruleEditorSeed } from './rule-editor.js'
+import { summaryView } from './summary-view.js'
+import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
 
 const KIND_LABEL = {
   tool: 'Engedélyt kér',
@@ -110,7 +112,7 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
       }
       const clock = { armedAt: armedAt(), lastTypedAt: keyHistory.current.lastTypedAt, now: Date.now() }
       if (!shortcutAllowed(key, clock)) return
-      const action = shortcutFor(decision.kind, event.key)
+      const action = shortcutFor(decision.kind, event.key, decision.readable)
       if (action === undefined) return
       event.preventDefault()
       run(action)
@@ -176,9 +178,11 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
 
     if (mode === 'rule-project' || mode === 'rule-machine') {
       const destination = mode === 'rule-machine' ? 'userSettings' : 'localSettings'
+      const seed = ruleEditorSeed(decision.suggestedRules)
       return (
         <RuleEditor
-          initial={decision.suggestedRules.map(formatRule).join('\n')}
+          initial={seed.text}
+          multilineSuggestions={seed.multiline}
           machine={mode === 'rule-machine'}
           busy={busy}
           onSubmit={(rules) => {
@@ -188,6 +192,22 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
             setMode('buttons')
           }}
         />
+      )
+    }
+
+    // Olvashatatlan parancs, fájl vagy URL: engedélyezést a core úgyis elutasítana. A sor ne legyen
+    // zsákutca: tiltani lehet, és a natív prompt a VSCode-ban ott van.
+    if (!decision.readable) {
+      return (
+        <div className="decision-row">
+          <span className="muted">{UNREADABLE_REQUEST}</span>
+          <button type="button" disabled={busy} onClick={() => { run('deny') }}>
+            <kbd>D</kbd> Tilt…
+          </button>
+          <button type="button" onClick={onJump}>
+            Ugrás a VSCode-ba
+          </button>
+        </div>
       )
     }
 
@@ -265,6 +285,8 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
   // Az App másodpercenként újrarenderel (az órák miatt); egy nagy szkript formázása vagy egy
   // fájl soronkénti összevetése ne fusson le minden tikkre.
   const { preview, details } = useMemo(() => panelContent(decision), [decision])
+  const summary = useMemo(() => summaryView(decision.summary), [decision])
+  const agent = decision.agentType === undefined ? undefined : `subagent · ${decision.agentType}`
   const limitNote = (
     <p className="muted">
       Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik — a teljes
@@ -272,7 +294,6 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
     </p>
   )
 
-  const agent = decision.agentType === undefined ? undefined : `subagent · ${decision.agentType}`
   // Kérdésnél és tervnél a művelet-terület maga is hosszú (kérdések, tervszöveg): ott a belseje
   // görget, a küldő gombok pedig alul maradnak.
   const fill = decision.kind === 'question' || decision.kind === 'plan'
@@ -284,10 +305,26 @@ export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props
       <header className="decision-head">
         <span className="decision-kind">{KIND_LABEL[decision.kind]}</span>
         <span className="decision-tool">{decision.toolName}</span>
+        {summary.lines > 1 && <span className="decision-lines">{summary.lines.toLocaleString('hu-HU')} sor</span>}
         {agent !== undefined && <span className="decision-agent">{agent}</span>}
       </header>
       <div className="decision-scroll">
-        <pre className="decision-summary">{decision.summary}</pre>
+        {sandboxDisabled(decision.toolInput) && (
+          <p className="decision-warning">Sandbox nélkül futna (dangerouslyDisableSandbox: true).</p>
+        )}
+        <pre className="decision-summary">
+          {summary.segments.map((segment, index) =>
+            // A láthatatlan karakter escape-je kiemelve, hogy ne lehessen a parancs részének nézni.
+            segment.hidden ? (
+              <span key={index} className="invisible-char">
+                {segment.text}
+              </span>
+            ) : (
+              segment.text
+            ),
+          )}
+        </pre>
+        {summary.truncated && limitNote}
         {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
         {preview !== undefined && (
           // Alapból nyitva: ez maga a jóváhagyandó tartalom. Natív <details>, hogy összecsukható legyen.

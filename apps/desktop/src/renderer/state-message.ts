@@ -43,6 +43,8 @@ function isDecision(value: unknown): value is PendingDecisionView {
     // Opcionális: egy régebbi daemon nem küldi. Ha jön, szövegnek kell lennie — a panel annak rendereli.
     (description === undefined || typeof description === 'string') &&
     typeof value['released'] === 'boolean' &&
+    // Kötelező: ebből dönti el a panel, kínál-e engedélyezést. Hiányzó jelző nem számíthat olvashatónak.
+    typeof value['readable'] === 'boolean' &&
     typeof kind === 'string' &&
     DECISION_KINDS.has(kind) &&
     Array.isArray(questions) &&

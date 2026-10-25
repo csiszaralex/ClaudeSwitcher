@@ -11,28 +11,28 @@ import {
 
 describe('shortcutFor', () => {
   it('maps the command keys, case-insensitively', () => {
-    expect(['a', 'd', 'p', 'g', 'A'].map((key) => shortcutFor('tool', key))).toEqual([
+    expect(['a', 'd', 'p', 'g', 'A'].map((key) => shortcutFor('tool', key, true))).toEqual([
       'allow',
       'deny',
       'rule-project',
       'rule-machine',
       'allow',
     ])
-    expect(shortcutFor('tool', 'x')).toBeUndefined()
+    expect(shortcutFor('tool', 'x', true)).toBeUndefined()
   })
 
   it('offers session edits for a file write, and no rules', () => {
-    expect(shortcutFor('edit', 's')).toBe('session-edits')
-    expect(shortcutFor('edit', 'p')).toBeUndefined()
-    expect(shortcutFor('edit', 'g')).toBeUndefined()
+    expect(shortcutFor('edit', 's', true)).toBe('session-edits')
+    expect(shortcutFor('edit', 'p', true)).toBeUndefined()
+    expect(shortcutFor('edit', 'g', true)).toBeUndefined()
   })
 
   it('has no key for a question — it can only be answered through the form', () => {
-    for (const key of ['a', 'd', 'p', 'g', 's']) expect(shortcutFor('question', key)).toBeUndefined()
+    for (const key of ['a', 'd', 'p', 'g', 's']) expect(shortcutFor('question', key, true)).toBeUndefined()
   })
 
   it('has no key for a plan — a stray key must not reject it, and approval happens in VS Code', () => {
-    for (const key of ['a', 'd', 'p', 'g', 's']) expect(shortcutFor('plan', key)).toBeUndefined()
+    for (const key of ['a', 'd', 'p', 'g', 's']) expect(shortcutFor('plan', key, true)).toBeUndefined()
   })
 })
 
@@ -121,5 +121,12 @@ describe('isUnreadableQuestion', () => {
     expect(isUnreadableQuestion({ kind: 'question', questions: [question] })).toBe(false)
     expect(isUnreadableQuestion({ kind: 'tool', questions: [] })).toBe(false)
     expect(isUnreadableQuestion({ kind: 'plan', questions: [] })).toBe(false)
+  })
+})
+
+describe('shortcutFor — olvashatatlan kérés', () => {
+  it('leaves only deny on the keyboard, since no allow can go out for it', () => {
+    expect(['a', 'd', 'p', 'g'].map((key) => shortcutFor('tool', key, false))).toEqual([undefined, 'deny', undefined, undefined])
+    expect(['a', 'd', 's'].map((key) => shortcutFor('edit', key, false))).toEqual([undefined, 'deny', undefined])
   })
 })

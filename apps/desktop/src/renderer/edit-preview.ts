@@ -1,5 +1,5 @@
 import type { DecisionKind } from '@claudeswitcher/core'
-import { DETAILS_LIMIT, formatToolInput, showsDetails, type ToolDetails } from './tool-details.js'
+import { DETAILS_LIMIT, formatToolInput, toolDetails, type ToolDetails } from './tool-details.js'
 
 /**
  * Egy blokkban legfeljebb ennyi sor látszik. A karakterkorlát (`DETAILS_LIMIT`) egy sok rövid
@@ -242,5 +242,5 @@ export function panelContent(decision: { kind: DecisionKind; toolName: string; t
     const details = formatToolInput(decision.toolInput)
     return { preview: undefined, details: details.blocks.length > 0 ? details : undefined }
   }
-  return { preview: undefined, details: showsDetails(decision) ? formatToolInput(decision.toolInput) : undefined }
+  return { preview: undefined, details: toolDetails(decision) }
 }

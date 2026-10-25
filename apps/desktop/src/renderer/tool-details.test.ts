@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DETAILS_LIMIT, formatToolInput, showsDetails } from './tool-details.js'
+import { DETAILS_LIMIT, formatToolInput, sandboxDisabled, showsDetails, toolDetails } from './tool-details.js'
 
 describe('showsDetails', () => {
   it('offers details for a tool request with input', () => {
@@ -62,5 +62,40 @@ describe('formatToolInput', () => {
   it('returns nothing for a non-object', () => {
     expect(formatToolInput(null)).toEqual({ blocks: [], truncated: false })
     expect(formatToolInput('x')).toEqual({ blocks: [], truncated: false })
+  })
+})
+
+describe('toolDetails — parancsot futtató eszköz', () => {
+  it('shows every field of a shell request except the command and its description', () => {
+    const decision = {
+      kind: 'tool' as const,
+      toolName: 'Bash',
+      toolInput: { command: 'ls', description: 'd', run_in_background: true, timeout: 5000 },
+    }
+    expect(showsDetails(decision)).toBe(true)
+    expect(toolDetails(decision)).toEqual({
+      blocks: [{ text: JSON.stringify({ run_in_background: true, timeout: 5000 }, null, 2) }],
+      truncated: false,
+    })
+  })
+
+  it('has no details for a shell request with only a command and a description', () => {
+    expect(toolDetails({ kind: 'tool', toolName: 'PowerShell', toolInput: { command: 'ls', description: 'd' } })).toBeUndefined()
+  })
+
+  it('keeps every field for any other tool', () => {
+    expect(toolDetails({ kind: 'tool', toolName: 'mcp__x__y', toolInput: { command: 'c', description: 'd' } })?.blocks).toEqual([
+      { text: JSON.stringify({ command: 'c', description: 'd' }, null, 2) },
+    ])
+  })
+})
+
+describe('sandboxDisabled', () => {
+  it('is true only for an explicit dangerouslyDisableSandbox: true', () => {
+    expect(sandboxDisabled({ command: 'ls', dangerouslyDisableSandbox: true })).toBe(true)
+    expect(sandboxDisabled({ command: 'ls', dangerouslyDisableSandbox: false })).toBe(false)
+    expect(sandboxDisabled({ command: 'ls', dangerouslyDisableSandbox: 'true' })).toBe(false)
+    expect(sandboxDisabled({ command: 'ls' })).toBe(false)
+    expect(sandboxDisabled(null)).toBe(false)
   })
 })

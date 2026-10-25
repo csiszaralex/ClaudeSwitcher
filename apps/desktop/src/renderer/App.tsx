@@ -2,7 +2,7 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, formatResetsIn, subagentTooltip, summarize } from './format.js'
+import { formatDuration, formatResetsIn, pendingRowText, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
@@ -172,7 +172,7 @@ export function App(): JSX.Element {
                 title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
               >
                 {pending !== undefined
-                  ? `${pending.toolName}: ${pending.summary}`
+                  ? pendingRowText(pending)
                   : row.session !== undefined
                     ? summarize(row.session)
                     : ''}

@@ -75,7 +75,11 @@ body {
 .decision-actions.fill { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .decision-kind { color: #d97757; font-weight: 600; }
 .decision-tool { color: #a8a6a2; }
+.decision-lines { flex: none; color: #e3b341; font-size: 11px; }
 .decision-agent { color: #7aa2c4; margin-left: auto; }
+.decision-warning { margin: 8px 0 0; color: #e0796b; font-weight: 600; }
+/* Egy láthatatlan karakter escape-je (summary-view.ts): elüt a parancs szövegétől. */
+.invisible-char { padding: 0 1px; border-radius: 2px; background: #e0796b33; color: #e0796b; }
 .decision-summary {
   margin: 8px 0;
   white-space: pre-wrap;

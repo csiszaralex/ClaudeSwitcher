@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, formatResetsIn, subagentTooltip, summarize, toolLabel } from './format.js'
+import { formatDuration, formatResetsIn, pendingRowText, subagentTooltip, summarize, toolLabel } from './format.js'
 
 describe('formatDuration', () => {
   it('renders seconds under a minute', () => {
@@ -127,5 +127,14 @@ describe('subagentTooltip', () => {
   it('has no tooltip without subagents', () => {
     expect(subagentTooltip(undefined)).toBeUndefined()
     expect(subagentTooltip([])).toBeUndefined()
+  })
+})
+
+describe('pendingRowText', () => {
+  it('names the tool and the request in one clipped line, like the other row texts', () => {
+    expect(pendingRowText({ toolName: 'Bash', summary: 'git add -A\n  git commit' })).toBe('Bash: git add -A git commit')
+    const long = pendingRowText({ toolName: 'Bash', summary: `cat <<END\n${'x'.repeat(100_000)}\nEND` })
+    expect(long).toHaveLength(80)
+    expect(long.endsWith('…')).toBe(true)
   })
 })

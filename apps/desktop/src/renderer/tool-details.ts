@@ -11,11 +11,15 @@ export const DETAILS_LIMIT = 20_000
 const LONG_STRING = 120
 
 /**
- * Parancsot futtató eszközök: náluk a parancs (az összefoglaló) maga a tartalom, a leírás
- * alatta áll, a többi mező (timeout, háttérfutás) a döntéshez nem ad hozzá — a részletek
- * csak ismételnék a fenti szöveget.
+ * Parancsot futtató eszközök: náluk a parancs (az összefoglaló) és a leírás már a panel tetején
+ * áll, a részletek ezeket nem ismétlik. Minden más mezőjük (timeout, háttérfutás, a sandbox
+ * kikapcsolása) a részletekbe kerül: egy rejtett mező mellett a sandbox nélküli futás ugyanúgy
+ * nézne ki, mint a sandboxos.
  */
-const NO_DETAILS_TOOLS = new Set(['Bash', 'PowerShell'])
+const SHOWN_ABOVE: Readonly<Record<string, ReadonlySet<string>>> = {
+  Bash: new Set(['command', 'description']),
+  PowerShell: new Set(['command', 'description']),
+}
 
 export interface DetailBlock {
   /** A mező neve, ha a blokk egyetlen szöveges mező; a JSON-blokknak nincs. */
@@ -33,17 +37,44 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+interface DetailSource {
+  kind: DecisionKind
+  toolName: string
+  /** A `toolInput`-ot a sanitizeState nem ellenőrzi, ezért `unknown`. */
+  toolInput: unknown
+}
+
+/** A részletekbe kerülő mezők: a bemenet, a panel tetején már látható mezők nélkül. */
+function detailFields(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
+  const above = SHOWN_ABOVE[toolName]
+  if (above === undefined) return input
+  return Object.fromEntries(Object.entries(input).filter(([key]) => !above.has(key)))
+}
+
 /**
  * Kap-e a kérés lenyitható részleteket. Csak `tool` fajtánál: a fájlírásnak, a kérdésnek és a
- * tervnek saját nézete van. A `toolInput`-ot a sanitizeState nem ellenőrzi, ezért `unknown`.
+ * tervnek saját nézete van. Parancsnál csak akkor, ha a parancson és a leíráson kívül is van mező.
  */
-export function showsDetails(decision: { kind: DecisionKind; toolName: string; toolInput: unknown }): boolean {
+export function showsDetails(decision: DetailSource): boolean {
   return (
     decision.kind === 'tool' &&
-    !NO_DETAILS_TOOLS.has(decision.toolName) &&
     isPlainObject(decision.toolInput) &&
-    Object.keys(decision.toolInput).length > 0
+    Object.keys(detailFields(decision.toolName, decision.toolInput)).length > 0
   )
+}
+
+/** A `tool` fajtájú kérés részletei a `showsDetails` szerint; `undefined`, ha nincs mit mutatni. */
+export function toolDetails(decision: DetailSource): ToolDetails | undefined {
+  if (!showsDetails(decision) || !isPlainObject(decision.toolInput)) return undefined
+  return formatToolInput(detailFields(decision.toolName, decision.toolInput))
+}
+
+/**
+ * A Bash `dangerouslyDisableSandbox: true` mezője: a parancs a sandboxon kívül futna. A panel
+ * ezt piros sorban, a részletek lenyitása nélkül is mutatja. Csak a kifejezett `true` számít.
+ */
+export function sandboxDisabled(toolInput: unknown): boolean {
+  return isPlainObject(toolInput) && toolInput['dangerouslyDisableSandbox'] === true
 }
 
 /**
