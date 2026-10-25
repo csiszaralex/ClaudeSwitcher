@@ -1,8 +1,39 @@
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
+import * as realFs from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { mergeSettings, transformSettingsFile, updateSettingsFile } from './settings-writer.js'
+import { describe, expect, it, onTestFinished } from 'vitest'
+import {
+  SETTINGS_BACKUP_SUFFIX,
+  mergeSettings,
+  transformSettingsFile,
+  updateSettingsFile,
+  type SettingsFs,
+} from './settings-writer.js'
+
+/** Saját mkdtemp könyvtár, amit a teszt végén eltakarítunk. */
+async function tempDir(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'cs-writer-'))
+  onTestFinished(() => rm(dir, { recursive: true, force: true }))
+  return dir
+}
+
+/** A valódi fájlrendszer, amelynek egyes műveleteit a teszt felülírja. */
+function fsWith(overrides: Partial<SettingsFs>): SettingsFs {
+  return {
+    readFile: (file, encoding) => realFs.readFile(file, encoding),
+    writeFile: (file, data, encoding) => realFs.writeFile(file, data, encoding),
+    rename: (from, to) => realFs.rename(from, to),
+    unlink: (file) => realFs.unlink(file),
+    stat: (file) => realFs.stat(file),
+    copyFile: (from, to, mode) => realFs.copyFile(from, to, mode),
+    ...overrides,
+  }
+}
+
+function codedError(code: string): Error {
+  return Object.assign(new Error(`${code}: simulated`), { code })
+}
 
 describe('mergeSettings', () => {
   it('preserves unrelated keys', () => {
@@ -170,5 +201,167 @@ describe('transformSettingsFile', () => {
     ])
 
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ a: 1, b: 2, c: 3 })
+  })
+})
+
+describe('transformSettingsFile never loses the existing settings', () => {
+  const ORIGINAL = JSON.stringify({ model: 'opus', permissions: { allow: ['Bash(ls)'] } }, null, 2)
+
+  it('refuses to write when the read fails with anything but ENOENT', async () => {
+    // Egy foglalt fájl (EBUSY) nem „nincs meg": régen `{}` lett belőle, és a telepítés csak a mi
+    // kulcsainkkal írta felül a felhasználó teljes beállítását.
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, ORIGINAL)
+    let called = false
+    const fs = fsWith({ readFile: () => Promise.reject(codedError('EBUSY')) })
+
+    await expect(
+      transformSettingsFile(file, (existing) => {
+        called = true
+        return existing
+      }, { fs }),
+    ).rejects.toThrow(/EBUSY/)
+
+    expect(called).toBe(false)
+    expect(await readFile(file, 'utf8')).toBe(ORIGINAL)
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('retries an empty read and writes once the content shows up', async () => {
+    // Egy másik író épp csonkolta a fájlt: a következő olvasás már a teljes tartalmat látja.
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, ORIGINAL)
+    let reads = 0
+    const fs = fsWith({
+      readFile: (target, encoding) => {
+        reads += 1
+        return reads === 1 ? Promise.resolve('  \n') : realFs.readFile(target, encoding)
+      },
+    })
+
+    await updateSettingsFile(file, { statusLine: { type: 'command' } }, { fs })
+
+    expect(reads).toBeGreaterThan(1)
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      model: 'opus',
+      permissions: { allow: ['Bash(ls)'] },
+      statusLine: { type: 'command' },
+    })
+  })
+
+  it('refuses to write a file that stays empty instead of treating it as {}', async () => {
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, '')
+    let called = false
+
+    await expect(
+      transformSettingsFile(file, (existing) => {
+        called = true
+        return existing
+      }),
+    ).rejects.toThrow(/empty/i)
+
+    expect(called).toBe(false)
+    expect(await readFile(file, 'utf8')).toBe('')
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('redoes the write when another writer changed the file meanwhile, keeping its keys', async () => {
+    // Claude Code vagy egy szerkesztő a mi olvasásunk és átnevezésünk között ír a fájlba.
+    // Az átnevezés előtti stat ezt észreveszi, és az ő tartalmára dolgozunk újra.
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, ORIGINAL)
+    let interfered = false
+    const fs = fsWith({
+      writeFile: async (target, data, encoding) => {
+        if (!interfered && target !== file) {
+          interfered = true
+          await realFs.writeFile(file, JSON.stringify({ model: 'sonnet', theirs: true }), 'utf8')
+        }
+        await realFs.writeFile(target, data, encoding)
+      },
+    })
+
+    await updateSettingsFile(file, { ours: 1 }, { fs, backup: false })
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ model: 'sonnet', theirs: true, ours: 1 })
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('gives up after a bounded number of conflicting writes, leaving the other writer\'s file', async () => {
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, ORIGINAL)
+    let round = 0
+    const fs = fsWith({
+      writeFile: async (target, data, encoding) => {
+        if (target !== file) {
+          round += 1
+          await realFs.writeFile(file, JSON.stringify({ round }), 'utf8')
+        }
+        await realFs.writeFile(target, data, encoding)
+      },
+    })
+
+    await expect(updateSettingsFile(file, { ours: 1 }, { fs, backup: false })).rejects.toThrow(/changed/i)
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ round })
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('backs up the existing file once before the first change and never overwrites the backup', async () => {
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    const backup = `${file}${SETTINGS_BACKUP_SUFFIX}`
+    await writeFile(file, ORIGINAL)
+
+    await updateSettingsFile(file, { a: 1 })
+    expect(await readFile(backup, 'utf8')).toBe(ORIGINAL)
+
+    await updateSettingsFile(file, { b: 2 })
+    expect(await readFile(backup, 'utf8')).toBe(ORIGINAL)
+  })
+
+  it('keeps a backup that already exists', async () => {
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    const backup = `${file}${SETTINGS_BACKUP_SUFFIX}`
+    await writeFile(file, ORIGINAL)
+    await writeFile(backup, 'the very first one')
+
+    await updateSettingsFile(file, { a: 1 })
+
+    expect(await readFile(backup, 'utf8')).toBe('the very first one')
+  })
+
+  it('makes no backup for a file that did not exist', async () => {
+    // Egy vadonatúj gépen nincs settings.json (ENOENT): ez továbbra is üres beállításként indul.
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    await updateSettingsFile(file, { a: 1 })
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('neither writes nor backs up when the transform changes nothing', async () => {
+    const dir = await tempDir()
+    const file = path.join(dir, 'settings.json')
+    const formatted = `${JSON.stringify({ a: 1 }, null, 2)}\n`
+    await writeFile(file, formatted)
+    let writes = 0
+    const fs = fsWith({
+      writeFile: (target, data, encoding) => {
+        writes += 1
+        return realFs.writeFile(target, data, encoding)
+      },
+    })
+
+    await transformSettingsFile(file, (existing) => existing, { fs })
+
+    expect(writes).toBe(0)
+    expect(await readdir(dir)).toEqual(['settings.json'])
   })
 })
