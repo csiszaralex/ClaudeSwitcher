@@ -8,6 +8,13 @@ export class Hub {
 
   constructor(server: Server, private readonly token: string) {
     this.#wss = new WebSocketServer({ server, path: '/ws' })
+    // A ws a HTTP szerver `error` eseményét a WebSocketServeren újra kibocsátja (ws 8.21.3,
+    // `addListeners(this._server, { error: ... })`). Figyelő nélkül egy EventEmitter `error`
+    // dob, ami a main processzben elkapatlan kivétel lenne. Itt csak naplózzuk; a szerver
+    // `error` figyelője a `startDaemon`-ban a listen után már nem tesz semmit.
+    this.#wss.on('error', (error) => {
+      console.error('[hub] server error', error)
+    })
     this.#wss.on('connection', (socket, request) => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1')
       if (url.searchParams.get('token') !== this.token) {
