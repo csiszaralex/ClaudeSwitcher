@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { isNotFoundError, transformSettingsFile } from '@claudeswitcher/core'
 
 /**
  * Az overlay gyorsbillentyűjének alapértéke.
@@ -39,12 +40,16 @@ export function configPath(dir: string): string {
   return path.join(dir, 'config.json')
 }
 
-/** A fájl nyers tartalma, vagy `undefined`, ha nem olvasható (tipikusan: nincs meg). */
+/**
+ * A fájl nyers tartalma, vagy `undefined`, ha nincs meg (ENOENT). Minden más olvasási hiba dob:
+ * egy foglalt vagy olvashatatlan fájl nem „hiányzik", tehát az alapértékekkel sem írhatjuk felül.
+ */
 async function readRaw(file: string): Promise<string | undefined> {
   try {
     return await readFile(file, 'utf8')
-  } catch {
-    return undefined
+  } catch (error) {
+    if (isNotFoundError(error)) return undefined
+    throw error
   }
 }
 
@@ -62,23 +67,34 @@ function parseObject(raw: string): Record<string, unknown> | undefined {
 }
 
 /**
- * Atomikus írás: ideiglenes fájl, majd átnevezés. Egy félbeszakadt írás így nem hagy
- * félkész configot, amit a következő indulás már elrontottnak látna.
+ * Olvasás, módosítás, írás a core sorba állított, atomikus JSON-írójával (`transformSettingsFile`):
+ * egyedi temp név, átnevezés, fájlonkénti sor, és elutasítás elrontott, üres vagy olvashatatlan
+ * fájlnál. A `change` a meglévő objektumot kapja; egy hiányzó fájl üres objektumként érkezik.
+ * Biztonsági másolat a saját config fájlunkhoz nem kell.
  */
-async function writeObject(dir: string, value: Record<string, unknown>): Promise<void> {
-  const file = configPath(dir)
+async function transformConfig(
+  dir: string,
+  change: (existing: Record<string, unknown>) => Record<string, unknown>,
+): Promise<void> {
   await mkdir(dir, { recursive: true })
-  const temp = `${file}.${process.pid}.tmp`
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  await rename(temp, file)
+  await transformSettingsFile(configPath(dir), change, { backup: false })
+}
+
+/**
+ * Hiányzó fájlnál az alapértékek. Egy `{}` tartalmú fájl ugyanígy üres objektumként érkezik, és
+ * ugyanazt jelenti (minden kulcs az alapértékén), tehát az alapértékekkel feltölteni nem változtat
+ * a jelentésén.
+ */
+function orDefaults(existing: Record<string, unknown>): Record<string, unknown> {
+  return Object.keys(existing).length === 0 ? { ...DEFAULT_CONFIG } : existing
 }
 
 /**
  * Beolvassa a beállításokat, és soha nem dob.
  *
- * Ha a fájl nincs meg, kiírja az alapértékekkel — különben a felhasználó nem tudná, mit és
- * hol szerkeszthet. Ha a fájl elromlott, az alapértékeket adja, de NEM írja felül: a kézi
- * szerkesztés maradjon meg, hogy ki lehessen javítani. Egy írhatatlan könyvtár sem
+ * Ha a fájl nincs meg, kiírja az alapértékekkel, különben a felhasználó nem tudná, mit és
+ * hol szerkeszthet. Ha a fájl elromlott vagy nem olvasható, az alapértékeket adja, de NEM írja
+ * felül: a kézi szerkesztés maradjon meg, hogy ki lehessen javítani. Egy írhatatlan könyvtár sem
  * akadályozza meg az indulást.
  *
  * A kulcsokat egyenként olvassuk: egy hibás gyorsbillentyű nem viszi el a jó auto-hide vagy
@@ -86,7 +102,13 @@ async function writeObject(dir: string, value: Record<string, unknown>): Promise
  * alapértékkel töltődik be — átírás nélkül.
  */
 export async function loadConfig(dir: string): Promise<Config> {
-  const raw = await readRaw(configPath(dir))
+  let raw: string | undefined
+  try {
+    raw = await readRaw(configPath(dir))
+  } catch (error) {
+    console.error('[claudeswitcher] could not read the config file; using defaults', error)
+    return { ...DEFAULT_CONFIG }
+  }
 
   if (raw !== undefined) {
     const parsed = parseObject(raw)
@@ -101,7 +123,8 @@ export async function loadConfig(dir: string): Promise<Config> {
 
   const config: Config = { ...DEFAULT_CONFIG }
   try {
-    await writeObject(dir, { ...config })
+    // Ha a fájl az olvasás óta mégis megjelent, a tartalma marad.
+    await transformConfig(dir, orDefaults)
   } catch (error) {
     console.error('[claudeswitcher] could not write the config file; using defaults', error)
   }
@@ -113,21 +136,16 @@ export async function loadConfig(dir: string): Promise<Config> {
  *
  * A fájlt frissen olvassuk be, és csak a megadott kulcsokat írjuk át benne: ha a felhasználó
  * indulás óta kézzel átírta a gyorsbillentyűt (az újraindítás után él), vagy saját kulcsot
- * tett bele, az nem veszhet el egy pipa miatt. Elrontott fájlba nem írunk — ugyanaz a
- * garancia, mint a betöltésnél; a változás ilyenkor csak a futó appban él.
+ * tett bele, az nem veszhet el egy pipa miatt. Elrontott vagy olvashatatlan fájlba nem írunk,
+ * ugyanaz a garancia, mint a betöltésnél; a változás ilyenkor csak a futó appban él. A hívások
+ * fájlonként sorba állnak, így két egymás után, várakozás nélkül indított módosítás is megmarad.
  */
 export async function updateConfig(dir: string, patch: Partial<Config>): Promise<boolean> {
-  const raw = await readRaw(configPath(dir))
-  const current = raw === undefined ? { ...DEFAULT_CONFIG } : parseObject(raw)
-  if (current === undefined) {
-    console.error('[claudeswitcher] the config file is not valid JSON; not overwriting it')
-    return false
-  }
   try {
-    await writeObject(dir, { ...current, ...patch })
+    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), ...patch }))
     return true
   } catch (error) {
-    console.error('[claudeswitcher] could not write the config file', error)
+    console.error('[claudeswitcher] could not update the config file; not overwriting it', error)
     return false
   }
 }

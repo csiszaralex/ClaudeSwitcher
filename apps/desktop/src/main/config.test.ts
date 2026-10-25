@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { DEFAULT_HOTKEY, configPath, loadConfig, updateConfig } from './config.js'
 
 const freshDir = (): Promise<string> => mkdtemp(path.join(tmpdir(), 'cs-config-'))
@@ -147,5 +147,37 @@ describe('updateConfig', () => {
     const unusable = path.join(dir, 'file-not-a-dir')
     await writeFile(unusable, 'x')
     await expect(updateConfig(unusable, { hideAfterLastDecision: false })).resolves.toBe(false)
+  })
+
+  it('persists two updates that were not awaited one after the other', async () => {
+    // A két tálcapipa egymás után, várakozás nélkül hívja. Sorbaállítás nélkül a második a
+    // régi tartalmat olvasná, és az első változás elveszne.
+    const dir = await freshDir()
+    onTestFinished(() => rm(dir, { recursive: true, force: true }))
+    await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9' }))
+
+    const results = await Promise.all([
+      updateConfig(dir, { hideAfterLastDecision: false }),
+      updateConfig(dir, { jumpToTab: false }),
+    ])
+
+    expect(results).toEqual([true, true])
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual({
+      hotkey: 'F9',
+      hideAfterLastDecision: false,
+      jumpToTab: false,
+    })
+    expect(await readdir(dir)).toEqual(['config.json'])
+  })
+
+  it('does not overwrite a config it cannot read for a reason other than a missing file', async () => {
+    // Egy könyvtár a config helyén nem ENOENT olvasási hibát ad: ez nem „nincs meg".
+    const dir = await freshDir()
+    onTestFinished(() => rm(dir, { recursive: true, force: true }))
+    await mkdir(configPath(dir))
+
+    await expect(updateConfig(dir, { jumpToTab: false })).resolves.toBe(false)
+    await expect(loadConfig(dir)).resolves.toEqual(DEFAULTS)
+    expect(await readdir(dir)).toEqual(['config.json'])
   })
 })
