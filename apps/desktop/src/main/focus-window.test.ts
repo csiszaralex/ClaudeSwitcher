@@ -2,7 +2,9 @@ import { exec, execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import type { SessionView } from '@claudeswitcher/core'
 import {
+  CLI_EXEC_OPTIONS,
   TAB_FOCUS_SETTLE_MS,
+  codeCliCommand,
   countMainWindows,
   findMainWindow,
   focusWith,
@@ -235,7 +237,7 @@ describe('focusWith', () => {
 
   it('reports the cwd path when the pid is known but the folder is not and the fast path failed', async () => {
     // Ez a rés a `windowPid !== undefined || workspaceFolder !== undefined` feltétel mögött: a
-    // pid ismert, de a gyors út elbukott, így a `code -r` a cwd-t kapta — ami egy új ablakot
+    // pid ismert, de a gyors út elbukott, így a `code` a cwd-t kapta, ami egy új ablakot
     // nyithatott. A kimenet ezt `cwd`-ként mondja meg, nem „sikerként".
     const fake = fakeSteps({ pid: false, cli: true })
     const view = extensionView({ workspaceFolder: undefined })
@@ -245,6 +247,46 @@ describe('focusWith', () => {
   it('reports failure when neither path brought a window forward', async () => {
     const fake = fakeSteps({ pid: false, cli: false })
     expect(await focusWith(extensionView(), fake.steps)).toBe<FocusOutcome>('failed')
+  })
+
+  it('never runs the CLI for a session that is known not to run in the VS Code extension', async () => {
+    // Egy terminálos vagy SDK-s sessionnek nincs VS Code ablaka: a `code <mappa>` csak egy új
+    // ablakot nyitna neki.
+    for (const entrypoint of ['cli', 'sdk-ts', 'Claude-VSCode']) {
+      const fake = fakeSteps({ pid: false, cli: true })
+      expect(await focusWith(extensionView({ entrypoint }), fake.steps)).toBe<FocusOutcome>('failed')
+      expect(fake.cliCalls).toEqual([])
+      const unknownWindow = fakeSteps({ pid: false, cli: true })
+      const view = extensionView({ entrypoint, windowPid: undefined, workspaceFolder: undefined })
+      expect(await focusWith(view, unknownWindow.steps)).toBe<FocusOutcome>('failed')
+      expect(unknownWindow.cliCalls).toEqual([])
+    }
+  })
+
+  it('still tries the verified pid path for a session outside the extension', async () => {
+    const fake = fakeSteps({ pid: true, cli: true })
+    expect(await focusWith(extensionView({ entrypoint: 'cli' }), fake.steps)).toBe<FocusOutcome>('pid')
+    expect(fake.pidCalls).toEqual([900])
+  })
+
+  it('keeps the CLI fallback when the entrypoint is unknown', async () => {
+    const fake = fakeSteps({ pid: false, cli: true })
+    expect(await focusWith(extensionView({ entrypoint: undefined }), fake.steps)).toBe<FocusOutcome>('workspace')
+    expect(fake.cliCalls).toEqual(['p:\\proj\\alpha'])
+  })
+})
+
+describe('codeCliCommand', () => {
+  it('opens the folder without -r, so an existing window is never taken over', () => {
+    // A `-r` a legutóbb aktív ablakba nyitná a mappát, és lecserélné annak munkaterületét.
+    expect(codeCliCommand('C:\\work\\alpha')).toBe('code "C:\\work\\alpha"')
+    expect(codeCliCommand('C:\\')).toBe('code "C:\\\\"')
+  })
+
+  it('runs with a bounded timeout and no console window', () => {
+    expect(CLI_EXEC_OPTIONS.windowsHide).toBe(true)
+    expect(CLI_EXEC_OPTIONS.timeout).toBeGreaterThan(0)
+    expect(CLI_EXEC_OPTIONS.timeout).toBeLessThanOrEqual(10_000)
   })
 })
 

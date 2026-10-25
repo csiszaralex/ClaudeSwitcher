@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process'
+import { exec, type ExecOptions } from 'node:child_process'
 import { createRequire } from 'node:module'
 import type { PermissionRequestInfo, SessionView } from '@claudeswitcher/core'
 
@@ -30,7 +30,7 @@ let user32: User32 | null | undefined
  * Szándékosan nem modulszinten: a `focus-window.ts`-t az `index.ts` importálja még az
  * `app.whenReady()` előtt, így egy modulszintű koffi-hiba az indulási hibadialógus
  * bekötése ELŐTT dobna — és az app dialógus nélkül, csendben halna meg. Így egy
- * elérhetetlen natív modul csak a gyors fókuszutat kapcsolja ki; a `code -r` tartalék
+ * elérhetetlen natív modul csak a gyors fókuszutat kapcsolja ki; a `code` CLI tartalék
  * tovább működik.
  */
 function loadUser32(): User32 | null {
@@ -52,7 +52,7 @@ function loadUser32(): User32 | null {
       ShowWindow: lib.func('int ShowWindow(intptr hWnd, int nCmdShow)'),
     }
   } catch (error) {
-    console.error('[focus] user32 bindings unavailable; falling back to code -r only', error)
+    console.error('[focus] user32 bindings unavailable; falling back to the code CLI only', error)
     user32 = null
   }
   return user32
@@ -110,11 +110,11 @@ export function scanWindowsForPid(api: WindowScanner, targetPid: number, cap = 2
  * pid 8–12 KÜLÖNBÖZŐ workspace mappához tartozik (a 24092-es pid tíz mappához, miközben
  * egyetlen ablaka van). A pid tehát nem azonosít ablakot. Az első Z-sorrendű találat a
  * LEGFELSŐ ablak lenne, nem a sessionhöz tartozó — vagyis az Enter egy másik projekt
- * ablakát hozná elő, és mivel a `SetForegroundWindow` sikeres, a `code -r` tartalék sem
+ * ablakát hozná elő, és mivel a `SetForegroundWindow` sikeres, a `code` CLI tartalék sem
  * futna le, ami helyesen találná meg.
  *
  * Egyértelműség nélkül ezért inkább nem választunk: a hívó a mappa alapján dolgozó
- * `code -r`-re esik vissza, ami a VSCode saját ablakfeloldását használja.
+ * `code` CLI-re esik vissza, ami a VSCode saját ablakfeloldását használja.
  */
 export function findMainWindow(targetPid: number): number {
   const api = loadUser32()
@@ -165,7 +165,7 @@ function focusByPid(pid: number): boolean {
 
   // A SetForegroundWindow visszatérési értéke nem megbízható. A Windows előtér-
   // zárolása mellett „sikert" jelenthet, miközben csak a tálcagombot villogtatja. Ha
-  // ezt elhinnénk, a `code -r` tartalék sosem futna le, a felhasználó pedig azt
+  // ezt elhinnénk, a `code` CLI tartalék sosem futna le, a felhasználó pedig azt
   // látná, hogy az overlay eltűnik, és semmi nem történik. Ezért megnézzük, mi
   // került ténylegesen előtérbe.
   return foregroundWindow() === hwnd
@@ -179,7 +179,7 @@ function focusByPid(pid: number): boolean {
  */
 const CMD_UNSAFE_IN_QUOTES = /[%"]/
 
-/** Igaz, ha a mappa biztonságosan átadható a `code -r`-nek egy cmd.exe shellen át. */
+/** Igaz, ha a mappa biztonságosan átadható a `code` CLI-nek egy cmd.exe shellen át. */
 export function isSafeForCli(folder: string): boolean {
   return !CMD_UNSAFE_IN_QUOTES.test(folder)
 }
@@ -202,6 +202,24 @@ export function quoteForCli(folder: string): string {
   return `"${folder.replace(/(\\+)$/, '$1$1')}"`
 }
 
+/**
+ * A parancs, ami a mappát a VSCode-ban előhozza.
+ *
+ * Szándékosan `-r` nélkül. A `-r` a legutóbb aktív ablakba nyitja a mappát: ha a mappa sehol
+ * nincs nyitva, lecseréli annak az ablaknak a munkaterületét, és újratölti, a benne futó Claude
+ * Code sessionökkel együtt. `-r` nélkül egy már nyitott mappa ablaka így is előjön, egy nem
+ * nyitott mappa pedig új ablakot kap, és egyetlen meglévő ablakot sem vesz el.
+ */
+export function codeCliCommand(folder: string): string {
+  return `code ${quoteForCli(folder)}`
+}
+
+/**
+ * A `code` CLI futtatási beállításai. Timeout nélkül egy beragadt `code.cmd` (frissítés, elakadt
+ * egypéldányos kézfogás) a `session:focus` kérést soha nem zárná le, és az overlay fent maradna.
+ */
+export const CLI_EXEC_OPTIONS = { windowsHide: true, timeout: 10_000 } as const satisfies ExecOptions
+
 function focusByCli(folder: string): Promise<boolean> {
   // Egy ilyen mappanévnél inkább nem próbálkozunk: a `%` kibontása csendben egy MÁSIK
   // útvonalat nyitna meg. Egy elmaradt fókusz jobb, mint egy rossz.
@@ -210,7 +228,7 @@ function focusByCli(folder: string): Promise<boolean> {
   // A `code` Windowson `code.cmd`, ezért kell a shell. A teljes parancsot egyetlen
   // stringként adjuk át, az idézést pedig a quoteForCli végzi, egy helyen és tesztelve.
   return new Promise((resolve) => {
-    exec(`code -r ${quoteForCli(folder)}`, { windowsHide: true }, (error) => {
+    exec(codeCliCommand(folder), CLI_EXEC_OPTIONS, (error) => {
       resolve(error === null)
     })
   })
@@ -219,10 +237,11 @@ function focusByCli(folder: string): Promise<boolean> {
 /**
  * Melyik úton jött elő az ablak. A tab-fókusznak ez kell, nem egy puszta „sikerült":
  * - `pid`: a gyors út, és az előtérbe került ablakot ellenőriztük (`foregroundWindow() === hwnd`);
- * - `workspace`: a `code -r` a lock fájl mappáját kapta, az ablakot a VSCode maga oldotta fel;
- * - `cwd`: a `code -r` a session cwd-jét kapta, mert a mappa ismeretlen. Ez egy VADONATÚJ
- *   ablakot is nyithatott, tehát nem tudjuk, hogy a session ablaka van-e elöl;
- * - `failed`: egyik út sem vezetett eredményre.
+ * - `workspace`: a `code` CLI a lock fájl mappáját kapta, az ablakot a VSCode maga oldotta fel;
+ * - `cwd`: a `code` CLI a session cwd-jét kapta, mert a mappa ismeretlen. Ha a cwd sehol nincs
+ *   nyitva, ez egy VADONATÚJ ablakot nyitott, tehát nem tudjuk, hogy a session ablaka van-e elöl;
+ * - `failed`: egyik út sem vezetett eredményre, vagy a CLI-t kihagytuk, mert a session ismerten
+ *   nem a VSCode bővítményben fut.
  */
 export type FocusOutcome = 'pid' | 'workspace' | 'cwd' | 'failed'
 
@@ -232,16 +251,24 @@ export interface FocusSteps {
   byCli(folder: string): Promise<boolean>
 }
 
+/** A VSCode bővítményben futó session registry-beli `entrypoint` értéke. */
+const VSCODE_ENTRYPOINT = 'claude-vscode'
+
 /**
  * A `focusSessionWindow` döntési logikája, befecskendezett lépésekkel.
  *
- * Elsőként a lock fájlból ismert pid alapján, mert az azonnali — de csak akkor, ha annak a
- * pidnek pontosan egy ablaka van (lásd `findMainWindow`: egy VSCode főprocessz több ablakot
- * is birtokolhat, és ilyenkor a pid nem azonosít ablakot). Több ablak esetén, és ha a gyors
- * út bármiért nem vezet eredményre, a `code -r` dönt a mappa alapján.
+ * Elsőként a lock fájlból ismert pid alapján, mert az gyors, és az eredményét ellenőrizzük. De
+ * csak akkor, ha annak a pidnek pontosan egy ablaka van (lásd `findMainWindow`: egy VSCode
+ * főprocessz több ablakot is birtokolhat, és ilyenkor a pid nem azonosít ablakot). Több ablak
+ * esetén, és ha a gyors út bármiért nem vezet eredményre, a `code` CLI dönt a mappa alapján.
+ *
+ * A CLI-t kihagyjuk, ha a session `entrypoint`-ja ismert, és nem a VSCode bővítményé: egy
+ * terminálos vagy SDK-s sessionnek nincs VSCode ablaka, a `code <mappa>` csak egy új ablakot
+ * nyitna neki. Ismeretlen `entrypoint`-nál a CLI tartalék marad.
  */
 export async function focusWith(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
   if (view.windowPid !== undefined && steps.byPid(view.windowPid)) return 'pid'
+  if (view.entrypoint !== undefined && view.entrypoint !== VSCODE_ENTRYPOINT) return 'failed'
   if (view.workspaceFolder !== undefined) {
     return (await steps.byCli(view.workspaceFolder)) ? 'workspace' : 'failed'
   }
@@ -261,9 +288,6 @@ export function focusSessionWindow(view: SessionView): Promise<FocusOutcome> {
  */
 export const TAB_FOCUS_SETTLE_MS = 200
 
-/** A VSCode bővítményben futó session registry-beli `entrypoint` értéke. */
-const VSCODE_ENTRYPOINT = 'claude-vscode'
-
 /** Egy kanonikus UUID (8-4-4-4-12 hexa). A Claude Code session azonosítói ilyenek. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -275,7 +299,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * ÚJ tabot nyit neki. Ez soha nem történhet meg, ezért csak akkor küldjük, ha MIND igaz:
  * - az ablak előjött, és tudjuk, hogy a session ablaka: a `pid` út ellenőrizte az előtérbe
  *   került ablakot, a `workspace` úton a VSCode a lock fájl mappájából maga oldotta fel. A
- *   `cwd` út nem elég: a `code -r <cwd>` egy új ablakot nyithatott, és a URI ott a futó session
+ *   `cwd` út nem elég: a `code <cwd>` egy új ablakot nyithatott, és a URI ott a futó session
  *   egy másodpéldányát nyitná meg. `failed` esetén a legfelső ablak bármelyik lehet;
  * - a session ablaka ismert (`windowPid` vagy `workspaceFolder`) — a kimenettől függetlenül is,
  *   hogy egy ellentmondó kimenet se nyisson tabot;

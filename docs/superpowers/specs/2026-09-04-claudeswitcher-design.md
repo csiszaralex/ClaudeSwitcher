@@ -371,8 +371,10 @@ nyílik.
 
 Ezért az app (`focus-window.ts`, `tabFocusUri`) előbb az ablakot hozza elő (M1 útvonal), és
 csak akkor küldi a URI-t (`shell.openExternal`, ~200 ms várakozás után), ha az ablak a `pid`
-úton ellenőrzötten, vagy a `code -r <workspaceFolder>` úton jött elő; a `cwd`-s `code -r`
-(esetleg új ablak) és a sikertelen fókusz kizárva. Csak `entrypoint: claude-vscode` sessionre,
+úton ellenőrzötten, vagy a `code <workspaceFolder>` úton jött elő; a `cwd`-s `code`
+(esetleg új ablak) és a sikertelen fókusz kizárva. A CLI 2026-10-25 óta `-r` nélkül fut, és
+ismerten nem `claude-vscode` sessionre egyáltalán nem fut (indoklás: `focus-window.ts`
+`codeCliCommand` és `focusWith`). Csak `entrypoint: claude-vscode` sessionre,
 csak UUID-ra, és csak bekapcsolt „Ugrás a pontos Claude-tabra" tálcapipánál. Bármelyik feltétel
 hiányában a viselkedés az M1-é: csak ablak.
 

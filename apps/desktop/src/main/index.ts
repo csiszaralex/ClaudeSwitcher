@@ -165,7 +165,7 @@ app.whenReady().then(async () => {
     // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
     // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van —
     // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
-    // tálcagombot villogtatná. Ha így is elbukik, a `code -r` tartalék megoldja.
+    // tálcagombot villogtatná. Ha így is elbukik, a `code` CLI tartalék megoldja.
     const outcome = await focusSessionWindow(view)
     hideOverlay()
     // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
