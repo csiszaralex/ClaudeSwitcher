@@ -7,6 +7,7 @@ import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } fr
 import { configPath, loadConfig, updateConfig } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { hotkeyLogText, registerHotkeyOrDefault } from './hotkey.js'
+import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
@@ -31,8 +32,8 @@ const allowRendererReload = createReloadLimiter()
 
 function createOverlay(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 620,
-    height: 600,
+    width: OVERLAY_WIDTH,
+    height: OVERLAY_HEIGHT,
     show: false,
     frame: false,
     resizable: false,
@@ -307,16 +308,11 @@ app.whenReady().then(async () => {
     const window = overlay
     // Ha a renderer a korlát miatt halott maradt, a megnyitás próbálja újra (szintén korlátosan).
     if (window.webContents.isCrashed() && allowRendererReload()) window.reload()
-    const cursor = screen.getCursorScreenPoint()
-    const display = screen.getDisplayNearestPoint(cursor)
-    // getBounds(), nem getSize(): az Electron a getSize()-t `number[]`-ként típusozza,
-    // amiből `noUncheckedIndexedAccess` mellett csak típus-kényszerítéssel lehetne
-    // szélességet és magasságot kivenni. A getBounds() elnevezett mezőket ad.
-    const { width, height } = window.getBounds()
-    window.setPosition(
-      Math.round(display.workArea.x + (display.workArea.width - width) / 2),
-      Math.round(display.workArea.y + (display.workArea.height - height) / 3),
-    )
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    // Hely és méret egyetlen `setBounds`-szal, a munkaterülethez szorítva. Egy alacsony
+    // kijelzőn így az overlay teteje sem lóg ki; a csak pozíciót állító `setPosition` eltérő
+    // méretezésű kijelzők között a méretet is elronthatja.
+    window.setBounds(overlayBounds(display.workArea))
     window.show()
     window.focus()
   }
