@@ -1,8 +1,9 @@
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
-import { isTypingTarget, readOverlaySettings } from './decision-actions.js'
+import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, formatResetsIn, subagentTooltip, summarize } from './format.js'
+import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
@@ -34,15 +35,37 @@ export function App(): JSX.Element {
     latest.current = { rows, decisions }
   })
 
-  // Megjelenéskor a legrégebben várakozó sessionre ugrunk. A jel a main `show` eseménye (az
-  // indoklás a main createOverlay-ében).
+  // A panel betűjeleinek őréhez (key-guard.ts): mikor jelent meg az overlay, és mikor gépeltünk
+  // utoljára szövegmezőbe.
+  const keyHistory = useRef<KeyHistory>({ shownArmedAt: 0, lastTypedAt: undefined })
+  // Csak újrarenderelést vált ki megjelenéskor: a panel ebből tompítja az engedélyező gombokat.
+  const [, rerenderOnShow] = useState(0)
+
+  // Megjelenéskor a legrégebben várakozó sessionre ugrunk, és a panel újra élesedik: az első
+  // leütés még a régi kijelölésre mehetne. A jel a main `show` eseménye (az indoklás a main
+  // createOverlay-ében).
   useEffect(
     () =>
       window.claudeswitcher.onShown(() => {
+        const armedAt = armUntil(Date.now())
+        keyHistory.current.shownArmedAt = armedAt
+        rerenderOnShow(armedAt)
         setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current))
       }),
     [],
   )
+
+  // Minden szövegmezős leütés ideje, a capture fázisban: akkor is megvan, ha a mező a következő
+  // pillanatban eltűnik (a kérés máshol lezárult), és a fókusz a body-ra esik.
+  useEffect(() => {
+    function onTyped(event: KeyboardEvent): void {
+      if (isTypingTarget(event.target)) keyHistory.current.lastTypedAt = Date.now()
+    }
+    window.addEventListener('keydown', onTyped, true)
+    return () => {
+      window.removeEventListener('keydown', onTyped, true)
+    }
+  }, [])
 
   /** Egy appból hozott SIKERES döntés után: a következő várakozóra lép, vagy elrejtőzik. */
   async function afterDecision(decided: PendingDecisionView): Promise<void> {
@@ -82,6 +105,8 @@ export function App(): JSX.Element {
     function onKey(event: KeyboardEvent): void {
       // Szövegmezőben a gépelés az övé: se a nyilak, se az Enter, se az Esc ne vezérelje a listát.
       if (isTypingTarget(event.target)) return
+      // Egy fókuszált gombon vagy <summary>-n az Enter az elemé (megnyomja, nyitja), nem ugrás.
+      if (event.key === 'Enter' && isActivationTarget(event.target)) return
       if (event.key === 'Escape') void window.claudeswitcher.hide()
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         // Enélkül a nyíl a listát is elscrollozná a kijelölés mozgatása mellett.
@@ -164,6 +189,7 @@ export function App(): JSX.Element {
         <DecisionPanel
           key={decision.id}
           decision={decision}
+          keyHistory={keyHistory}
           onDecided={() => {
             afterDecision(decision).catch((error: unknown) => {
               console.error('[overlay] could not move on after the decision', error)

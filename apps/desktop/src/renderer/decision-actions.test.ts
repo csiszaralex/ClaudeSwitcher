@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isActivationTarget,
+  isSubmitChord,
   isTypingTarget,
   isUnreadableQuestion,
   readDecideResult,
@@ -46,6 +48,44 @@ describe('isTypingTarget', () => {
     expect(isTypingTarget({ tagName: 'BUTTON' })).toBe(false)
     expect(isTypingTarget(null)).toBe(false)
     expect(isTypingTarget('INPUT')).toBe(false)
+  })
+})
+
+describe('isActivationTarget', () => {
+  // A DOM-elem alakja, amit a függvény olvas: tagName, role (ARIA-tükrözés) és a szülő.
+  function element(tagName: string, parentElement: unknown = null, role: string | null = null): unknown {
+    return { tagName, role, parentElement }
+  }
+
+  it('is true for a button, a summary and a link, so Enter activates them', () => {
+    expect(isActivationTarget(element('BUTTON'))).toBe(true)
+    expect(isActivationTarget(element('SUMMARY'))).toBe(true)
+    expect(isActivationTarget(element('A'))).toBe(true)
+    expect(isActivationTarget(element('DIV', null, 'button'))).toBe(true)
+  })
+
+  it('is true inside one, e.g. the <kbd> in a button', () => {
+    expect(isActivationTarget(element('KBD', element('BUTTON', element('DIV'))))).toBe(true)
+    expect(isActivationTarget(element('SPAN', element('SPAN', element('SUMMARY'))))).toBe(true)
+  })
+
+  it('is false for the body and other elements, so Enter still jumps to VS Code there', () => {
+    expect(isActivationTarget(element('BODY', element('HTML')))).toBe(false)
+    expect(isActivationTarget(element('LI', element('UL', element('BODY'))))).toBe(false)
+    expect(isActivationTarget(element('DIV', null, 'list'))).toBe(false)
+    expect(isActivationTarget(null)).toBe(false)
+    expect(isActivationTarget('BUTTON')).toBe(false)
+  })
+})
+
+describe('isSubmitChord', () => {
+  it('is Ctrl+Enter, the submit key of the multi-line fields', () => {
+    expect(isSubmitChord({ key: 'Enter', ctrlKey: true })).toBe(true)
+  })
+
+  it('leaves a plain Enter to the textarea (a new line) and ignores other Ctrl keys', () => {
+    expect(isSubmitChord({ key: 'Enter', ctrlKey: false })).toBe(false)
+    expect(isSubmitChord({ key: 'a', ctrlKey: true })).toBe(false)
   })
 })
 

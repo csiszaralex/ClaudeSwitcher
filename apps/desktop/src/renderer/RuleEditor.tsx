@@ -1,6 +1,7 @@
 import type { PermissionRule } from '@claudeswitcher/core'
 import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
+import { isSubmitChord } from './decision-actions.js'
 
 interface Props {
   /** A Claude Code javaslata, soronként egy szabály — a felhasználó átírhatja. */
@@ -55,7 +56,7 @@ export function RuleEditor({ initial, machine, busy, onSubmit, onCancel }: Props
             event.stopPropagation()
             onCancel()
           }
-          if (event.key === 'Enter' && event.ctrlKey && canSubmit) {
+          if (isSubmitChord(event) && canSubmit) {
             event.preventDefault()
             onSubmit(rules)
           }

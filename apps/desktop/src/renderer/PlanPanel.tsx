@@ -1,4 +1,5 @@
 import { useState, type JSX } from 'react'
+import { isSubmitChord } from './decision-actions.js'
 
 interface Props {
   plan: string | undefined
@@ -31,6 +32,13 @@ export function PlanPanel({ plan, busy, onReject, onJump }: Props): JSX.Element 
           placeholder="Mit változtasson a terven? (elutasításhoz kötelező)"
           onChange={(event) => {
             setFeedback(event.target.value)
+          }}
+          onKeyDown={(event) => {
+            // Mint a szabályszerkesztőben: Ctrl+Enter küld a mezőből, a sima Enter új sort kezd.
+            if (isSubmitChord(event) && canReject) {
+              event.preventDefault()
+              onReject(feedback)
+            }
           }}
         />
         <div className="decision-row">

@@ -1,7 +1,7 @@
 import type { UserDecision } from '@claudeswitcher/core'
 import { formatRule } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
-import { useEffect, useMemo, useState, type JSX } from 'react'
+import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
 import {
   isTypingTarget,
   isUnreadableQuestion,
@@ -9,6 +9,7 @@ import {
   shortcutFor,
   type DecisionAction,
 } from './decision-actions.js'
+import { armUntil, isArmed, shortcutAllowed, type KeyHistory } from './key-guard.js'
 import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
@@ -26,6 +27,8 @@ type Mode = 'buttons' | 'deny' | 'rule-project' | 'rule-machine'
 
 interface Props {
   decision: PendingDecisionView
+  /** Az App billentyű-előzménye: az overlay megjelenése és az utolsó szövegmezős leütés (key-guard.ts). */
+  keyHistory: RefObject<KeyHistory>
   /** A daemon elfogadta a döntést — az App ebből lépteti a kijelölést, vagy rejti el az overlayt. */
   onDecided: () => void
   /** Ugrás a session VSCode ablakára — ott a natív prompt végig megvan. */
@@ -36,7 +39,7 @@ interface Props {
  * Egy függő kérés döntési panelje. A döntést a main processzen át a daemon ellenőrzi és
  * továbbítja; siker esetén a következő állapot leveszi a kérést, és a panel eltűnik.
  */
-export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Element {
+export function DecisionPanel({ decision, keyHistory, onDecided, onJump }: Props): JSX.Element {
   const [mode, setMode] = useState<Mode>('buttons')
   const [denyText, setDenyText] = useState('')
   const [error, setError] = useState<string | undefined>()
@@ -72,11 +75,41 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
     }
   }
 
-  // A betűjelek. Szövegmezőben, nyitott űrlapnál, futó kérés közben és elengedett kérésnél nem hatnak.
+  // Élesedés: a panel minden kéréshez újra mountol (az App `key={decision.id}`-ja), így ez minden
+  // új kérésnél újraindul. Az overlay megjelenése a `keyHistory`-ból élesít újra.
+  const [mountArmedAt] = useState(() => armUntil(Date.now()))
+  function armedAt(): number {
+    return Math.max(mountArmedAt, keyHistory.current.shownArmedAt)
+  }
+  // Az engedélyező gombok az élesedésig tiltva: egy dupla kattintás második fele ugyanoda esik,
+  // és a következő kérés gombját nyomná meg. A tiltás, az ugrás és a mégse gomb élesedés nélkül is megy.
+  const armed = isArmed(armedAt(), Date.now())
+  const [, rerenderWhenArmed] = useState(0)
+  useEffect(() => {
+    const wait = armedAt() - Date.now()
+    if (wait <= 0) return
+    const timer = setTimeout(() => {
+      rerenderWhenArmed((count) => count + 1)
+    }, wait)
+    return () => {
+      clearTimeout(timer)
+    }
+  })
+
+  // A betűjelek. Nyitott űrlapnál, futó kérés közben és elengedett kérésnél nem hatnak; a többi
+  // feltétel (ismétlés, módosítók, szövegmező, élesedés, gépelés utáni szünet) a key-guard.ts-ben.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       if (decision.released || busy || mode !== 'buttons') return
-      if (isTypingTarget(event.target) || event.ctrlKey || event.altKey || event.metaKey) return
+      const key = {
+        repeat: event.repeat,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+        typingTarget: isTypingTarget(event.target),
+      }
+      const clock = { armedAt: armedAt(), lastTypedAt: keyHistory.current.lastTypedAt, now: Date.now() }
+      if (!shortcutAllowed(key, clock)) return
       const action = shortcutFor(decision.kind, event.key)
       if (action === undefined) return
       event.preventDefault()
@@ -162,16 +195,16 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
       case 'tool':
         return (
           <div className="decision-row">
-            <button type="button" disabled={busy} onClick={() => { run('allow') }}>
+            <button type="button" disabled={busy || !armed} onClick={() => { run('allow') }}>
               <kbd>A</kbd> Engedélyez
             </button>
             <button type="button" disabled={busy} onClick={() => { run('deny') }}>
               <kbd>D</kbd> Tilt…
             </button>
-            <button type="button" disabled={busy} onClick={() => { run('rule-project') }}>
+            <button type="button" disabled={busy || !armed} onClick={() => { run('rule-project') }}>
               <kbd>P</kbd> Projekt-szabály…
             </button>
-            <button type="button" disabled={busy} onClick={() => { run('rule-machine') }}>
+            <button type="button" disabled={busy || !armed} onClick={() => { run('rule-machine') }}>
               <kbd>G</kbd> Gépszintű szabály…
             </button>
           </div>
@@ -179,13 +212,13 @@ export function DecisionPanel({ decision, onDecided, onJump }: Props): JSX.Eleme
       case 'edit':
         return (
           <div className="decision-row">
-            <button type="button" disabled={busy} onClick={() => { run('allow') }}>
+            <button type="button" disabled={busy || !armed} onClick={() => { run('allow') }}>
               <kbd>A</kbd> Engedélyez
             </button>
             <button type="button" disabled={busy} onClick={() => { run('deny') }}>
               <kbd>D</kbd> Tilt…
             </button>
-            <button type="button" disabled={busy} onClick={() => { run('session-edits') }}>
+            <button type="button" disabled={busy || !armed} onClick={() => { run('session-edits') }}>
               <kbd>S</kbd> Erre a sessionre automatikusan
             </button>
           </div>

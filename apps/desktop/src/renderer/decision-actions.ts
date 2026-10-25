@@ -38,6 +38,28 @@ export function isTypingTarget(target: unknown): boolean {
   )
 }
 
+/**
+ * Igaz, ha a cél egy gomb, egy `<summary>`, egy link vagy egy `role="button"` elem, vagy ezek
+ * egyikén belül van (pl. a gomb `<kbd>`-ja). Ott az Enter az elemé: megnyomja, illetve nyitja.
+ * A szülőláncot a `parentElement` mentén járja be, a szerepet az ARIA-tükrözésű `role`
+ * tulajdonságból olvassa, így DOM nélkül is tesztelhető.
+ */
+export function isActivationTarget(target: unknown): boolean {
+  let current: unknown = target
+  while (typeof current === 'object' && current !== null) {
+    const element = current as { tagName?: unknown; role?: unknown; parentElement?: unknown }
+    if (element.tagName === 'BUTTON' || element.tagName === 'SUMMARY' || element.tagName === 'A') return true
+    if (element.role === 'button') return true
+    current = element.parentElement
+  }
+  return false
+}
+
+/** A többsoros mezők beküldő billentyűje: Ctrl+Enter. A sima Enter új sort kezd. */
+export function isSubmitChord(event: { key: string; ctrlKey: boolean }): boolean {
+  return event.key === 'Enter' && event.ctrlKey
+}
+
 export type DecideOutcome = { ok: true } | { ok: false; reason: string }
 
 /** A main processz `DecideResult`-ja, ellenőrizve — az IPC-n át bármi jöhet. */
