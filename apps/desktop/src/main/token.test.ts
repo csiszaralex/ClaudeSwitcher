@@ -1,10 +1,21 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { loadOrCreateToken } from './token.js'
 
 describe('loadOrCreateToken', () => {
+  it('throws on a read error other than a missing file, instead of rotating the token', async () => {
+    // Egy átmeneti olvasási hiba nem cserélheti le a tokent: minden telepített hook 401-et kapna.
+    // A könyvtár a token helyén valódi, nem ENOENT olvasási hibát ad (EISDIR).
+    const dir = await mkdtemp(path.join(tmpdir(), 'cs-token-'))
+    onTestFinished(() => rm(dir, { recursive: true, force: true }))
+    await mkdir(path.join(dir, 'daemon-token'))
+
+    await expect(loadOrCreateToken(dir)).rejects.toThrow(/EISDIR/)
+    expect(await readdir(dir)).toEqual(['daemon-token'])
+  })
+
   it('creates a 32-hex-character token when none exists', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'cs-token-'))
     expect(await loadOrCreateToken(dir)).toMatch(/^[0-9a-f]{32}$/)
