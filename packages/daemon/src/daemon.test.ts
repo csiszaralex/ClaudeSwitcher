@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ProcessProbe } from '@claudeswitcher/core'
@@ -358,6 +358,36 @@ describe('startDaemon — held decisions', () => {
     await postHook(daemon, '/hooks/subagent-stop', { ...payload('subagentStop'), session_id: 'sid-100' })
     expect(daemon.state().decisions).toEqual([])
     expect(daemon.state().sessions[0]?.status).toBe('idle')
+  })
+
+  it('keeps the label of a subagent that waits on a held decision longer than the staleness window', async () => {
+    // Konstruált subagent-fájlok a mért elrendezésben (lásd core subagent.ts), nem valódi tartalom.
+    const dir = await fixture()
+    const agentId = String(payload('permissionRequest_subagent')['agent_id'])
+    const project = path.join(dir, 'projects', 'encoded-alpha')
+    const subagents = path.join(project, 'sid-100', 'subagents')
+    await mkdir(subagents, { recursive: true })
+    await writeFile(path.join(project, 'sid-100.jsonl'), '')
+    const transcript = path.join(subagents, `agent-${agentId}.jsonl`)
+    await writeFile(transcript, `${JSON.stringify({ type: 'api-request', agentId, isSidechain: true })}\n`)
+    await writeFile(
+      path.join(subagents, `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: 'general-purpose', description: 'Teszt hullám' }),
+    )
+    const silentSince = (Date.now() - 10 * 60_000) / 1000
+    await utimes(transcript, silentSince, silentSince)
+
+    running = await startDaemon({ claudeDir: dir, probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    expect(daemon.state().sessions[0]?.subagents).toBeUndefined()
+
+    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_subagent'), session_id: 'sid-100' })
+    await waitFor(() => daemon.state().decisions)
+    await daemon.refresh()
+    expect(daemon.state().sessions[0]?.subagents?.map((s) => [s.agentId, s.description])).toEqual([
+      [agentId, 'Teszt hullám'],
+    ])
   })
 
   it('drops a held request when the hook client disconnects — over a real socket', async () => {

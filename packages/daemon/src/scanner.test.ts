@@ -260,6 +260,33 @@ describe('scanSessions — subagents', () => {
     }
   })
 
+  it('keeps a subagent with a held decision past the staleness window, labels included', async () => {
+    // Egy engedélyre váró subagent nem ír. 5 perc után különben eltűnne, és a panel fejléce a
+    // `subagent · general-purpose`-ra esne vissza.
+    const dir = await fixture()
+    await addSubagent(dir, 'waiter', { meta: runningMeta, lines: [subagentLine('Bash', { command: 'x' })], ageMs: 10 * 60_000 })
+    expect((await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []).toEqual([])
+
+    const list = (await scanSessions(dir, aliveProbe, Date.now(), new Set(['waiter']))).subagents.get('sid-100') ?? []
+    expect(list.map((s) => [s.agentId, s.description])).toEqual([['waiter', 'Teszt hullám']])
+  })
+
+  it('keeps a subagent with a held decision beyond the three-subagent limit', async () => {
+    const dir = await fixture()
+    for (const [i, id] of ['a0', 'a1', 'a2'].entries()) {
+      await addSubagent(dir, id, { meta: runningMeta, lines: [subagentLine('Bash', { command: id })], ageMs: i * 1_000 })
+    }
+    await addSubagent(dir, 'waiter', { meta: runningMeta, lines: [subagentLine('Bash', { command: 'w' })], ageMs: 60_000 })
+    const list = (await scanSessions(dir, aliveProbe, Date.now(), new Set(['waiter']))).subagents.get('sid-100') ?? []
+    expect(list.map((s) => s.agentId)).toEqual(['a0', 'a1', 'a2', 'waiter'])
+  })
+
+  it('still leaves out a held subagent whose meta says it finished', async () => {
+    const dir = await fixture()
+    await addSubagent(dir, 'done', { meta: { ...runningMeta, finished: true }, lines: [subagentLine('Bash', { command: 'x' })], ageMs: 10 * 60_000 })
+    expect((await scanSessions(dir, aliveProbe, Date.now(), new Set(['done']))).subagents.get('sid-100') ?? []).toEqual([])
+  })
+
   it('skips a directory that carries a subagent transcript name', async () => {
     const dir = await fixture()
     await addSubagent(dir, 'a1', { meta: runningMeta, lines: [subagentLine('Bash', { command: 'x' })] })

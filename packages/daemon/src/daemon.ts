@@ -157,7 +157,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     refreshing = (async () => {
       try {
         const now = Date.now()
-        const snapshot = await scanSessions(claudeDir, probe, now)
+        // A függő döntésű subagentek címkéje akkor is kell, ha a subagent régóta nem írt (engedélyre
+        // vár). A forrás maga a broker, így nincs külön, elavulni képes másolat.
+        const heldAgents = new Set(
+          decisions.views().flatMap((view) => (view.agentId === undefined ? [] : [view.agentId])),
+        )
+        const snapshot = await scanSessions(claudeDir, probe, now, heldAgents)
         sessions.applySnapshot(snapshot.sessions, snapshot.activities, now, snapshot.subagents)
         // Csak sikeres szkennelés után: egy elbukott szkennelés nem „eltűnt minden session".
         decisions.pruneAbsent(new Set(snapshot.sessions.map((session) => session.record.sessionId)))

@@ -120,8 +120,16 @@ async function readSubagentMeta(metaPath: string): Promise<SubagentMeta> {
  * `SUBAGENT_META_LIMIT` meta-olvasás az elavulási ablakon belül, és a transcript vége csak a
  * legfrissebb `SUBAGENT_SCAN_LIMIT` NEM KÉSZ subagentnél. Soha nem dob: egy hibás fájl csak a
  * saját subagentjét viszi el.
+ *
+ * @param heldAgents a függő döntéssel bíró subagentek. Ezek koruktól és a korláttól függetlenül
+ * bekerülnek: egy engedélyre váró subagent nem ír, így az elavulási ablak után a címkéje eltűnne a
+ * döntési panelről. A plusz költség legfeljebb függő döntésenként egy meta és egy transcript-vég.
  */
-async function readSubagents(transcript: string, now: number): Promise<SubagentView[]> {
+async function readSubagents(
+  transcript: string,
+  now: number,
+  heldAgents: ReadonlySet<string>,
+): Promise<SubagentView[]> {
   const dir = path.join(path.dirname(transcript), path.basename(transcript, '.jsonl'), 'subagents')
   let names: string[]
   try {
@@ -146,20 +154,23 @@ async function readSubagents(transcript: string, now: number): Promise<SubagentV
       }
     }),
   )
+  const listed = files.filter((file) => file !== undefined)
   // Előbb a kész subagentek kiszűrése, CSAK utána a darabszám-korlát: különben néhány frissen
   // befejezett subagent eltakarná a még futót (lásd SUBAGENT_META_LIMIT).
-  const candidates = pickRecentSubagentFiles(
-    files.filter((file) => file !== undefined),
-    now,
-    SUBAGENT_META_LIMIT,
-  )
+  const recent = pickRecentSubagentFiles(listed, now, SUBAGENT_META_LIMIT)
+  const held = listed.filter((file) => heldAgents.has(file.agentId) && !recent.includes(file))
   const withMeta = await Promise.all(
-    candidates.map(async (candidate) => ({
+    [...recent, ...held].map(async (candidate) => ({
       ...candidate,
       meta: await readSubagentMeta(path.join(dir, `agent-${candidate.agentId}.meta.json`)),
     })),
   )
-  const active = withMeta.filter(({ meta }) => !meta.finished).slice(0, SUBAGENT_SCAN_LIMIT)
+  const unfinished = withMeta.filter(({ meta }) => !meta.finished)
+  const limited = unfinished.filter(({ agentId }) => !heldAgents.has(agentId)).slice(0, SUBAGENT_SCAN_LIMIT)
+  // A függő döntésű subagent a korláton felül is marad; a sorrend a legutóbb írt elöl.
+  const active = unfinished
+    .filter((candidate) => heldAgents.has(candidate.agentId) || limited.includes(candidate))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
 
   return Promise.all(
     active.map(async ({ agentId, mtimeMs, file, meta }): Promise<SubagentView> => {
@@ -182,11 +193,17 @@ interface SessionReading {
   subagents: SubagentView[]
 }
 
-/** Egy teljes állapot-pillanatkép: élő sessionök, párosított ablakok, aktivitás, aktív subagentek. */
+/**
+ * Egy teljes állapot-pillanatkép: élő sessionök, párosított ablakok, aktivitás, aktív subagentek.
+ *
+ * @param heldAgents azon subagentek `agentId`-ja, amelyeknek most függő döntésük van (a daemon a
+ * brokertől veszi). Ezek akkor is bekerülnek, ha régen írtak; lásd `readSubagents`.
+ */
 export async function scanSessions(
   claudeDir: string,
   probe: ProcessProbe,
   now: number = Date.now(),
+  heldAgents: ReadonlySet<string> = new Set(),
 ): Promise<{
   sessions: LiveSession[]
   activities: Map<string, SessionActivity>
@@ -203,7 +220,7 @@ export async function scanSessions(
       try {
         const transcript = await findTranscriptPath(claudeDir, record.sessionId)
         if (transcript === undefined) return [record.sessionId, { activity: {}, subagents: [] }]
-        const [lines, subagents] = await Promise.all([tailLines(transcript), readSubagents(transcript, now)])
+        const [lines, subagents] = await Promise.all([tailLines(transcript), readSubagents(transcript, now, heldAgents)])
         return [record.sessionId, { activity: readActivityFromLines(lines), subagents }]
       } catch (error) {
         // Védelem mélységben. A `Promise.all` egyetlen elutasításra eldobná az
