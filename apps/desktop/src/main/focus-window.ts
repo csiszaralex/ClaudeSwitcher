@@ -18,7 +18,8 @@ interface User32 {
   GetWindowTextLengthW(hWnd: number): number
   GetForegroundWindow(): number | bigint
   SetForegroundWindow(hWnd: number): number
-  ShowWindow(hWnd: number, nCmdShow: number): number
+  IsIconic(hWnd: number): number
+  ShowWindowAsync(hWnd: number, nCmdShow: number): number
 }
 
 /** `undefined`: még nem próbáltuk. `null`: a betöltés elbukott. */
@@ -49,7 +50,8 @@ function loadUser32(): User32 | null {
       GetWindowTextLengthW: lib.func('int GetWindowTextLengthW(intptr hWnd)'),
       GetForegroundWindow: lib.func('intptr GetForegroundWindow()'),
       SetForegroundWindow: lib.func('int SetForegroundWindow(intptr hWnd)'),
-      ShowWindow: lib.func('int ShowWindow(intptr hWnd, int nCmdShow)'),
+      IsIconic: lib.func('int IsIconic(intptr hWnd)'),
+      ShowWindowAsync: lib.func('int ShowWindowAsync(intptr hWnd, int nCmdShow)'),
     }
   } catch (error) {
     console.error('[focus] user32 bindings unavailable; falling back to the code CLI only', error)
@@ -154,21 +156,54 @@ export function foregroundWindow(): number {
   return api === null ? 0 : Number(api.GetForegroundWindow())
 }
 
-function focusByPid(pid: number): boolean {
+/** A fókuszáláshoz szükséges user32 részhalmaz, hogy a `bringToFront` tesztelhető legyen fake-kel. */
+export type FocusApi = Pick<User32, 'IsIconic' | 'ShowWindowAsync' | 'SetForegroundWindow' | 'GetForegroundWindow'>
+
+/** Ennyiszer nézzük meg újra az előtérben lévő ablakot, `FOREGROUND_POLL_INTERVAL_MS` szünetekkel. */
+export const FOREGROUND_POLL_ATTEMPTS = 5
+export const FOREGROUND_POLL_INTERVAL_MS = 20
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Előtérbe hozza az ablakot, és igazat ad, ha tényleg az került előtérbe.
+ *
+ * - Csak egy minimalizált ablakot állítunk vissza (`IsIconic`). Az `SW_RESTORE` egy maximalizált
+ *   ablakot is a normál méretére vinne vissza, így minden ugrás összezsugorítaná a felhasználó
+ *   maximalizált VSCode-ját.
+ * - `ShowWindowAsync`, nem `ShowWindow`: a `ShowWindow` egy másik processz ablakán szinkron, és
+ *   egy lefagyott VSCode-nál a main szálat, vele a daemont és minden session hookját megakasztaná.
+ * - A `SetForegroundWindow` visszatérési értéke nem megbízható: a Windows előtérzárolása mellett
+ *   „sikert" jelenthet, miközben csak a tálcagombot villogtatja. Ha ezt elhinnénk, a `code` CLI
+ *   tartalék sosem futna le. Ezért megnézzük, mi került ténylegesen előtérbe. Mivel a
+ *   visszaállítás aszinkron, ezt rövid ideig (legfeljebb kb. 100 ms) többször nézzük, időzítővel,
+ *   nem pörgő ciklussal.
+ */
+export async function bringToFront(
+  api: FocusApi,
+  hwnd: number,
+  wait: (ms: number) => Promise<void> = delay,
+): Promise<boolean> {
+  if (api.IsIconic(hwnd) !== 0) api.ShowWindowAsync(hwnd, SW_RESTORE)
+  api.SetForegroundWindow(hwnd)
+
+  let waited = 0
+  while (Number(api.GetForegroundWindow()) !== hwnd) {
+    if (waited === FOREGROUND_POLL_ATTEMPTS) return false
+    await wait(FOREGROUND_POLL_INTERVAL_MS)
+    waited++
+  }
+  return true
+}
+
+async function focusByPid(pid: number): Promise<boolean> {
   const api = loadUser32()
   if (api === null) return false
   const hwnd = findMainWindow(pid)
   if (hwnd === 0) return false
-
-  api.ShowWindow(hwnd, SW_RESTORE)
-  api.SetForegroundWindow(hwnd)
-
-  // A SetForegroundWindow visszatérési értéke nem megbízható. A Windows előtér-
-  // zárolása mellett „sikert" jelenthet, miközben csak a tálcagombot villogtatja. Ha
-  // ezt elhinnénk, a `code` CLI tartalék sosem futna le, a felhasználó pedig azt
-  // látná, hogy az overlay eltűnik, és semmi nem történik. Ezért megnézzük, mi
-  // került ténylegesen előtérbe.
-  return foregroundWindow() === hwnd
+  return bringToFront(api, hwnd)
 }
 
 /**
@@ -236,7 +271,7 @@ function focusByCli(folder: string): Promise<boolean> {
 
 /**
  * Melyik úton jött elő az ablak. A tab-fókusznak ez kell, nem egy puszta „sikerült":
- * - `pid`: a gyors út, és az előtérbe került ablakot ellenőriztük (`foregroundWindow() === hwnd`);
+ * - `pid`: a gyors út, és az előtérbe került ablakot ellenőriztük (`bringToFront`);
  * - `workspace`: a `code` CLI a lock fájl mappáját kapta, az ablakot a VSCode maga oldotta fel;
  * - `cwd`: a `code` CLI a session cwd-jét kapta, mert a mappa ismeretlen. Ha a cwd sehol nincs
  *   nyitva, ez egy VADONATÚJ ablakot nyitott, tehát nem tudjuk, hogy a session ablaka van-e elöl;
@@ -247,7 +282,7 @@ export type FocusOutcome = 'pid' | 'workspace' | 'cwd' | 'failed'
 
 /** A két fókuszlépés, hogy a `focusWith` sorrendje tesztelhető legyen ablak előhozása nélkül. */
 export interface FocusSteps {
-  byPid(pid: number): boolean
+  byPid(pid: number): Promise<boolean>
   byCli(folder: string): Promise<boolean>
 }
 
@@ -267,7 +302,7 @@ const VSCODE_ENTRYPOINT = 'claude-vscode'
  * nyitna neki. Ismeretlen `entrypoint`-nál a CLI tartalék marad.
  */
 export async function focusWith(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
-  if (view.windowPid !== undefined && steps.byPid(view.windowPid)) return 'pid'
+  if (view.windowPid !== undefined && (await steps.byPid(view.windowPid))) return 'pid'
   if (view.entrypoint !== undefined && view.entrypoint !== VSCODE_ENTRYPOINT) return 'failed'
   if (view.workspaceFolder !== undefined) {
     return (await steps.byCli(view.workspaceFolder)) ? 'workspace' : 'failed'

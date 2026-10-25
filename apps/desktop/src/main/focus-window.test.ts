@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import type { SessionView } from '@claudeswitcher/core'
 import {
   CLI_EXEC_OPTIONS,
+  FOREGROUND_POLL_ATTEMPTS,
+  FOREGROUND_POLL_INTERVAL_MS,
   TAB_FOCUS_SETTLE_MS,
+  bringToFront,
   codeCliCommand,
   countMainWindows,
   findMainWindow,
@@ -14,6 +17,7 @@ import {
   quoteForCli,
   scanWindowsForPid,
   tabFocusUri,
+  type FocusApi,
   type FocusOutcome,
   type WindowScanner,
 } from './focus-window.js'
@@ -201,7 +205,7 @@ function fakeSteps(result: { pid: boolean; cli: boolean }): {
     steps: {
       byPid: (pid) => {
         pidCalls.push(pid)
-        return result.pid
+        return Promise.resolve(result.pid)
       },
       byCli: (folder) => {
         cliCalls.push(folder)
@@ -287,6 +291,86 @@ describe('codeCliCommand', () => {
     expect(CLI_EXEC_OPTIONS.windowsHide).toBe(true)
     expect(CLI_EXEC_OPTIONS.timeout).toBeGreaterThan(0)
     expect(CLI_EXEC_OPTIONS.timeout).toBeLessThanOrEqual(10_000)
+  })
+})
+
+/** Egy hamis user32 a fókuszhoz: rögzíti a hívásokat, és megadott lekérdezés után adja az előteret. */
+function fakeFocusApi(options: { iconic: boolean; foregroundAfter?: number }): {
+  api: FocusApi
+  restored: Array<[number, number]>
+  foregroundSet: number[]
+} {
+  const restored: Array<[number, number]> = []
+  const foregroundSet: number[] = []
+  let queries = 0
+  return {
+    api: {
+      IsIconic: () => (options.iconic ? 1 : 0),
+      ShowWindowAsync: (hWnd, nCmdShow) => {
+        restored.push([hWnd, nCmdShow])
+        return 1
+      },
+      SetForegroundWindow: (hWnd) => {
+        foregroundSet.push(hWnd)
+        return 1
+      },
+      GetForegroundWindow: () => {
+        queries++
+        // BigInt, ahogy a koffi `intptr`-je futásidőben is jöhet.
+        return options.foregroundAfter !== undefined && queries > options.foregroundAfter ? BigInt(42) : 7
+      },
+    },
+    restored,
+    foregroundSet,
+  }
+}
+
+describe('bringToFront', () => {
+  const SW_RESTORE = 9
+
+  it('leaves a maximized or normal window as it is, only bringing it forward', async () => {
+    const fake = fakeFocusApi({ iconic: false, foregroundAfter: 0 })
+    expect(await bringToFront(fake.api, 42, () => Promise.resolve())).toBe(true)
+    expect(fake.restored).toEqual([])
+    expect(fake.foregroundSet).toEqual([42])
+  })
+
+  it('restores a minimized window asynchronously', async () => {
+    const fake = fakeFocusApi({ iconic: true, foregroundAfter: 0 })
+    expect(await bringToFront(fake.api, 42, () => Promise.resolve())).toBe(true)
+    expect(fake.restored).toEqual([[42, SW_RESTORE]])
+  })
+
+  it('polls the foreground window briefly, because the restore is asynchronous', async () => {
+    const waits: number[] = []
+    const fake = fakeFocusApi({ iconic: true, foregroundAfter: 2 })
+    const wait = (ms: number): Promise<void> => {
+      waits.push(ms)
+      return Promise.resolve()
+    }
+    expect(await bringToFront(fake.api, 42, wait)).toBe(true)
+    expect(waits).toEqual([FOREGROUND_POLL_INTERVAL_MS, FOREGROUND_POLL_INTERVAL_MS])
+  })
+
+  it('gives up after a bounded wait of about 100 ms, so the CLI fallback can run', async () => {
+    const waits: number[] = []
+    const fake = fakeFocusApi({ iconic: false })
+    const wait = (ms: number): Promise<void> => {
+      waits.push(ms)
+      return Promise.resolve()
+    }
+    expect(await bringToFront(fake.api, 42, wait)).toBe(false)
+    expect(waits).toHaveLength(FOREGROUND_POLL_ATTEMPTS)
+    const total = waits.reduce((sum, ms) => sum + ms, 0)
+    expect(total).toBeGreaterThanOrEqual(80)
+    expect(total).toBeLessThanOrEqual(150)
+  })
+
+  it('waits with real timers by default instead of spinning', async () => {
+    const fake = fakeFocusApi({ iconic: false })
+    const started = performance.now()
+    expect(await bringToFront(fake.api, 42)).toBe(false)
+    expect(performance.now() - started).toBeGreaterThanOrEqual(FOREGROUND_POLL_ATTEMPTS * FOREGROUND_POLL_INTERVAL_MS - 10)
   })
 })
 
