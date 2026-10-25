@@ -8,6 +8,7 @@ import { configPath, loadConfig, updateConfig } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { hotkeyLogText, registerHotkeyOrDefault } from './hotkey.js'
 import { createNativeProcessProbe } from './process-probe.js'
+import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
 import { DAEMON_PORT, installIntegration, uninstallIntegration } from './setup.js'
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
@@ -25,6 +26,8 @@ let cleanup: () => void = () => undefined
  * bezárását ekkor sem szabad visszatartani.
  */
 let sessionEnding = false
+/** Az overlay renderer-újratöltéseinek korlátja, az újra létrehozott overlayen át is közös. */
+const allowRendererReload = createReloadLimiter()
 
 function createOverlay(): BrowserWindow {
   const window = new BrowserWindow({
@@ -80,11 +83,21 @@ function createOverlay(): BrowserWindow {
 
   // Ha a renderer processz meghal (OOM, GPU- vagy V8-összeomlás), az Electron egy üres
   // keretet hagy, és semmi nem tölti újra. Az overlay az egyetlen ablak, tehát a
-  // gyorsbillentyű onnantól egy üres ablakot mutatna — ami pont úgy néz ki, mint a „nincs
+  // gyorsbillentyű onnantól egy üres ablakot mutatna, ami pont úgy néz ki, mint a „nincs
   // futó session", vagyis a monitorozó eszköz a legrosszabb módon hibázna: csendben.
+  // Az újratöltés korlátos: egy betöltéskor mindig összeomló renderer különben végtelen
+  // ciklusba esne. A korlát után az overlay következő megnyitása próbálja újra (`showOverlay`).
   window.webContents.on('render-process-gone', (_event, details) => {
-    console.error(`[claudeswitcher] renderer gone (${details.reason}); reloading`)
-    if (!window.isDestroyed()) window.reload()
+    if (window.isDestroyed()) return
+    if (allowRendererReload()) {
+      console.error(`[claudeswitcher] renderer gone (${details.reason}); reloading`)
+      window.reload()
+    } else {
+      console.error(
+        `[claudeswitcher] renderer gone (${details.reason}) after ${RELOAD_LIMIT} reloads ` +
+          `within ${RELOAD_WINDOW_MS / 1000} s; not reloading until the overlay is opened again`,
+      )
+    }
   })
 
   return window
@@ -292,6 +305,8 @@ app.whenReady().then(async () => {
     // ismeretlen út), egy új ablak jobb, mint egy „Object has been destroyed" kivétel.
     if (overlay === undefined || overlay.isDestroyed()) overlay = createOverlay()
     const window = overlay
+    // Ha a renderer a korlát miatt halott maradt, a megnyitás próbálja újra (szintén korlátosan).
+    if (window.webContents.isCrashed() && allowRendererReload()) window.reload()
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)
     // getBounds(), nem getSize(): az Electron a getSize()-t `number[]`-ként típusozza,
