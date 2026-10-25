@@ -19,6 +19,12 @@ let daemon: Daemon | undefined
 let overlay: BrowserWindow | undefined
 /** A gyorsbillentyű és a tálcaikon elengedése kilépéskor; indulás után kap tartalmat. */
 let cleanup: () => void = () => undefined
+/**
+ * Igaz, ha a Windows a munkamenetet zárja (leállítás, újraindítás, kijelentkezés). Ilyenkor a
+ * `before-quit` a dokumentáció szerint nem fut le, tehát a `quitting` sem vált; az overlay
+ * bezárását ekkor sem szabad visszatartani.
+ */
+let sessionEnding = false
 
 function createOverlay(): BrowserWindow {
   const window = new BrowserWindow({
@@ -58,6 +64,20 @@ function createOverlay(): BrowserWindow {
     window.webContents.send('overlay:shown')
   })
 
+  // Az Alt+F4 a keret nélküli ablakot is bezárná, és vele az egyetlen ablakot végleg. Utána a
+  // gyorsbillentyű és a tálca egy megsemmisült ablakot érne el („Object has been destroyed"),
+  // miközben a hookok tovább élnek. Ezért a bezárás csak elrejt, amíg nem lépünk ki: így a
+  // renderer állapota és a WS kapcsolata is megmarad. Kilépéskor a `before-quit` a `quitting`-ot
+  // még az ablakok `close` eseménye előtt átállítja, tehát a valódi kilépést ez nem tartja vissza.
+  window.on('close', (event) => {
+    if (quitting !== 'no' || sessionEnding) return
+    event.preventDefault()
+    window.hide()
+  })
+  window.on('session-end', () => {
+    sessionEnding = true
+  })
+
   // Ha a renderer processz meghal (OOM, GPU- vagy V8-összeomlás), az Electron egy üres
   // keretet hagy, és semmi nem tölti újra. Az overlay az egyetlen ablak, tehát a
   // gyorsbillentyű onnantól egy üres ablakot mutatna — ami pont úgy néz ki, mint a „nincs
@@ -68,6 +88,11 @@ function createOverlay(): BrowserWindow {
   })
 
   return window
+}
+
+/** Elrejti az overlayt, ha még létezik. Egy megsemmisült ablak `hide()`-ja dobna. */
+function hideOverlay(): void {
+  if (overlay !== undefined && !overlay.isDestroyed()) overlay.hide()
 }
 
 /**
@@ -142,7 +167,7 @@ app.whenReady().then(async () => {
     // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
     // tálcagombot villogtatná. Ha így is elbukik, a `code -r` tartalék megoldja.
     const outcome = await focusSessionWindow(view)
-    overlay?.hide()
+    hideOverlay()
     // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
     // A döntéseket a fókusz UTÁN olvassuk: a várakozás alatt egy fájlírás-kérés is beérkezhetett.
     // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
@@ -152,7 +177,7 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('overlay:hide', () => {
-    overlay?.hide()
+    hideOverlay()
   })
 
   ipcMain.handle('settings:get', () => ({ hideAfterLastDecision }))
@@ -256,23 +281,28 @@ app.whenReady().then(async () => {
   })
 
   function showOverlay(): void {
-    if (overlay === undefined) return
+    // Kilépés közben nem hozunk létre új ablakot, és nem mutatjuk a régit.
+    if (quitting !== 'no') return
+    // A `close` kezelő óta az overlay csak kilépéskor semmisül meg. Ha mégis megsemmisült (egy
+    // ismeretlen út), egy új ablak jobb, mint egy „Object has been destroyed" kivétel.
+    if (overlay === undefined || overlay.isDestroyed()) overlay = createOverlay()
+    const window = overlay
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)
     // getBounds(), nem getSize(): az Electron a getSize()-t `number[]`-ként típusozza,
     // amiből `noUncheckedIndexedAccess` mellett csak típus-kényszerítéssel lehetne
     // szélességet és magasságot kivenni. A getBounds() elnevezett mezőket ad.
-    const { width, height } = overlay.getBounds()
-    overlay.setPosition(
+    const { width, height } = window.getBounds()
+    window.setPosition(
       Math.round(display.workArea.x + (display.workArea.width - width) / 2),
       Math.round(display.workArea.y + (display.workArea.height - height) / 3),
     )
-    overlay.show()
-    overlay.focus()
+    window.show()
+    window.focus()
   }
 
   function toggleOverlay(): void {
-    if (overlay?.isVisible() === true) overlay.hide()
+    if (overlay !== undefined && !overlay.isDestroyed() && overlay.isVisible()) overlay.hide()
     else showOverlay()
   }
 
