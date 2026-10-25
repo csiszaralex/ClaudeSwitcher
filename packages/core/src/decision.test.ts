@@ -161,3 +161,108 @@ describe('parsePermissionRequest — Workflow', () => {
     }
   })
 })
+
+/** Egy kérés tetszőleges eszközzel és bemenettel — a formátumváltás eseteihez nincs valódi payload. */
+function request(toolName: string, toolInput: unknown): PermissionRequestInfo {
+  const info = parsePermissionRequest({ session_id: 's', tool_name: toolName, tool_input: toolInput })
+  if (info === undefined) throw new Error(`request did not parse: ${toolName}`)
+  return info
+}
+
+describe('parsePermissionRequest — olvasható-e a kérés', () => {
+  it('marks every measured payload readable', () => {
+    for (const name of [
+      'permissionRequest_bash',
+      'permissionRequest_write',
+      'permissionRequest_edit',
+      'permissionRequest_webFetch',
+      'permissionRequest_mcp',
+      'permissionRequest_askSingle',
+      'permissionRequest_plan',
+      'permissionRequest_subagent',
+      'permissionRequest_workflow',
+    ]) {
+      expect(parsed(name).readable, name).toBe(true)
+    }
+  })
+
+  it('marks a shell request without a readable command unreadable', () => {
+    for (const toolName of ['Bash', 'PowerShell']) {
+      expect(request(toolName, { command: 'ls' }).readable).toBe(true)
+      expect(request(toolName, {}).readable).toBe(false)
+      expect(request(toolName, { command: '' }).readable).toBe(false)
+      expect(request(toolName, { command: '  \n ' }).readable).toBe(false)
+      expect(request(toolName, { command: ['ls'] }).readable).toBe(false)
+      expect(request(toolName, { cmd: 'ls' }).readable).toBe(false)
+    }
+    expect(parsePermissionRequest({ session_id: 's', tool_name: 'Bash' })?.readable).toBe(false)
+  })
+
+  it('marks a file write without its path unreadable', () => {
+    for (const toolName of ['Write', 'Edit', 'MultiEdit']) {
+      expect(request(toolName, { file_path: 'a.txt' }).readable).toBe(true)
+      expect(request(toolName, { path: 'a.txt' }).readable).toBe(false)
+      expect(request(toolName, { file_path: '' }).readable).toBe(false)
+    }
+  })
+
+  it('reads a notebook edit by notebook_path, and summarises with it', () => {
+    const notebook = request('NotebookEdit', { notebook_path: 'P:/nb/a.ipynb', new_source: 'x' })
+    expect(notebook.readable).toBe(true)
+    expect(notebook.summary).toBe('P:/nb/a.ipynb')
+    expect(request('NotebookEdit', { file_path: 'P:/nb/a.ipynb' }).readable).toBe(false)
+  })
+
+  it('marks a WebFetch without a url unreadable', () => {
+    expect(request('WebFetch', { url: 'https://x' }).readable).toBe(true)
+    expect(request('WebFetch', { prompt: 'p' }).readable).toBe(false)
+  })
+
+  it('keeps every other tool readable, even with an empty input', () => {
+    expect(request('mcp__github__create_issue', {}).readable).toBe(true)
+    expect(request('Grep', { pattern: 'x' }).readable).toBe(true)
+    expect(request('SomethingNew', 'garbage').readable).toBe(true)
+  })
+})
+
+describe('parsePermissionRequest — a szabályjavaslatok', () => {
+  const suggesting = (permission_suggestions: unknown): PermissionRequestInfo => {
+    const info = parsePermissionRequest({
+      session_id: 's',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls' },
+      permission_suggestions,
+    })
+    if (info === undefined) throw new Error('request did not parse')
+    return info
+  }
+
+  it('takes only allow suggestions', () => {
+    expect(
+      suggesting([
+        { type: 'addRules', behavior: 'deny', rules: [{ toolName: 'Bash', ruleContent: 'rm *' }], destination: 'localSettings' },
+        { type: 'addRules', behavior: 'ask', rules: [{ toolName: 'Bash', ruleContent: 'git *' }], destination: 'localSettings' },
+        { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'cat *' }], destination: 'localSettings' },
+        { type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Bash', ruleContent: 'ls *' }], destination: 'localSettings' },
+      ]).suggestedRules,
+    ).toEqual([{ toolName: 'Bash', ruleContent: 'ls *' }])
+  })
+
+  it('drops a rule whose ruleContent is empty or not text instead of widening it to the bare tool', () => {
+    expect(
+      suggesting([
+        {
+          type: 'addRules',
+          behavior: 'allow',
+          rules: [
+            { toolName: 'Bash', ruleContent: '' },
+            { toolName: 'Bash', ruleContent: 42 },
+            { toolName: 'Bash', ruleContent: null },
+            { toolName: 'mcp__x__y' },
+          ],
+          destination: 'localSettings',
+        },
+      ]).suggestedRules,
+    ).toEqual([{ toolName: 'mcp__x__y', ruleContent: undefined }])
+  })
+})

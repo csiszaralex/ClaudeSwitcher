@@ -6,7 +6,9 @@ import {
   joinAnswerLabels,
   parseUserDecision,
   PLAN_APPROVAL_UNSUPPORTED,
+  UNREADABLE_REQUEST,
   type DecisionResult,
+  type UserDecision,
 } from './decision-response.js'
 
 const fixtures = JSON.parse(
@@ -190,5 +192,31 @@ describe('parseUserDecision — the IPC boundary', () => {
       expect(() => parseUserDecision(garbage)).not.toThrow()
       expect(parseUserDecision(garbage)).toBeUndefined()
     }
+  })
+})
+
+describe('buildHookResponse — olvashatatlan kérés', () => {
+  const blindBash = parsePermissionRequest({ session_id: 's', tool_name: 'Bash', tool_input: { cmd: 'rm -rf /' } })
+  const blindEdit = parsePermissionRequest({ session_id: 's', tool_name: 'Edit', tool_input: { path: 'x' } })
+  if (blindBash === undefined || blindEdit === undefined) throw new Error('payload did not parse')
+
+  it('refuses every allow variant, since the panel cannot show what would be approved', () => {
+    const rules: UserDecision = { type: 'allow-with-rules', rules: [{ toolName: 'Bash' }], destination: 'localSettings' }
+    for (const result of [
+      buildHookResponse(blindBash, { type: 'allow' }),
+      buildHookResponse(blindBash, rules),
+      buildHookResponse(blindEdit, { type: 'allow' }),
+      buildHookResponse(blindEdit, { type: 'allow-session-edits' }),
+    ]) {
+      expect(result).toEqual({ ok: false, reason: UNREADABLE_REQUEST })
+    }
+  })
+
+  it('still lets the user deny it', () => {
+    expect(decisionOf(buildHookResponse(blindBash, { type: 'deny' }))).toEqual({ behavior: 'deny' })
+    expect(decisionOf(buildHookResponse(blindEdit, { type: 'deny', message: 'nem' }))).toEqual({
+      behavior: 'deny',
+      message: 'nem',
+    })
   })
 })

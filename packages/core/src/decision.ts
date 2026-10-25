@@ -62,9 +62,32 @@ export interface PermissionRequestInfo {
   questions: AskQuestion[]
   /** Csak `plan` fajtánál van. */
   plan?: string | undefined
+  /**
+   * Hamis, ha a kérés lényegét nem tudtuk kiolvasni (megváltozott `tool_input` alak): a parancs,
+   * a fájl útvonala vagy az URL hiányzik. A panel ilyenkor csak az eszköz nevét mutatná, ezért a
+   * `buildHookResponse` minden engedélyezést elutasít rá; a tiltás és a VSCode marad.
+   */
+  readable: boolean
 }
 
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/**
+ * Eszközönként az a mező, ami nélkül a kérés vakon menne át: a parancs, a fájl útvonala, az URL.
+ * A NotebookEdit a `notebook_path`-ban adja a fájlt. Erre nincs mért payload a fixture-ökben; a
+ * mezőnév a Claude Code NotebookEdit bemenete, és a `toolDetail` (tool-detail.ts) is ezt olvassa.
+ * Ami itt nincs, az olvashatónak számít: egy MCP-toolnak vagy egy ismeretlen eszköznek nincs
+ * kötelező mezője, a nyers bemenete a részletekben látszik.
+ */
+const REQUIRED_FIELD: Readonly<Record<string, string>> = {
+  Bash: 'command',
+  PowerShell: 'command',
+  Write: 'file_path',
+  Edit: 'file_path',
+  MultiEdit: 'file_path',
+  NotebookEdit: 'notebook_path',
+  WebFetch: 'url',
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -72,6 +95,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** A kötelező mező egy nem üres szöveg; csupa szóköz nem az, abból sem látszana semmi. */
+function isReadable(toolName: string, input: Record<string, unknown>): boolean {
+  const field = REQUIRED_FIELD[toolName]
+  if (field === undefined) return true
+  const value = input[field]
+  return typeof value === 'string' && value.trim() !== ''
 }
 
 function kindOf(toolName: string): DecisionKind {
@@ -114,18 +145,32 @@ function parseQuestions(raw: unknown): AskQuestion[] {
   return questions
 }
 
+/**
+ * Csak az engedélyező (`behavior: 'allow'`) `addRules` javaslatok: a mért payloadokban a
+ * `behavior` a javaslat szintjén áll. Egy tiltó vagy kérdező javaslat engedélyező szabályként
+ * az ellenkezőjét adná annak, amit a Claude Code javasolt.
+ *
+ * A `ruleContent` nélküli szabály a puszta tool (MCP-nél ez a természetes alak). Egy üres vagy nem
+ * szöveges `ruleContent` viszont nem ugyanaz: abból puszta tool, vagyis a tool MINDEN hívására
+ * szóló szabály lenne, ezért az ilyen szabály kiesik.
+ */
 function parseSuggestedRules(raw: unknown): PermissionRule[] {
   if (!Array.isArray(raw)) return []
   const rules: PermissionRule[] = []
   for (const suggestion of raw) {
-    if (!isRecord(suggestion) || suggestion['type'] !== 'addRules') continue
+    if (!isRecord(suggestion) || suggestion['type'] !== 'addRules' || suggestion['behavior'] !== 'allow') continue
     const list = suggestion['rules']
     if (!Array.isArray(list)) continue
     for (const rule of list) {
       if (!isRecord(rule)) continue
       const toolName = str(rule['toolName'])
       if (toolName === undefined) continue
-      rules.push({ toolName, ruleContent: str(rule['ruleContent']) })
+      if (!('ruleContent' in rule)) {
+        rules.push({ toolName, ruleContent: undefined })
+        continue
+      }
+      const ruleContent = str(rule['ruleContent'])
+      if (ruleContent !== undefined) rules.push({ toolName, ruleContent })
     }
   }
   return rules
@@ -179,7 +224,7 @@ function summarize(
   // mást mutatna, mint amit a felhasználó jóváhagy. Csak a két végét vágjuk.
   const command = str(input['command'])
   if (command !== undefined) return command.replace(/\r\n?/g, '\n').trim()
-  const target = str(input['file_path']) ?? str(input['url'])
+  const target = str(input['file_path']) ?? str(input['notebook_path']) ?? str(input['url'])
   return target === undefined ? toolName : oneLine(target)
 }
 
@@ -216,5 +261,6 @@ export function parsePermissionRequest(body: unknown): PermissionRequestInfo | u
     suggestedRules: parseSuggestedRules(body['permission_suggestions']),
     questions,
     plan: kind === 'plan' ? str(toolInput['plan']) : undefined,
+    readable: isReadable(toolName, toolInput),
   }
 }

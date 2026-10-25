@@ -19,6 +19,13 @@ export type DecisionResult = { ok: true; body: HookDecisionBody } | { ok: false;
 export const PLAN_APPROVAL_UNSUPPORTED =
   'Tervet a hookból nem lehet jóváhagyni (Claude Code korlát) — hagyd jóvá a VSCode-ban.'
 
+/**
+ * Olvashatatlan kérésre (`PermissionRequestInfo.readable`) a panel csak az eszköz nevét látja:
+ * egy engedélyezés vakon menne ki. A panel ugyanezt a szöveget mutatja a gombok helyén.
+ */
+export const UNREADABLE_REQUEST =
+  'A kérés tartalma nem olvasható (ismeretlen formátum), ezért itt nem engedélyezhető. Tilthatod, vagy dönts a VSCode-ban.'
+
 function accept(decision: Record<string, unknown>): DecisionResult {
   return { ok: true, body: { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } } }
 }
@@ -37,9 +44,10 @@ function toWire(rule: PermissionRule): Record<string, string> {
 /**
  * A felhasználó döntéséből a hook válasza — vagy annak megtagadása, ha a döntés az adott
  * kérésre nem érvényes. Ez az egyetlen hely, ahol a spec tiltásai érvényesülnek: kérdést csak
- * válasszal, tervet soha nem enged tovább.
+ * válasszal, tervet soha nem enged tovább, olvashatatlan kérést pedig csak tilthat.
  */
 export function buildHookResponse(request: PermissionRequestInfo, decision: UserDecision): DecisionResult {
+  if (!request.readable && decision.type !== 'deny') return refuse(UNREADABLE_REQUEST)
   switch (decision.type) {
     case 'allow':
       if (request.kind === 'question') return refuse('Kérdést csak válasszal lehet továbbengedni.')
