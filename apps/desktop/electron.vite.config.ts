@@ -16,7 +16,7 @@ type Plugin = ReturnType<typeof swcPlugin>
  * `ERR_REQUIRE_ESM`-mel hal meg. Ezt valódi Electron főprocesszben mértük le.
  *
  * Megoldás: a workspace csomagokat kizárjuk az externalizálásból, így beépülnek a
- * bundle-be, a tranzitív függőségeikkel (hono, ws, chokidar) együtt — azok nem
+ * bundle-be, a tranzitív függőségeikkel (hono, @hono/node-server, ws) együtt: azok nem
  * szerepelnek ennek az appnak a `dependencies`-ében, tehát nem externalizálódnak.
  *
  * Az ESM főprocessz nem járható alternatíva: az Electron 33 ESM-loadere elhasal, ha

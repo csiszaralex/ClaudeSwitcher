@@ -237,7 +237,7 @@ export function takeNativeSnapshot(): ProcessSnapshot | undefined {
  * processzre (2026-10-22), és ennek szinte egésze maga a `CreateToolhelp32Snapshot` kernelhívás
  * — egy nyers Buffer-es bejárás ugyanennyi volt —, a 20–30 indulási idő lekérdezése ~0,3 ms.
  * Ez elhanyagolható a korábbi 330 ms–10 s blokkoláshoz képest, de nem nulla, ezért a TTL a
- * régi 2 s marad: a fájlfigyelő által sűrűn indított szkennelések sem kérnek gyakrabban.
+ * régi 2 s marad: a poll és a lifecycle hookok által sűrűn indított szkennelések sem kérnek gyakrabban.
  */
 export function createNativeProcessProbe(ttlMs = 2000): ProcessProbe | undefined {
   const api = loadKernel32()

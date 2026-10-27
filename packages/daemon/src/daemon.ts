@@ -150,7 +150,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   let refreshing: Promise<void> | undefined
   async function refresh(): Promise<void> {
-    // Egyszerre csak egy szkennelés fusson; a fájlfigyelő sűrűn tüzelhet.
+    // Egyszerre csak egy szkennelés fusson: a poll és a lifecycle hookok egymást átfedve is indíthatják.
     if (refreshing !== undefined) return refreshing
     refreshing = (async () => {
       try {
