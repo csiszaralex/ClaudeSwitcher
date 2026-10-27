@@ -1,17 +1,46 @@
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
+import { ErrorBoundary } from './ErrorBoundary.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, formatResetsIn, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
-import { useDaemonState } from './useDaemonState.js'
+import type { OverlayState } from './useDaemonState.js'
 import './styles.css'
 
-export function App(): JSX.Element {
-  const { sessions, rateLimits, connected, checkedAt, decisions } = useDaemonState()
+/**
+ * A panel helye, amikor az appból nem lehet dönteni: egy sor magyarázat és az ugrás a VSCode-ba,
+ * hogy a sor ne legyen zsákutca.
+ */
+function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): JSX.Element {
+  return (
+    <section className="decision">
+      <div className="decision-actions">
+        <div className="decision-row">
+          <span className="muted">{text}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void window.claudeswitcher.focusSession(sessionId)
+            }}
+          >
+            Ugrás a VSCode-ba
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * @param overlay A daemon élő állapota. Kívülről jön (`main.tsx` `Root`), nem itt olvassuk: így
+ * egy renderelési hiba után is él a kapcsolat, és a következő állapot visszaállíthatja a felületet.
+ */
+export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
+  const { sessions, rateLimits, connected, checkedAt, decisions } = overlay
   // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
   // együtt mozog. Lásd a selection.ts dokumentációját.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -192,45 +221,38 @@ export function App(): JSX.Element {
       </ul>
 
       {decision !== undefined && selectedRowView !== undefined && (
-        <DecisionPanel
+        // Saját határ, a kérés azonosítójával kulcsolva: egy hibás kérés csak a saját panelját viszi
+        // el, a lista és a többi kérés működik tovább. Egy másik kérés új határt kap.
+        <ErrorBoundary
           key={decision.id}
-          decision={decision}
-          agentLabel={subagentLabel(decision, selectedRowView.session?.subagents)}
-          keyHistory={keyHistory}
-          onDecided={() => {
-            afterDecision(decision).catch((error: unknown) => {
-              console.error('[overlay] could not move on after the decision', error)
-            })
-          }}
-          onJump={() => {
-            // A session-azonosítóval, mint eddig. Ismeretlen sessionnél a main nem talál ablakot,
-            // és nem ugrik — a natív prompt a VSCode-ban attól még ott van.
-            void window.claudeswitcher.focusSession(selectedRowView.sessionId)
-          }}
-        />
+          label="decision panel"
+          fallback={() => <JumpNotice text="A kérés nem jeleníthető meg" sessionId={selectedRowView.sessionId} />}
+        >
+          <DecisionPanel
+            decision={decision}
+            agentLabel={subagentLabel(decision, selectedRowView.session?.subagents)}
+            keyHistory={keyHistory}
+            onDecided={() => {
+              afterDecision(decision).catch((error: unknown) => {
+                console.error('[overlay] could not move on after the decision', error)
+              })
+            }}
+            onJump={() => {
+              // A session-azonosítóval, mint eddig. Ismeretlen sessionnél a main nem talál ablakot,
+              // és nem ugrik — a natív prompt a VSCode-ban attól még ott van.
+              void window.claudeswitcher.focusSession(selectedRowView.sessionId)
+            }}
+          />
+        </ErrorBoundary>
       )}
 
       {decision === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
         // Nincs tartott kérés, tehát nincs mit eldönteni — de a sor ne legyen zsákutca: a natív
         // prompt a VSCode-ban ott van.
-        <section className="decision">
-          <div className="decision-actions">
-            <div className="decision-row">
-              <span className="muted">
-                A VSCode-ban vár jóváhagyásra — az appból ezt nem lehet eldönteni (az app újraindult, vagy
-                a kérés nem hozzá érkezett).
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  void window.claudeswitcher.focusSession(selectedRowView.sessionId)
-                }}
-              >
-                Ugrás a VSCode-ba
-              </button>
-            </div>
-          </div>
-        </section>
+        <JumpNotice
+          text="A VSCode-ban vár jóváhagyásra — az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett)."
+          sessionId={selectedRowView.sessionId}
+        />
       )}
 
       <div className="limits">

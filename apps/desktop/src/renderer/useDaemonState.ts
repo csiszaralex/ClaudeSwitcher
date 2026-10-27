@@ -29,6 +29,12 @@ export interface OverlayState extends DaemonState {
    * jelen keresztül különböztethető meg.
    */
   checkedAt: number | undefined
+  /**
+   * Hányadik alkalmazott állapotüzenet (élő `state` üzenet vagy a kezdeti IPC-lekérés). A legfelső
+   * ErrorBoundary ebből tudja, hogy új állapot jött, és újra megpróbálhatja a renderelést. Az
+   * életjel (`tick`) nem növeli: az azonos állapot ugyanúgy hibázna.
+   */
+  stateVersion: number
 }
 
 /**
@@ -45,6 +51,7 @@ export function useDaemonState(): OverlayState {
   const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {}, decisions: [] })
   const [connected, setConnected] = useState(false)
   const [checkedAt, setCheckedAt] = useState<number | undefined>()
+  const [stateVersion, setStateVersion] = useState(0)
 
   useEffect(() => {
     let socket: WebSocket | undefined
@@ -96,7 +103,10 @@ export function useDaemonState(): OverlayState {
           .then((fresh) => {
             const clean = sanitizeState(fresh)
             if (clean === undefined) return
-            if (!closed && myGeneration === generation && !receivedLive) setState(clean)
+            if (!closed && myGeneration === generation && !receivedLive) {
+              setState(clean)
+              setStateVersion((version) => version + 1)
+            }
           })
           .catch((error: unknown) => {
             console.error('[overlay] could not read the initial state', error)
@@ -116,6 +126,7 @@ export function useDaemonState(): OverlayState {
         if (parsed.kind !== 'state') return
         receivedLive = true
         setState(parsed.state)
+        setStateVersion((version) => version + 1)
       }
 
       next.onclose = () => {
@@ -154,5 +165,5 @@ export function useDaemonState(): OverlayState {
     }
   }, [])
 
-  return { ...state, connected, checkedAt }
+  return { ...state, connected, checkedAt, stateVersion }
 }
