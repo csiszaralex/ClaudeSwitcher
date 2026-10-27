@@ -1,12 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { isNotFoundError, transformSettingsFile, userSettingsPath } from '@claudeswitcher/core'
+import { DAEMON_PORT } from './daemon-port.js'
 
-/**
- * A daemon rögzített portja. Nem ideiglenes, mert a telepített hookok és a statusLine ezt
- * az URL-t kapják a settings.json-ban: egy újraindításonként változó port minden
- * újraindítás után halottá tenné őket.
- */
-export const DAEMON_PORT = 47821
+export { DAEMON_PORT } from './daemon-port.js'
 
 export interface IntegrationOptions {
   port: number
