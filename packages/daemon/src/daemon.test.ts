@@ -151,17 +151,6 @@ describe('startDaemon', () => {
     expect(types.filter((t) => t === 'tick')).toHaveLength(2)
   })
 
-  it('stores rate limits posted by the status line', async () => {
-    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
-    const resetsAt = Math.floor(Date.now() / 1000) + 3600
-    await fetch(`http://127.0.0.1:${running.port}/statusline`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${running.token}` },
-      body: JSON.stringify({ rate_limits: { five_hour: { used_percentage: 23.5, resets_at: resetsAt } } }),
-    })
-    expect(running.state().rateLimits.five_hour?.used_percentage).toBe(23.5)
-  })
-
   it('uses the token it is given instead of generating one', async () => {
     const token = 'a'.repeat(32)
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0, token })

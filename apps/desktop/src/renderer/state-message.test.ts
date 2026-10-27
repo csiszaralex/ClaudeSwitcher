@@ -16,8 +16,8 @@ function decisionFrom(name: string): Record<string, unknown> {
 
 describe('parseStateMessage', () => {
   it('returns the state carried by a well-formed state message', () => {
-    const message = JSON.stringify({ type: 'state', payload: { sessions: [], rateLimits: {}, decisions: [] } })
-    expect(parseStateMessage(message)).toEqual({ sessions: [], rateLimits: {}, decisions: [] })
+    const message = JSON.stringify({ type: 'state', payload: { sessions: [], decisions: [] } })
+    expect(parseStateMessage(message)).toEqual({ sessions: [], decisions: [] })
   })
 
   it('ignores messages that are not state updates', () => {
@@ -37,7 +37,7 @@ describe('parseStateMessage', () => {
     // magától, az overlay onnantól véglegesen hibaszöveget mutatna.
     const message = JSON.stringify({
       type: 'state',
-      payload: { sessions: [null, { sessionId: 'a' }, 'nope', {}], rateLimits: {} },
+      payload: { sessions: [null, { sessionId: 'a' }, 'nope', {}] },
     })
     expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a' }])
   })
@@ -48,7 +48,6 @@ describe('parseStateMessage', () => {
       type: 'state',
       payload: {
         sessions: [{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'b', stoppedAt: 'tegnap' }, { sessionId: 'c' }],
-        rateLimits: {},
       },
     })
     expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'c' }])
@@ -65,7 +64,6 @@ describe('parseStateMessage', () => {
           { sessionId: 'c', entrypoint: null },
           { sessionId: 'd' },
         ],
-        rateLimits: {},
       },
     })
     expect(parseStateMessage(message)?.sessions).toEqual([
@@ -94,7 +92,6 @@ describe('parseStateMessage', () => {
           { sessionId: 'j', subagents: [] },
           { sessionId: 'k' },
         ],
-        rateLimits: {},
       },
     })
     expect(parseStateMessage(message)?.sessions).toEqual([
@@ -106,24 +103,13 @@ describe('parseStateMessage', () => {
 })
 
 describe('sanitizeState', () => {
-  it('drops a null rate-limit window, which an undefined check would let through', () => {
-    // `five_hour !== undefined` egy null-ra IGAZ, és a `.used_percentage` utána dob.
-    const clean = sanitizeState({
-      sessions: [],
-      rateLimits: { five_hour: null, seven_day: { used_percentage: 4, resets_at: 1 } },
-    })
-    expect(clean?.rateLimits.five_hour).toBeUndefined()
-    expect(clean?.rateLimits.seven_day).toEqual({ used_percentage: 4, resets_at: 1 })
-  })
-
   it('rejects a payload whose containers are the wrong type', () => {
-    expect(sanitizeState({ sessions: 'no', rateLimits: {} })).toBeUndefined()
-    expect(sanitizeState({ sessions: [], rateLimits: null })).toBeUndefined()
+    expect(sanitizeState({ sessions: 'no' })).toBeUndefined()
     expect(sanitizeState(undefined)).toBeUndefined()
   })
 
   it('never throws, whatever it is handed', () => {
-    for (const garbage of [null, 42, 'text', [], { sessions: [undefined], rateLimits: {} }]) {
+    for (const garbage of [null, 42, 'text', [], { sessions: [undefined] }]) {
       expect(() => sanitizeState(garbage)).not.toThrow()
     }
   })
@@ -134,7 +120,6 @@ describe('sanitizeState', () => {
     const good = decisionFrom('permissionRequest_askMulti')
     const clean = sanitizeState({
       sessions: [],
-      rateLimits: {},
       decisions: [
         good,
         null,
@@ -153,7 +138,6 @@ describe('sanitizeState', () => {
     expect(good['description']).toBe('Write spike-a to a.txt')
     const clean = sanitizeState({
       sessions: [],
-      rateLimits: {},
       decisions: [good, { ...good, id: 'x', description: { text: 'nope' } }],
     })
     expect(clean?.decisions).toEqual([good])
@@ -168,13 +152,19 @@ describe('sanitizeState', () => {
     delete missing['readable']
     const clean = sanitizeState({
       sessions: [],
-      rateLimits: {},
       decisions: [good, blind, missing, { ...good, id: 'text', readable: 'yes' }],
     })
     expect(clean?.decisions).toEqual([good, blind])
   })
 
+  it('drops a field it does not know, such as the retired rateLimits', () => {
+    expect(sanitizeState({ sessions: [], rateLimits: { five_hour: null }, decisions: [] })).toEqual({
+      sessions: [],
+      decisions: [],
+    })
+  })
+
   it('defaults decisions to an empty list when an older daemon omits them', () => {
-    expect(sanitizeState({ sessions: [], rateLimits: {} })?.decisions).toEqual([])
+    expect(sanitizeState({ sessions: [] })?.decisions).toEqual([])
   })
 })

@@ -50,7 +50,7 @@ body {
 .age { color: #6b6a67; text-align: right; font-variant-numeric: tabular-nums; }
 .empty { padding: 24px; text-align: center; color: #6b6a67; }
 
-.limits {
+.status-bar {
   display: flex;
   gap: 16px;
   padding: 8px 14px;

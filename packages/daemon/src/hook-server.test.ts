@@ -23,7 +23,6 @@ function events(): HookEvents {
   return {
     onNotification: vi.fn(),
     onLifecycle: vi.fn(),
-    onRateLimits: vi.fn(),
     onPermissionRequest: vi.fn(() => Promise.resolve(undefined)),
     onPreToolUse: vi.fn(),
     onPostToolUse: vi.fn(),
@@ -196,35 +195,8 @@ describe('POST /hooks/lifecycle/:kind', () => {
 })
 
 describe('POST /statusline', () => {
-  it('forwards rate limits', async () => {
-    const ev = events()
-    const app = createHookApp(TOKEN, ev)
-    await post(app, '/statusline', {
-      rate_limits: {
-        five_hour: { used_percentage: 23.5, resets_at: 1738425600 },
-        seven_day: { used_percentage: 41.2, resets_at: 1738857600 },
-      },
-    })
-    expect(ev.onRateLimits).toHaveBeenCalledWith({
-      five_hour: { used_percentage: 23.5, resets_at: 1738425600 },
-      seven_day: { used_percentage: 41.2, resets_at: 1738857600 },
-    })
-  })
-
-  it('ignores a payload with no rate_limits (free plans, pre-first-response)', async () => {
-    const ev = events()
-    const app = createHookApp(TOKEN, ev)
-    expect((await post(app, '/statusline', { model: { id: 'opus' } })).status).toBe(200)
-    expect(ev.onRateLimits).not.toHaveBeenCalled()
-  })
-
-  it('ignores rate_limits whose windows are all unusable', async () => {
-    const ev = events()
-    const app = createHookApp(TOKEN, ev)
-    await post(app, '/statusline', {
-      rate_limits: { five_hour: { used_percentage: 'lots' }, seven_day: null },
-    })
-    expect(ev.onRateLimits).not.toHaveBeenCalled()
+  it('is gone with the retired rate-limit feature', async () => {
+    expect((await post(createHookApp(TOKEN, events()), '/statusline', { rate_limits: {} })).status).toBe(404)
   })
 })
 

@@ -95,14 +95,3 @@ export interface SessionView {
    */
   subagents?: SubagentView[] | undefined
 }
-
-export interface RateLimitWindow {
-  used_percentage: number
-  resets_at: number
-}
-
-export interface RateLimits {
-  five_hour?: RateLimitWindow | undefined
-  seven_day?: RateLimitWindow | undefined
-  spend_limit?: RateLimitWindow | undefined
-}

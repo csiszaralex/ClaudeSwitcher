@@ -48,7 +48,7 @@ export function retryDelayMs(attempt: number): number {
 
 /** Élő állapot a daemon WebSocket hubjáról, újracsatlakozással. */
 export function useDaemonState(): OverlayState {
-  const [state, setState] = useState<DaemonState>({ sessions: [], rateLimits: {}, decisions: [] })
+  const [state, setState] = useState<DaemonState>({ sessions: [], decisions: [] })
   const [connected, setConnected] = useState(false)
   const [checkedAt, setCheckedAt] = useState<number | undefined>()
   const [stateVersion, setStateVersion] = useState(0)

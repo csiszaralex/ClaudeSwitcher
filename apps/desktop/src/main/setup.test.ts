@@ -19,7 +19,20 @@ function without<T>(source: Record<string, T>, keys: readonly string[]): Record<
 const OPTIONS = {
   port: 47821,
   token: 'abc123',
-  statusLineCommand: 'node "P:\\repo\\packages\\statusline\\dist\\main.js"',
+}
+
+/** A kivezetett status line, ahogy egy korábbi verzió telepítette: a jelölő a parancs végén. */
+const OUR_OLD_STATUS_LINE = {
+  type: 'command',
+  command: 'node "P:\\repo\\packages\\statusline\\dist\\main.js" --claudeswitcher',
+  padding: 0,
+}
+
+/** Egy korábbi verzió telepítése: hookok, a jelölt status line és mindkét env-változó. */
+function olderInstall(base: Record<string, unknown>): Record<string, unknown> {
+  const installed = applyIntegration(base, OPTIONS).settings
+  const env = installed['env'] as Record<string, unknown>
+  return { ...installed, statusLine: OUR_OLD_STATUS_LINE, env: { ...env, CLAUDESWITCHER_PORT: '47821' } }
 }
 
 /** A felhasználó valódi settings.json-jának alakja, a munkamenet elején lemérve. */
@@ -119,24 +132,33 @@ describe('applyIntegration', () => {
     expect(String(hooks['Stop']![0]!.hooks[0]!['url'])).toContain(':47821/')
   })
 
-  it('installs the status line and adds the two env vars beside existing ones', () => {
-    const { settings } = applyIntegration({ env: { OTHER: 'x' } }, OPTIONS)
-    expect(settings['statusLine']).toEqual({
-      type: 'command',
-      command: `${OPTIONS.statusLineCommand} --claudeswitcher`,
-      padding: 0,
-    })
-    expect(settings['env']).toEqual({
-      OTHER: 'x',
-      CLAUDESWITCHER_PORT: '47821',
-      CLAUDESWITCHER_TOKEN: 'abc123',
-    })
+  it('installs no status line and adds only the token env var beside existing ones', () => {
+    const { settings, conflicts } = applyIntegration({ env: { OTHER: 'x' } }, OPTIONS)
+    expect(settings['statusLine']).toBeUndefined()
+    expect(settings['env']).toEqual({ OTHER: 'x', CLAUDESWITCHER_TOKEN: 'abc123' })
+    expect(conflicts).toEqual([])
   })
 
-  it('refuses to overwrite a foreign status line and reports it as a conflict', () => {
+  it('leaves a foreign status line alone without reporting a conflict', () => {
     const { settings, conflicts } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
     expect(settings['statusLine']).toEqual(FOREIGN_STATUS_LINE)
-    expect(conflicts).toHaveLength(1)
+    expect(conflicts).toEqual([])
+  })
+
+  it('removes the status line and the port env var an earlier version installed, on reinstall', () => {
+    const reinstalled = applyIntegration(olderInstall({ env: { OTHER: 'x' } }), OPTIONS).settings
+    expect(reinstalled['statusLine']).toBeUndefined()
+    expect(reinstalled['env']).toEqual({ OTHER: 'x', CLAUDESWITCHER_TOKEN: 'abc123' })
+    expect(reinstalled).toEqual(applyIntegration({ env: { OTHER: 'x' } }, OPTIONS).settings)
+  })
+
+  it('keeps a foreign status line that replaced ours after the install, through reinstall and uninstall', () => {
+    // A felhasználó a mi status line-unkat a sajátjára cserélte: onnantól az nem a miénk.
+    const replaced = { ...olderInstall(USER_SETTINGS), statusLine: FOREIGN_STATUS_LINE }
+    const reinstalled = applyIntegration(replaced, OPTIONS).settings
+    expect(reinstalled['statusLine']).toEqual(FOREIGN_STATUS_LINE)
+    expect(removeIntegration(reinstalled)).toEqual({ ...USER_SETTINGS, statusLine: FOREIGN_STATUS_LINE })
+    expect(removeIntegration(replaced)).toEqual({ ...USER_SETTINGS, statusLine: FOREIGN_STATUS_LINE })
   })
 
   it('leaves a malformed hooks value alone and reports it', () => {
@@ -146,18 +168,11 @@ describe('applyIntegration', () => {
   })
 
   it('does not mistake another repo\'s statusline for ours', () => {
-    // A régi felismerés puszta útvonaltöredékre illesztett, így ezt a sajátunknak nézte,
-    // ütközésjelzés nélkül felülírta, majd az eltávolításnál törölte volna.
-    const { settings, conflicts } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
+    // Az útvonal elrendezése nem a miénk, hanem elterjedt. Útvonal szerinti felismeréssel a
+    // telepítés és az eltávolítás is elvinné ezt az idegen status line-t.
+    const { settings } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
     expect(settings['statusLine']).toEqual(FOREIGN_STATUS_LINE)
-    expect(conflicts).toHaveLength(1)
-  })
-
-  it('keeps the padding the user set on our own status line', () => {
-    const once = applyIntegration({}, OPTIONS).settings
-    const tuned = { ...(once['statusLine'] as Record<string, unknown>), padding: 3 }
-    const again = applyIntegration({ ...once, statusLine: tuned }, OPTIONS).settings
-    expect((again['statusLine'] as Record<string, unknown>)['padding']).toBe(3)
+    expect(removeIntegration(settings)).toEqual({ statusLine: FOREIGN_STATUS_LINE })
   })
 
   it('keeps a foreign hook that sits inside our own matcher group', () => {
@@ -262,6 +277,12 @@ describe('removeIntegration', () => {
     }
     const installed = applyIntegration(existing, OPTIONS).settings
     expect(removeIntegration(installed)).toEqual(existing)
+  })
+
+  it('removes the status line and the port env var an earlier version installed', () => {
+    expect(removeIntegration(olderInstall(USER_SETTINGS))).toEqual(USER_SETTINGS)
+    const withForeignEnv = olderInstall({ ...USER_SETTINGS, env: { OTHER: 'x' } })
+    expect(removeIntegration(withForeignEnv)).toEqual({ ...USER_SETTINGS, env: { OTHER: 'x' } })
   })
 
   it('is harmless on settings that never had the integration', () => {

@@ -1,5 +1,5 @@
 /**
- * A daemon rögzített portja. Nem ideiglenes, mert a telepített hookok és a statusLine ezt
+ * A daemon rögzített portja. Nem ideiglenes, mert a telepített hookok ezt
  * az URL-t kapják a settings.json-ban: egy újraindításonként változó port minden
  * újraindítás után halottá tenné őket.
  *

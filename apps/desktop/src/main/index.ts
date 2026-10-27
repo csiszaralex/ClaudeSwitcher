@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
@@ -195,7 +194,7 @@ if (!isPrimaryInstance) {
 
 app.whenReady().then(async () => {
   if (!isPrimaryInstance) return
-  // A token tartós, a port rögzített: a telepített hookok és a statusLine ezeket kapják
+  // A token tartós, a port rögzített: a telepített hookok ezeket kapják
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
   const userData = app.getPath('userData')
@@ -281,11 +280,6 @@ app.whenReady().then(async () => {
 
   overlay = createOverlay()
 
-  // Csak fejlesztői build: abszolút útvonal ennek a repónak a lefordított statusline
-  // scriptjére. Ha a repó elköltözik vagy a dist törlődik, újra kell telepíteni.
-  const statusLineScript = path.join(dirname, '../../../../packages/statusline/dist/main.js')
-  const statusLineCommand = `node "${statusLineScript}"`
-
   const describeError = (error: unknown): string =>
     error instanceof Error ? error.message : String(error)
 
@@ -326,20 +320,8 @@ app.whenReady().then(async () => {
       app.quit()
     },
     onInstall: () => {
-      // A telepítés különben „sikerült"-et jelentene egy olyan status line-ra, ami nem
-      // létezik — a limitek egyszerűen nem jelennének meg, ok nélkül. Lefordítatlan
-      // `dist`-nél ez a leggyakoribb eset, ezért ütközésként mondjuk meg.
-      const missingStatusLine = existsSync(statusLineScript)
-        ? []
-        : [
-            `A status line scriptje nincs meg (${statusLineScript}). ` +
-              'Futtass egy `pnpm build`-et a repo gyökerében, majd telepíts újra — ' +
-              'addig a limitek nem jelennek meg.',
-          ]
-
-      installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token, statusLineCommand })
-        .then((installConflicts) => {
-          const conflicts = [...missingStatusLine, ...installConflicts]
+      installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token })
+        .then((conflicts) => {
           void dialog.showMessageBox({
             type: conflicts.length === 0 ? 'info' : 'warning',
             title: 'ClaudeSwitcher',

@@ -1,9 +1,8 @@
-import type { RateLimits, SessionView, SubagentView } from '@claudeswitcher/core'
+import type { SessionView, SubagentView } from '@claudeswitcher/core'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 
 export interface DaemonState {
   sessions: SessionView[]
-  rateLimits: RateLimits
   decisions: PendingDecisionView[]
 }
 
@@ -91,10 +90,8 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
   if (!isObject(payload)) return undefined
 
   const sessions = payload['sessions']
-  const rateLimits = payload['rateLimits']
   const decisions = payload['decisions']
   if (!Array.isArray(sessions)) return undefined
-  if (!isObject(rateLimits)) return undefined
 
   return {
     sessions: sessions.filter(
@@ -108,9 +105,6 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
         // Opcionális; ha jön, minden eleme olyan alakú, amit a sor összefoglalója olvas.
         (view['subagents'] === undefined || (Array.isArray(view['subagents']) && view['subagents'].every(isSubagent))),
     ),
-    // A `five_hour !== undefined` vizsgálat egy `null`-ra IGAZ, az App pedig utána a
-    // `.used_percentage`-en dobna. Itt kiszűrve a megjelenítésnek nem kell erre gondolnia.
-    rateLimits: Object.fromEntries(Object.entries(rateLimits).filter(([, window]) => isObject(window))),
     // Egy régebbi daemon nem küld döntéseket — az nem hiba, hanem „nincs függő döntés".
     decisions: Array.isArray(decisions) ? decisions.filter(isDecision) : [],
   }

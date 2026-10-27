@@ -13,12 +13,6 @@ export function formatDuration(ms: number): string {
   return `${seconds}mp`
 }
 
-export function formatResetsIn(resetsAt: number, now: number = Date.now()): string {
-  const minutes = Math.max(0, Math.round((resetsAt * 1000 - now) / 60_000))
-  if (minutes >= 60) return `${Math.round(minutes / 60)}h múlva`
-  return `${minutes}p múlva`
-}
-
 /** Parancsot futtató eszközök: a részletük maga a parancs, kettősponttal jobban olvasható. */
 const COMMAND_TOOLS = new Set(['Bash', 'PowerShell'])
 

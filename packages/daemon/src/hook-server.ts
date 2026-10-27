@@ -3,8 +3,6 @@ import {
   parsePermissionRequest,
   type HookDecisionBody,
   type PermissionRequestInfo,
-  type RateLimits,
-  type RateLimitWindow,
 } from '@claudeswitcher/core'
 import { Hono } from 'hono'
 import type { ToolUseEvent } from './decision-broker.js'
@@ -26,7 +24,6 @@ export interface LifecycleEvent {
 export interface HookEvents {
   onNotification(event: NotificationEvent): void | Promise<void>
   onLifecycle(event: LifecycleEvent): void | Promise<void>
-  onRateLimits(limits: RateLimits): void | Promise<void>
   /**
    * A hook válasza: döntés, vagy `undefined` = nincs döntés (üres 200, a natív prompt marad).
    * A `signal` a hook-kliens kapcsolata: akkor bomlik, ha a kliens a válasz előtt bontja.
@@ -61,14 +58,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v !== '' ? v : undefined
-}
-
-function limitWindow(v: unknown): RateLimitWindow | undefined {
-  if (!isRecord(v)) return undefined
-  const usedPercentage = v['used_percentage']
-  const resetsAt = v['resets_at']
-  if (typeof usedPercentage !== 'number' || typeof resetsAt !== 'number') return undefined
-  return { used_percentage: usedPercentage, resets_at: resetsAt }
 }
 
 function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
@@ -229,29 +218,6 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       if (sessionId !== undefined && agentId !== undefined) events.onSubagentStop({ sessionId, agentId })
     } catch (error) {
       console.error('[hook] subagent-stop handler failed', error)
-    }
-    return c.body(null, 200)
-  })
-
-  app.post('/statusline', async (c) => {
-    try {
-      const b = await body(c)
-      record('/statusline', b)
-      const raw = b['rate_limits']
-      if (isRecord(raw)) {
-        const limits: RateLimits = {}
-        const five = limitWindow(raw['five_hour'])
-        const seven = limitWindow(raw['seven_day'])
-        const spend = limitWindow(raw['spend_limit'])
-        if (five) limits.five_hour = five
-        if (seven) limits.seven_day = seven
-        if (spend) limits.spend_limit = spend
-        if (Object.keys(limits).length > 0) {
-          contain(events.onRateLimits(limits), 'statusline')
-        }
-      }
-    } catch (error) {
-      console.error('[hook] statusline handler failed', error)
     }
     return c.body(null, 200)
   })

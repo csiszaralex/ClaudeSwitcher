@@ -6,7 +6,7 @@ import { isNotFoundError, writeFileAtomic } from '@claudeswitcher/core'
 const TOKEN_PATTERN = /^[0-9a-f]{32}$/
 
 /**
- * Tartós daemon-token. A telepített hookok és a statusLine a settings.json `env` blokkjából
+ * Tartós daemon-token. A telepített hookok a settings.json `env` blokkjából
  * kapják, tehát az app újraindításai között azonosnak kell maradnia, különben minden
  * újraindítás elavulttá tenné a telepítést.
  *

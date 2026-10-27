@@ -2,11 +2,10 @@ import { randomBytes } from 'node:crypto'
 import type { Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
-import type { ProcessProbe, RateLimits, SessionView, UserDecision } from '@claudeswitcher/core'
+import type { ProcessProbe, SessionView, UserDecision } from '@claudeswitcher/core'
 import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
 import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
-import { RateLimitStore } from './rate-limits.js'
 import { scanSessions } from './scanner.js'
 import { SessionStore } from './session-store.js'
 
@@ -14,7 +13,6 @@ export type { DecideResult, PendingDecisionView } from './decision-broker.js'
 
 export interface DaemonState {
   sessions: SessionView[]
-  rateLimits: RateLimits
   decisions: PendingDecisionView[]
 }
 
@@ -35,7 +33,7 @@ export interface DaemonOptions {
   pollMs?: number | undefined
   /**
    * A port, amire a daemon köt. 0: ideiglenes (tesztekhez). A desktop fix portot ad, mert a
-   * telepített hookok és a statusLine egy rögzített URL-t kapnak a settings.json-ban.
+   * telepített hookok egy rögzített URL-t kapnak a settings.json-ban.
    */
   port?: number | undefined
   /** A daemon tokenje. Ha nincs megadva, véletlen. A desktop tartós tokent ad, ugyanezért. */
@@ -47,7 +45,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const token = options.token ?? randomBytes(16).toString('hex')
 
   const sessions = new SessionStore()
-  const limits = new RateLimitStore()
   const decisions = new DecisionBroker()
 
   const app = createHookApp(
@@ -64,10 +61,6 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         if (event.kind === 'stop') decisions.sessionStopped(event.sessionId)
         if (event.kind === 'end') decisions.sessionEnded(event.sessionId)
         void refresh()
-      },
-      onRateLimits: (received) => {
-        limits.update(received)
-        broadcast()
       },
       onPermissionRequest: (request, signal) => decisions.hold(request, signal),
       onPreToolUse: (event) => {
@@ -104,7 +97,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const hub = new Hub(server as HttpServer, token)
 
   function state(): DaemonState {
-    return { sessions: sessions.views(), rateLimits: limits.current(), decisions: decisions.views() }
+    return { sessions: sessions.views(), decisions: decisions.views() }
   }
 
   // A SessionStore minden `apply*` híváskor jelez, akkor is, ha az állapot nem

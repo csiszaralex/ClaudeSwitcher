@@ -7,7 +7,6 @@ export { DAEMON_PORT } from './daemon-port.js'
 export interface IntegrationOptions {
   port: number
   token: string
-  statusLineCommand: string
 }
 
 export interface IntegrationResult {
@@ -57,7 +56,12 @@ const HOOK_ROUTES: Readonly<Record<string, HookRoute>> = {
 const LEGACY_EVENTS: readonly string[] = ['SessionStart']
 
 const TOKEN_ENV = 'CLAUDESWITCHER_TOKEN'
-const PORT_ENV = 'CLAUDESWITCHER_PORT'
+
+/**
+ * Egy korábbi verzió írta, azóta kivezetve. Csak a kivezetett status line scriptje olvasta, a
+ * hookok URL-je a portot közvetlenül tartalmazza. Telepítéskor és eltávolításkor is kivesszük.
+ */
+const LEGACY_PORT_ENV = 'CLAUDESWITCHER_PORT'
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -142,18 +146,18 @@ function stripEvents(hooks: Record<string, unknown>, events: readonly string[]):
 }
 
 /**
- * Jelölő a status line parancsunk végén.
+ * Jelölő a kivezetett status line parancsunk végén. Egy korábbi verzió telepítette a status
+ * line-t (a VSCode-bővítmény nem futtatja), ma már csak a régi bejegyzés felismerésére kell:
+ * telepítéskor és eltávolításkor is kivesszük.
  *
- * Azért kell, mert az útvonal önmagában nem azonosít: a `packages/statusline/dist/main.js`
- * elrendezés nem a miénk, hanem elterjedt, és egy másik repó ugyanilyen status line-ját a
- * sajátunknak néznénk — ütközésjelzés nélkül felülírnánk, majd az eltávolításnál törölnénk.
- * A statusline scriptünk az argumentumait nem olvassa (a bemenete stdin), így a jelölő
- * ártalmatlan, viszont egyértelmű.
+ * Az útvonal önmagában nem azonosít: a `packages/statusline/dist/main.js` elrendezés nem a
+ * miénk, hanem elterjedt, és egy másik repó ugyanilyen status line-ját a sajátunknak néznénk,
+ * majd törölnénk. A jelölő nélküli status line ezért soha nem a miénk.
  */
-export const STATUS_LINE_MARKER = '--claudeswitcher'
+const STATUS_LINE_MARKER = '--claudeswitcher'
 
-/** Igaz, ha a status line a mienk — a jelölőnk alapján, nem az útvonala alapján. */
-export function isOurStatusLine(statusLine: unknown): boolean {
+/** Igaz, ha a status line a kivezetett saját bejegyzésünk: a jelölőnk alapján, nem az útvonala alapján. */
+function isOurStatusLine(statusLine: unknown): boolean {
   if (!isPlainObject(statusLine)) return false
   const command = statusLine['command']
   return typeof command === 'string' && command.includes(STATUS_LINE_MARKER)
@@ -179,17 +183,26 @@ function ourHookEntry(port: number, hookRoute: HookRoute): Record<string, unknow
 }
 
 /**
+ * Új objektum a kivezetett status line-unk nélkül, ha az még a miénk. Egy idegenhez nem nyúl.
+ * Mindig másolatot ad: a hívók a visszakapott objektumot tovább írják.
+ */
+function withoutOurStatusLine(settings: Record<string, unknown>): Record<string, unknown> {
+  return isOurStatusLine(settings['statusLine']) ? without(settings, ['statusLine']) : { ...settings }
+}
+
+/**
  * A telepítés tiszta transzformációja.
  *
  * Semmit nem töröl és nem ír felül, ami nem a mienk: az idegen hookok megmaradnak az
  * eseményük tömbjében, egy idegen vagy hibás alakú érték pedig ütközésként jelentődik. A
- * korábbi verzió kivezetett eseményeiből a saját bejegyzésünket kivesszük.
+ * korábbi verzió kivezetett bejegyzéseit (`SessionStart` hook, status line, port env-változó)
+ * kivesszük, így az újratelepítés egyben migrál is.
  */
 export function applyIntegration(
   existing: Record<string, unknown>,
   options: IntegrationOptions,
 ): IntegrationResult {
-  const settings: Record<string, unknown> = { ...existing }
+  const settings: Record<string, unknown> = withoutOurStatusLine(existing)
   const conflicts: string[] = []
 
   const rawHooks = existing['hooks']
@@ -209,29 +222,12 @@ export function applyIntegration(
     settings['hooks'] = stripEvents(hooks, LEGACY_EVENTS)
   }
 
-  const previousStatusLine = existing['statusLine']
-  if (previousStatusLine === undefined || isOurStatusLine(previousStatusLine)) {
-    const previousPadding = isPlainObject(previousStatusLine) ? previousStatusLine['padding'] : undefined
-    settings['statusLine'] = {
-      type: 'command',
-      command: `${options.statusLineCommand} ${STATUS_LINE_MARKER}`,
-      // A felhasználó által állított padding megmarad; enélkül minden újratelepítés
-      // visszaállítaná nullára.
-      padding: typeof previousPadding === 'number' ? previousPadding : 0,
-    }
-  } else {
-    conflicts.push(
-      'Már van saját status line beállítva, ezt nem írtuk felül — a limitek így nem jelennek meg.',
-    )
-  }
-
   const rawEnv = existing['env']
   if (rawEnv !== undefined && !isPlainObject(rawEnv)) {
-    conflicts.push('Az "env" érték nem objektum, ezért a portot és a tokent nem állítottuk be.')
+    conflicts.push('Az "env" érték nem objektum, ezért a tokent nem állítottuk be.')
   } else {
     settings['env'] = {
-      ...(isPlainObject(rawEnv) ? rawEnv : {}),
-      [PORT_ENV]: String(options.port),
+      ...without(isPlainObject(rawEnv) ? rawEnv : {}, [LEGACY_PORT_ENV]),
       [TOKEN_ENV]: options.token,
     }
   }
@@ -240,12 +236,12 @@ export function applyIntegration(
 }
 
 /**
- * Az eltávolítás tiszta transzformációja: csak a saját bejegyzéseinket veszi ki (a kivezetett
- * eseményekből is), és a kiürült `hooks` / `env` kulcsot is törli, így egy telepítés utáni
+ * Az eltávolítás tiszta transzformációja: csak a saját bejegyzéseinket veszi ki (a korábbi
+ * verzió kivezetett bejegyzéseit is), és a kiürült `hooks` / `env` kulcsot is törli, így egy telepítés utáni
  * eltávolítás pontosan az eredeti beállításokat adja vissza.
  */
 export function removeIntegration(existing: Record<string, unknown>): Record<string, unknown> {
-  let settings: Record<string, unknown> = { ...existing }
+  let settings: Record<string, unknown> = withoutOurStatusLine(existing)
 
   const rawHooks = existing['hooks']
   if (isPlainObject(rawHooks)) {
@@ -253,11 +249,9 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
     settings = Object.keys(hooks).length === 0 ? without(settings, ['hooks']) : { ...settings, hooks }
   }
 
-  if (isOurStatusLine(existing['statusLine'])) settings = without(settings, ['statusLine'])
-
   const rawEnv = existing['env']
   if (isPlainObject(rawEnv)) {
-    const env = without(rawEnv, [PORT_ENV, TOKEN_ENV])
+    const env = without(rawEnv, [LEGACY_PORT_ENV, TOKEN_ENV])
     settings = Object.keys(env).length === 0 ? without(settings, ['env']) : { ...settings, env }
   }
 

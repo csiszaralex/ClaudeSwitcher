@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, formatResetsIn, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
+import { formatDuration, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
@@ -40,7 +40,7 @@ function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): J
  * egy renderelési hiba után is él a kapcsolat, és a következő állapot visszaállíthatja a felületet.
  */
 export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
-  const { sessions, rateLimits, connected, checkedAt, decisions } = overlay
+  const { sessions, connected, checkedAt, decisions } = overlay
   // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
   // együtt mozog. Lásd a selection.ts dokumentációját.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -255,19 +255,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
         />
       )}
 
-      <div className="limits">
-        {rateLimits.five_hour !== undefined && (
-          <span>
-            5h {Math.round(rateLimits.five_hour.used_percentage)}% ·{' '}
-            {formatResetsIn(rateLimits.five_hour.resets_at, now)}
-          </span>
-        )}
-        {rateLimits.seven_day !== undefined && (
-          <span>
-            7d {Math.round(rateLimits.seven_day.used_percentage)}% ·{' '}
-            {formatResetsIn(rateLimits.seven_day.resets_at, now)}
-          </span>
-        )}
+      <div className="status-bar">
         {/*
           Az életjel ideje. Ez az egyetlen jel, amiből látszik, hogy a lista ÉL, csak nincs
           változás — a daemon az azonos pillanatképet nem küldi újra, tehát egy tétlen gépen

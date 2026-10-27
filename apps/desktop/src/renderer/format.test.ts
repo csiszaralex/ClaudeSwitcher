@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, formatResetsIn, pendingRowText, subagentLabel, subagentTooltip, summarize, toolLabel } from './format.js'
+import { formatDuration, pendingRowText, subagentLabel, subagentTooltip, summarize, toolLabel } from './format.js'
 
 describe('formatDuration', () => {
   it('renders seconds under a minute', () => {
@@ -16,18 +16,6 @@ describe('formatDuration', () => {
 
   it('clamps a negative duration to zero', () => {
     expect(formatDuration(-5)).toBe('0mp')
-  })
-})
-
-describe('formatResetsIn', () => {
-  it('renders hours until reset', () => {
-    const now = 1_000_000_000_000
-    expect(formatResetsIn(now / 1000 + 7200, now)).toBe('2h múlva')
-  })
-
-  it('renders minutes when under an hour', () => {
-    const now = 1_000_000_000_000
-    expect(formatResetsIn(now / 1000 + 600, now)).toBe('10p múlva')
   })
 })
 
