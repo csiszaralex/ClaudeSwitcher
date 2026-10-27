@@ -3,10 +3,20 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
-import { BrowserWindow, app, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
+import {
+  BrowserWindow,
+  app,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  screen,
+  shell,
+  type IpcMainInvokeEvent,
+} from 'electron'
 import { configPath, loadConfig, updateConfig } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { hotkeyLogText, registerHotkeyOrDefault } from './hotkey.js'
+import { isOverlaySender, rendererLocation } from './ipc-sender.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
@@ -22,6 +32,29 @@ import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
+
+/** Honnan tölt az overlay; az IPC-kezelők a küldőt is ehhez mérik (`fromOverlay`). */
+const RENDERER = rendererLocation(process.env['ELECTRON_RENDERER_URL'], path.join(dirname, '../renderer/index.html'))
+
+/**
+ * Igaz, ha az IPC-hívás a saját rendererünktől jött (lásd `isOverlaySender`). Egy idegen küldőt
+ * naplózunk: ha a saját rendererünk URL-je valamiért eltérne, enélkül csak egy néma, üres overlay
+ * látszana.
+ */
+function fromOverlay(event: IpcMainInvokeEvent, channel: string): boolean {
+  const url = event.senderFrame?.url
+  if (isOverlaySender(url, RENDERER)) return true
+  console.error(`[claudeswitcher] refused ${channel} from a foreign sender: ${url ?? '(no frame)'}`)
+  return false
+}
+
+/** Az idegen küldőnek adott ok, a hibát jelző válaszokban és a dobott hibában is. */
+const FOREIGN_SENDER = 'Ismeretlen küldő.'
+
+/** Az idegen küldő elutasítása azoknál a kezelőknél, amelyeknek nincs hibát jelző válaszuk. */
+function foreignSender(): Error {
+  return new Error(FOREIGN_SENDER)
+}
 
 let daemon: Daemon | undefined
 let overlay: BrowserWindow | undefined
@@ -57,10 +90,30 @@ function createOverlay(): BrowserWindow {
     },
   })
 
-  if (process.env['ELECTRON_RENDERER_URL'] !== undefined) {
-    void window.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  // Az overlay csak a saját rendererét mutathatja. Egy idegen oldal ugyanazt a preloadot kapná
+  // (token, függő kérések, döntés), ezért a renderer felől indított navigáció, az új ablak és a
+  // <webview> tiltott. Az Electron-dokumentáció szerint a `will-navigate` a programból indított
+  // navigációra (például `loadURL`) nem fut le, így a saját betöltésünket és a `reload`-ot (az is
+  // programból indul) nem zárja ki. A `will-redirect`-et szándékosan nem tiltjuk: tiltott navigáció
+  // után nincs mit átirányítani, a saját betöltésünk átirányítását pedig nem akarjuk elrontani.
+  window.webContents.on('will-navigate', (event) => {
+    event.preventDefault()
+  })
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.on('will-attach-webview', (event) => {
+    event.preventDefault()
+  })
+  // Az overlaynek semmilyen engedély nem kell (kamera, értesítés, vágólap, teljes képernyő).
+  const { session } = window.webContents
+  session.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false)
+  })
+  session.setPermissionCheckHandler(() => false)
+
+  if (RENDERER.kind === 'dev-server') {
+    void window.loadURL(RENDERER.url)
   } else {
-    void window.loadFile(path.join(dirname, '../renderer/index.html'))
+    void window.loadFile(RENDERER.path)
   }
   window.on('blur', () => {
     window.hide()
@@ -166,9 +219,18 @@ app.whenReady().then(async () => {
   daemon = running
   await running.refresh()
 
-  ipcMain.handle('daemon:connection', () => ({ port: running.port, token: running.token }))
-  ipcMain.handle('daemon:state', () => running.state())
-  ipcMain.handle('decision:decide', (_event, id: unknown, raw: unknown) => {
+  // Minden kezelő előbb a küldőt nézi (`fromOverlay`). Ahol a válasznak van hibát jelző alakja, azt
+  // kapja az idegen küldő; a többi kezelő dob, ami a rendererben elutasított ígéret.
+  ipcMain.handle('daemon:connection', (event) => {
+    if (!fromOverlay(event, 'daemon:connection')) throw foreignSender()
+    return { port: running.port, token: running.token }
+  })
+  ipcMain.handle('daemon:state', (event) => {
+    if (!fromOverlay(event, 'daemon:state')) throw foreignSender()
+    return running.state()
+  })
+  ipcMain.handle('decision:decide', (event, id: unknown, raw: unknown) => {
+    if (!fromOverlay(event, 'decision:decide')) return { ok: false, reason: FOREIGN_SENDER }
     // IPC-bemenet: a renderer bármit küldhet. Csak egy pontosan érvényes döntés jut a
     // daemonhoz — annak érvényességét az adott kérésre a broker még külön ellenőrzi.
     if (typeof id !== 'string') return { ok: false, reason: 'Érvénytelen azonosító.' }
@@ -177,7 +239,8 @@ app.whenReady().then(async () => {
     return running.decide(id, decision)
   })
 
-  ipcMain.handle('session:focus', async (_event, sessionId: unknown) => {
+  ipcMain.handle('session:focus', async (event, sessionId: unknown) => {
+    if (!fromOverlay(event, 'session:focus')) return false
     // IPC-bemenet: a renderer bármit küldhet, ezért `unknown`, és itt ellenőrizzük.
     if (typeof sessionId !== 'string') return false
     const view = running.state().sessions.find((s) => s.sessionId === sessionId)
@@ -196,11 +259,15 @@ app.whenReady().then(async () => {
     return outcome !== 'failed'
   })
 
-  ipcMain.handle('overlay:hide', () => {
+  ipcMain.handle('overlay:hide', (event) => {
+    if (!fromOverlay(event, 'overlay:hide')) throw foreignSender()
     hideOverlay()
   })
 
-  ipcMain.handle('settings:get', () => ({ hideAfterLastDecision }))
+  ipcMain.handle('settings:get', (event) => {
+    if (!fromOverlay(event, 'settings:get')) throw foreignSender()
+    return { hideAfterLastDecision }
+  })
 
   // Indulási összegzés a főprocessz stdoutjára. Ez teszi a Step 5 ellenőrzését
   // automatizálhatóvá: nem kell DevTools-konzolba gépelni ahhoz, hogy lássuk,
