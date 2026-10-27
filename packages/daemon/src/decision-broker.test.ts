@@ -422,4 +422,35 @@ describe('DecisionBroker', () => {
     broker.decide(broker.views()[0]!.id, { type: 'allow' })
     expect(listener).toHaveBeenCalledTimes(2)
   })
+
+  it('tells listeners which session lost a request to a client abort, and only then', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    const listener = vi.fn()
+    broker.onChange(listener)
+    const client = new AbortController()
+    void broker.hold(request('permissionRequest_bash'), client.signal)
+    const [view] = broker.views()
+    expect(listener).toHaveBeenLastCalledWith({ abortedSessionId: undefined })
+
+    client.abort()
+    await flush()
+    expect(listener).toHaveBeenLastCalledWith({ abortedSessionId: view!.sessionId })
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports no abort for the other ways a request closes', () => {
+    const broker = new DecisionBroker(fakeClock())
+    const listener = vi.fn()
+    broker.onChange(listener)
+    const client = new AbortController()
+    void broker.hold(request('permissionRequest_bash'), client.signal)
+    broker.decide(broker.views()[0]!.id, { type: 'allow' })
+    void broker.hold(request('permissionRequest_bash'))
+    broker.sessionEnded(broker.views()[0]!.sessionId)
+
+    // A döntés után a bontás figyelője már le van véve: egy késő abort nem jelez.
+    client.abort()
+    for (const call of listener.mock.calls) expect(call).toEqual([{ abortedSessionId: undefined }])
+    expect(listener).toHaveBeenCalledTimes(4)
+  })
 })

@@ -130,7 +130,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
    * várakozást egy lépésben, egyetlen broadcasttal törölheti.
    */
   let resolvingFor: string | undefined
-  decisions.onChange(() => {
+  decisions.onChange(({ abortedSessionId }) => {
     // Sessionönként a legrégebbi függő döntés: amíg az tart, a session várakozó. A store
     // emittál, az pedig broadcastol — a döntések listája is ezzel megy ki.
     const pendingSince = new Map<string, number>()
@@ -138,7 +138,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       const earlier = pendingSince.get(view.sessionId)
       if (earlier === undefined || view.createdAt < earlier) pendingSince.set(view.sessionId, view.createdAt)
     }
-    sessions.applyPending(pendingSince, Date.now(), resolvingFor)
+    // A kliens bontotta a kapcsolatot (natív Nem vagy Esc): a Notification-várakozást csak akkor
+    // töröljük, ha a sessionnek nem maradt másik tartott kérése. Ha maradt, a prompt még nyitva
+    // lehet, és a várakozást annak a lezárása viszi el.
+    const abortedByClient =
+      abortedSessionId !== undefined && !pendingSince.has(abortedSessionId) ? abortedSessionId : undefined
+    sessions.applyPending(pendingSince, Date.now(), resolvingFor, abortedByClient)
   })
 
   function decide(id: string, decision: UserDecision): DecideResult {

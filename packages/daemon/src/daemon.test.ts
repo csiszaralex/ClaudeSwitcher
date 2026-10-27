@@ -432,6 +432,93 @@ describe('startDaemon — held decisions', () => {
     expect(daemon.state().decisions).toEqual([])
   })
 
+  /** Egy tartott kérés, amit a teszt a kliens oldaláról bont (natív Nem vagy Esc a VSCode-ban). */
+  function abortableRequest(daemon: Daemon, body: unknown): { abort: () => Promise<void> } {
+    const client = new AbortController()
+    const response = fetch(`http://127.0.0.1:${daemon.port}/hooks/permission-request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.token}` },
+      body: JSON.stringify(body),
+      signal: client.signal,
+    })
+    return {
+      abort: async () => {
+        client.abort()
+        await response.catch(() => undefined)
+      },
+    }
+  }
+
+  it('clears the waiting row in a single state message when the native prompt is answered after the Notification', async () => {
+    // Mérve (2026-10-25): natív Nem vagy Esc után nem jön Stop, PostToolUse vagy Notification,
+    // csak a tartott kapcsolat bomlik. ~6 mp várakozás után a permission_prompt már beállította
+    // a várakozást, és azt semmi más nem törölné.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    const held = abortableRequest(daemon, { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    await waitFor(() => daemon.state().decisions)
+    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    expect(daemon.state().sessions[0]?.notificationText).toBe('Claude needs your permission to use Write')
+
+    const socket = new WebSocket(`ws://127.0.0.1:${daemon.port}/ws?token=${daemon.token}`)
+    const states: Array<{ sessions: Array<{ status: string }>; decisions: unknown[] }> = []
+    socket.on('message', (data) => {
+      const message = JSON.parse(data instanceof Buffer ? data.toString('utf8') : '{}') as {
+        type: string
+        payload: (typeof states)[number]
+      }
+      if (message.type === 'state') states.push(message.payload)
+    })
+    await new Promise((resolve) => socket.on('open', resolve))
+
+    await held.abort()
+    await waitFor(() => (daemon.state().decisions.length === 0 ? [true] : []))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    socket.close()
+
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+    expect(daemon.state().sessions[0]?.notificationText).toBeUndefined()
+    expect(states).toHaveLength(1)
+    expect(states[0]?.decisions).toEqual([])
+    expect(states[0]?.sessions[0]?.status).toBe('idle')
+  })
+
+  it('keeps the Notification-wait while another request of the session is still held, and clears it with the last one', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    const first = abortableRequest(daemon, { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    await waitFor(() => daemon.state().decisions)
+    const second = abortableRequest(daemon, { ...payload('permissionRequest_subagent'), session_id: 'sid-100' })
+    await waitFor(() => (daemon.state().decisions.length === 2 ? [true] : []))
+    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+
+    await first.abort()
+    await waitFor(() => (daemon.state().decisions.length === 1 ? [true] : []))
+    expect(daemon.state().sessions[0]?.status).toBe('waiting')
+    expect(daemon.state().sessions[0]?.notificationText).toBe('Claude needs your permission to use Write')
+
+    await second.abort()
+    await waitFor(() => (daemon.state().decisions.length === 0 ? [true] : []))
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+    expect(daemon.state().sessions[0]?.notificationText).toBeUndefined()
+  })
+
+  it('takes a permission_prompt after a native answer as a real wait, unlike after an app decision', async () => {
+    // Natív válasz 6 mp-en belül nem küld Notificationt; egy később érkező így egy új prompté.
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const daemon = running
+    await daemon.refresh()
+    const held = abortableRequest(daemon, { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    await waitFor(() => daemon.state().decisions)
+    await held.abort()
+    await waitFor(() => (daemon.state().decisions.length === 0 ? [true] : []))
+
+    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    expect(daemon.state().sessions[0]?.status).toBe('waiting')
+  })
+
   it('answers held requests on stop instead of hanging the shutdown', async () => {
     // A tartott kapcsolatok miatt a server.close() különben soha nem térne vissza.
     const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })

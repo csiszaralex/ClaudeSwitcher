@@ -265,6 +265,42 @@ describe('SessionStore — a várakozás vége', () => {
     store.applyNotification({ sessionId: 's2', cwd: 'c', type: 'permission_prompt' }, 4_000)
     expect(store.views().find((v) => v.sessionId === 's2')?.status).toBe('waiting')
   })
+
+  it('clears the Notification-wait in the same change when a request closed by client abort', () => {
+    // Mérve (2026-10-25): natív Nem vagy Esc után nem jön hook, csak a tartott kapcsolat bomlik.
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    heldAndNotified(store, 's1', 1_000)
+    const listener = vi.fn()
+    store.onChange(listener)
+
+    store.applyPending(new Map(), 9_000, undefined, 's1')
+    const [view] = store.views()
+    expect(view?.status).toBe('idle')
+    expect(view?.notificationText).toBeUndefined()
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not open the late-prompt window after a client abort', () => {
+    // A késő Notificationt elnyelő ablak az app döntéséé. Natív válasz után egy új prompt
+    // Notificationje valódi várakozás.
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], noActivity)
+    heldAndNotified(store, 's1', 1_000)
+    store.applyPending(new Map(), 9_000, undefined, 's1')
+
+    store.applyNotification({ sessionId: 's1', cwd: 'c', type: 'permission_prompt' }, 10_000)
+    expect(store.views()[0]?.status).toBe('waiting')
+  })
+
+  it('makes an older registry waiting stale after a client abort, like any other closing hook', () => {
+    const store = new SessionStore()
+    store.applySnapshot([live('s1', { status: 'waiting', statusUpdatedAt: 1_500 })], noActivity, 2_000)
+    heldAndNotified(store, 's1', 1_000)
+
+    store.applyPending(new Map(), 9_000, undefined, 's1')
+    expect(store.views()[0]?.status).toBe('idle')
+  })
 })
 
 describe('SessionStore — rendezés a várakozás vége szerint', () => {

@@ -46,6 +46,18 @@ export interface ToolUseEvent {
 
 export type DecideResult = { ok: true } | { ok: false; reason: string }
 
+/** Egy változás oka, amit a figyelők a puszta „történt valami"-n túl megkapnak. */
+export interface DecisionChange {
+  /**
+   * A session, amelynek egy kérését ez a változás azért zárta le, mert a hook-kliens bontotta a
+   * kapcsolatot (natív Nem vagy Esc a VSCode-ban, vagy a session processzének halála). Minden más
+   * változásnál `undefined`.
+   */
+  readonly abortedSessionId: string | undefined
+}
+
+const NO_ABORT: DecisionChange = { abortedSessionId: undefined }
+
 /** Az idő és az időzítők. Tesztben hamisítható, hogy a 590 mp-et ne kelljen kivárni. */
 export interface BrokerClock {
   now(): number
@@ -115,7 +127,7 @@ export class DecisionBroker {
   readonly #clock: BrokerClock
   readonly #releaseAfterMs: number
   readonly #pending = new Map<string, Pending>()
-  readonly #listeners: Array<() => void> = []
+  readonly #listeners: Array<(change: DecisionChange) => void> = []
   #recentPre: Array<{ key: string; toolUseId: string; at: number }> = []
   /** A `releaseAll` után igaz: a daemon leáll, új kérést már nem tartunk. */
   #closed = false
@@ -125,7 +137,7 @@ export class DecisionBroker {
     this.#releaseAfterMs = releaseAfterMs
   }
 
-  onChange(listener: () => void): void {
+  onChange(listener: (change: DecisionChange) => void): void {
     this.#listeners.push(listener)
   }
 
@@ -147,7 +159,7 @@ export class DecisionBroker {
     return new Promise<HookDecisionBody | undefined>((resolve) => {
       let settled = false
       const onAbort = (): void => {
-        this.#finish(id, undefined)
+        this.#finish(id, undefined, { abortedSessionId: request.sessionId })
       }
       const pending: Pending = {
         view: { ...request, id, createdAt: this.#clock.now(), released: false },
@@ -294,14 +306,14 @@ export class DecisionBroker {
     this.#emit()
   }
 
-  #finish(id: string, body: HookDecisionBody | undefined): void {
+  #finish(id: string, body: HookDecisionBody | undefined, change: DecisionChange = NO_ABORT): void {
     const pending = this.#pending.get(id)
     if (pending === undefined) return
     this.#clock.clearTimeout(pending.timer)
     pending.detach()
     pending.respond(body)
     this.#pending.delete(id)
-    this.#emit()
+    this.#emit(change)
   }
 
   #closeWhere(predicate: (pending: Pending) => boolean): void {
@@ -310,10 +322,10 @@ export class DecisionBroker {
     }
   }
 
-  #emit(): void {
+  #emit(change: DecisionChange = NO_ABORT): void {
     for (const listener of this.#listeners) {
       try {
-        listener()
+        listener(change)
       } catch (error) {
         console.error('[decisions] listener failed', error)
       }

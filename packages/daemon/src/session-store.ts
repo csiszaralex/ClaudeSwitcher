@@ -261,14 +261,21 @@ export class SessionStore {
    * @param resolvedByApp — a session, amelynek a döntését ez a változás az appban zárta le. Az ő
    * Notification-várakozását EGY lépésben töröljük a függéssel: két külön frissítés között a
    * renderer egy pillanatra egy már eldöntött, de még „waiting" sessiont látna.
+   * @param abortedByClient A session, amelynek az utolsó tartott kérését a hook-kliens bontása
+   * zárta le. Natív Nem vagy Esc után a Claude Code semmilyen hookot nem küld, csak bontja a
+   * kapcsolatot (mérve, 2026-10-25), tehát a Notification-várakozást csak ez törölheti. Ugyanabban
+   * a lépésben, mint az app döntésénél, de a késő promptok ablaka (`#resolvedAt`) NEM nyílik meg:
+   * az az app döntésének versenyhelyzetére való, natív válasz után egy új prompt valódi várakozás.
    */
   applyPending(
     pendingSince: ReadonlyMap<string, number>,
     now: number = Date.now(),
     resolvedByApp?: string,
+    abortedByClient?: string,
   ): void {
     const affected = new Set(this.#pending.keys())
     if (resolvedByApp !== undefined) affected.add(resolvedByApp)
+    if (abortedByClient !== undefined) affected.add(abortedByClient)
     // Egy újonnan függő döntés egy új PermissionRequest: a session a Stop után újra mozdult.
     for (const id of pendingSince.keys()) {
       if (!this.#pending.has(id)) this.#stoppedAt.delete(id)
@@ -279,6 +286,7 @@ export class SessionStore {
         this.#clearWait(resolvedByApp, now)
         this.#resolvedAt.set(resolvedByApp, now)
       }
+      if (abortedByClient !== undefined) this.#clearWait(abortedByClient, now)
     })
     this.#emit()
   }
