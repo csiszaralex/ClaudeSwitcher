@@ -50,6 +50,12 @@ describe('hook app auth', () => {
     const app = createHookApp(TOKEN, events())
     expect((await post(app, '/hooks/notification', {}, 'nope')).status).toBe(401)
   })
+
+  it('rejects a token of the right length that differs, and accepts the right one', async () => {
+    const app = createHookApp(TOKEN, events())
+    expect((await post(app, '/hooks/notification', {}, 'test-tokem')).status).toBe(401)
+    expect((await post(app, '/hooks/notification', {}, TOKEN)).status).toBe(200)
+  })
 })
 
 describe('raw hook logging', () => {

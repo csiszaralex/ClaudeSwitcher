@@ -83,25 +83,47 @@ describe('startDaemon', () => {
     socket.close()
   })
 
-  it('closes a websocket connection presenting the wrong token', async () => {
-    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
-    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=wrong`)
-    const messages: string[] = []
-    socket.on('message', (data) => {
-      messages.push(data instanceof Buffer ? data.toString('utf8') : '')
+  /**
+   * A kliens felől: hitelesítetlen kérésre a szerver a 101 helyett HTTP-választ ad, amit a `ws`
+   * kliens `unexpected-response`-ként jelez. Nyitás (`open`) ilyenkor nincs.
+   */
+  async function upgradeRejection(url: string): Promise<{ status: number | undefined; opened: boolean }> {
+    const socket = new WebSocket(url)
+    let opened = false
+    socket.on('open', () => {
+      opened = true
     })
+    const status = await new Promise<number | undefined>((resolve) => {
+      socket.on('unexpected-response', (_request, response) => {
+        resolve(response.statusCode)
+        response.resume()
+      })
+      // Egy 101 utáni bezárás is ide futna: így a régi, kézfogás utáni elutasítás bukó teszt.
+      socket.on('close', () => {
+        resolve(undefined)
+      })
+      socket.on('error', () => undefined)
+    })
+    socket.terminate()
+    return { status, opened }
+  }
 
-    const code = await new Promise<number>((resolve) => socket.on('close', resolve))
-    expect(code).toBe(1008)
-    expect(messages).toHaveLength(0)
+  it('answers 401 to a websocket upgrade presenting the wrong token, before any handshake', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    expect(await upgradeRejection(`ws://127.0.0.1:${running.port}/ws?token=wrong`)).toEqual({
+      status: 401,
+      opened: false,
+    })
   })
 
-  it('closes a websocket connection presenting no token', async () => {
+  it('answers 401 to a websocket upgrade presenting no token, or a token of the right length', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
-    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws`)
-
-    const code = await new Promise<number>((resolve) => socket.on('close', resolve))
-    expect(code).toBe(1008)
+    expect(await upgradeRejection(`ws://127.0.0.1:${running.port}/ws`)).toEqual({ status: 401, opened: false })
+    const sameLength = running.token.replace(/^./, (c) => (c === '0' ? '1' : '0'))
+    expect(await upgradeRejection(`ws://127.0.0.1:${running.port}/ws?token=${sameLength}`)).toEqual({
+      status: 401,
+      opened: false,
+    })
   })
 
   it('does not re-broadcast an unchanged state, but does report every scan', async () => {

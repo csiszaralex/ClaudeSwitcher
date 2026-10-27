@@ -8,6 +8,7 @@ import {
 } from '@claudeswitcher/core'
 import { Hono } from 'hono'
 import type { ToolUseEvent } from './decision-broker.js'
+import { matchesSecret } from './token-compare.js'
 
 export interface NotificationEvent {
   sessionId: string
@@ -110,8 +111,9 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     })
   }
 
+  const expectedAuthorization = `Bearer ${token}`
   app.use('*', async (c, next) => {
-    if (c.req.header('authorization') !== `Bearer ${token}`) {
+    if (!matchesSecret(c.req.header('authorization'), expectedAuthorization)) {
       return c.text('unauthorized', 401)
     }
     await next()
