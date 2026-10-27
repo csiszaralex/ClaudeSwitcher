@@ -466,4 +466,40 @@ describe('isSafeForCli', () => {
     expect(isSafeForCli('C:\\work\\%TEMP%')).toBe(false)
     expect(isSafeForCli('C:\\work\\a"b')).toBe(false)
   })
+
+  it('accepts absolute drive paths with either slash, drive roots and UNC shares', () => {
+    expect(isSafeForCli('C:/work/project')).toBe(true)
+    expect(isSafeForCli('C:\\')).toBe(true)
+    expect(isSafeForCli('\\\\server\\share')).toBe(true)
+    expect(isSafeForCli('\\\\server\\share\\project')).toBe(true)
+  })
+
+  it('rejects a folder the code CLI would read as an option', () => {
+    // A security review esete: idézés után a `code` ezt kapcsolóként kapná meg.
+    expect(isSafeForCli('--install-extension=C:\\x\\evil.vsix')).toBe(false)
+    expect(isSafeForCli('-n')).toBe(false)
+  })
+
+  it('rejects relative, drive-relative and rooted-but-driveless paths', () => {
+    expect(isSafeForCli('project')).toBe(false)
+    expect(isSafeForCli('.\\project')).toBe(false)
+    expect(isSafeForCli('C:project')).toBe(false)
+    expect(isSafeForCli('\\work\\project')).toBe(false)
+    expect(isSafeForCli('')).toBe(false)
+  })
+
+  it('rejects incomplete UNC paths and Win32 device namespaces', () => {
+    expect(isSafeForCli('\\\\server')).toBe(false)
+    expect(isSafeForCli('\\\\server\\')).toBe(false)
+    expect(isSafeForCli('\\\\?\\C:\\work')).toBe(false)
+    expect(isSafeForCli('\\\\.\\pipe\\x')).toBe(false)
+  })
+
+  it('rejects control characters anywhere', () => {
+    expect(isSafeForCli('C:\\work\nproject')).toBe(false)
+    expect(isSafeForCli('C:\\work\u0000')).toBe(false)
+    expect(isSafeForCli('C:\\work\u001b[31m')).toBe(false)
+    expect(isSafeForCli('C:\\work\u007f')).toBe(false)
+    expect(isSafeForCli('C:\\work\u0085')).toBe(false)
+  })
 })

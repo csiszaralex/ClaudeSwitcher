@@ -214,8 +214,35 @@ async function focusByPid(pid: number): Promise<boolean> {
  */
 const CMD_UNSAFE_IN_QUOTES = /[%"]/
 
-/** Igaz, ha a mappa biztonságosan átadható a `code` CLI-nek egy cmd.exe shellen át. */
+/**
+ * Abszolút Windows útvonal eleje: meghajtó (`X:\` vagy `X:/`), vagy UNC megosztás
+ * (`\\server\share`). A `\\?\` és a `\\.\` eszköz-névtér nem megosztás, ezt a szerver
+ * nevében kizárt `?` és `.` szűri ki.
+ */
+const ABSOLUTE_WINDOWS_PATH = /^(?:[A-Za-z]:[\\/]|\\\\[^\\/?.][^\\/]*\\[^\\/]+)/
+
+/** Igaz, ha a szövegben C0 vagy C1 vezérlőkarakter, vagy DEL van. */
+function hasControlCharacter(text: string): boolean {
+  for (const char of text) {
+    const code = char.charCodeAt(0)
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true
+  }
+  return false
+}
+
+/**
+ * Igaz, ha a mappa biztonságosan átadható a `code` CLI-nek egy cmd.exe shellen át.
+ *
+ * A mappa a registryből vagy egy `ide/*.lock` fájlból jön, ahol csak a típusa ellenőrzött. Egy
+ * `-`-vel kezdődő érték idézés után is kapcsolóként jutna a `code`-hoz (pl.
+ * `--install-extension=...`), ezért csak abszolút útvonalat engedünk, ami soha nem kezdődik
+ * `-`-vel. Vezérlőkarakter (például sortörés) egy valódi mappanévben nem fordul elő, a cmd.exe
+ * parancssorában viszont mást jelenthet.
+ */
 export function isSafeForCli(folder: string): boolean {
+  if (folder.startsWith('-')) return false
+  if (!ABSOLUTE_WINDOWS_PATH.test(folder)) return false
+  if (hasControlCharacter(folder)) return false
   return !CMD_UNSAFE_IN_QUOTES.test(folder)
 }
 
