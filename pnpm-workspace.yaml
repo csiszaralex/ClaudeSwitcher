@@ -6,3 +6,5 @@ allowBuilds:
   esbuild: true
   koffi: true
   nx: true
+  # A hookot a gyökér `prepare` szkriptje telepíti; a csomag saját postinstallja ugyanezt tenné még egyszer.
+  simple-git-hooks: false

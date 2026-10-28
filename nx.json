@@ -1,10 +1,14 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "namedInputs": {
+    "sharedGlobals": ["{workspaceRoot}/tsconfig.base.json", "{workspaceRoot}/eslint.config.mjs"],
+    "default": ["{projectRoot}/**/*", "sharedGlobals"]
+  },
   "targetDefaults": {
-    "build": { "dependsOn": ["^build"], "cache": true },
-    "test": { "dependsOn": ["^build"], "cache": true },
-    "check-types": { "dependsOn": ["^build"], "cache": true },
-    "lint": { "dependsOn": ["^build"], "cache": true },
+    "build": { "dependsOn": ["^build"], "inputs": ["default", "^default"], "cache": true },
+    "test": { "dependsOn": ["^build"], "inputs": ["default", "^default"], "cache": true },
+    "check-types": { "dependsOn": ["^build"], "inputs": ["default", "^default"], "cache": true },
+    "lint": { "dependsOn": ["^build"], "inputs": ["default", "^default"], "cache": true },
     "dev": { "dependsOn": ["^build"], "cache": false }
   }
 }
