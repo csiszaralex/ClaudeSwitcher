@@ -1,3 +1,4 @@
+import type { UserDecision } from '@claudeswitcher/core'
 import { contextBridge, ipcRenderer } from 'electron'
 
 export interface DaemonConnection {
@@ -5,13 +6,19 @@ export interface DaemonConnection {
   token: string
 }
 
-contextBridge.exposeInMainWorld('claudeswitcher', {
+/**
+ * A renderernek kitett API, egyetlen deklarációban: a renderer `window.claudeswitcher` típusa
+ * ebből jön (`ClaudeSwitcherApi`, lásd `renderer/window-api.ts`). Ami `unknown`-t ad, azt a
+ * renderer ellenőrizve olvassa.
+ */
+const api = {
   connection: (): Promise<DaemonConnection> => ipcRenderer.invoke('daemon:connection'),
+  // A daemon állapota; a renderer a `sanitizeState`-tel olvassa.
   state: (): Promise<unknown> => ipcRenderer.invoke('daemon:state'),
   focusSession: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('session:focus', sessionId),
   hide: (): Promise<void> => ipcRenderer.invoke('overlay:hide'),
   // A választ a main processz `DecideResult`-ként adja; a renderer ellenőrizve olvassa.
-  decide: (id: string, decision: unknown): Promise<unknown> => ipcRenderer.invoke('decision:decide', id, decision),
+  decide: (id: string, decision: UserDecision): Promise<unknown> => ipcRenderer.invoke('decision:decide', id, decision),
   // A main `{ hideAfterLastDecision }`-t ad; a renderer ellenőrizve olvassa (readOverlaySettings).
   settings: (): Promise<unknown> => ipcRenderer.invoke('settings:get'),
   // Feliratkozás az overlay megjelenésére; a visszaadott függvény leiratkozik. A renderer csak a
@@ -25,4 +32,8 @@ contextBridge.exposeInMainWorld('claudeswitcher', {
       ipcRenderer.removeListener('overlay:shown', listener)
     }
   },
-})
+}
+
+export type ClaudeSwitcherApi = typeof api
+
+contextBridge.exposeInMainWorld('claudeswitcher', api)

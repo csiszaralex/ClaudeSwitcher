@@ -1,23 +1,6 @@
-import type { UserDecision } from '@claudeswitcher/core'
+import type { DaemonState } from '@claudeswitcher/daemon'
 import { useEffect, useState } from 'react'
-import { parseDaemonMessage, sanitizeState, type DaemonState } from './state-message.js'
-
-declare global {
-  interface Window {
-    claudeswitcher: {
-      connection(): Promise<{ port: number; token: string }>
-      state(): Promise<DaemonState>
-      focusSession(sessionId: string): Promise<boolean>
-      hide(): Promise<void>
-      /** A main `DecideResult`-ot ad; a renderer a `readDecideResult`-tal olvassa (Task 8). */
-      decide(id: string, decision: UserDecision): Promise<unknown>
-      /** A main beállításai; a renderer a `readOverlaySettings`-szel olvassa. */
-      settings(): Promise<unknown>
-      /** Hív, valahányszor az overlay láthatóvá válik; a visszaadott függvény leiratkozik. */
-      onShown(callback: () => void): () => void
-    }
-  }
-}
+import { parseDaemonMessage, sanitizeState } from './state-message.js'
 
 export interface OverlayState extends DaemonState {
   /** Hamis, amíg nincs élő kapcsolat a daemonnal — a lista ilyenkor állott lehet. */

@@ -1,11 +1,6 @@
 import type { SessionView, SubagentView } from '@claudeswitcher/core'
-import type { PendingDecisionView } from '@claudeswitcher/daemon'
+import type { DaemonState, PendingDecisionView } from '@claudeswitcher/daemon'
 import { isDecisionKind, isRecord } from '@claudeswitcher/core/browser'
-
-export interface DaemonState {
-  sessions: SessionView[]
-  decisions: PendingDecisionView[]
-}
 
 function isQuestion(value: unknown): boolean {
   if (!isRecord(value)) return false
