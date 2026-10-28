@@ -11,13 +11,15 @@
     "check-types": "nx run-many -t check-types",
     "lint": "nx run-many -t lint",
     "knip": "knip",
-    "verify": "nx run-many -t check-types lint test build && knip",
+    "verify:root": "tsc -p tsconfig.eslint.json && eslint eslint.config.mjs && knip",
+    "verify": "nx run-many -t check-types lint test build && pnpm verify:root",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm verify"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "eslint": "^9.39.5",
     "knip": "^6.43.0",
     "nx": "^21.0.0",

@@ -1,3 +1,4 @@
+import { defineConfig } from 'eslint/config'
 import tseslint from 'typescript-eslint'
 
 const SYNC_SPAWN_NAMES = ['execSync', 'execFileSync', 'spawnSync']
@@ -5,8 +6,8 @@ const SYNC_SPAWN_PATTERN = `/^(${SYNC_SPAWN_NAMES.join('|')})$/`
 const SYNC_SPAWN_MESSAGE =
   'A szinkron gyerekprocessz blokkolja az Electron főszálát, vele a daemont és minden session hookját. Használd az aszinkron változatot (execFile, spawn).'
 
-export default tseslint.config(
-  { ignores: ['**/dist/**', '**/out/**', '**/node_modules/**', 'spikes/**', 'eslint.config.mjs'] },
+export default defineConfig(
+  { ignores: ['**/dist/**', '**/out/**', '**/node_modules/**', 'spikes/**'] },
   ...tseslint.configs.strictTypeChecked,
   {
     languageOptions: {
@@ -20,6 +21,7 @@ export default tseslint.config(
           './apps/desktop/tsconfig.node.json',
           './apps/desktop/tsconfig.web.json',
           './apps/desktop/tsconfig.web.test.json',
+          './tsconfig.eslint.json',
         ],
         tsconfigRootDir: import.meta.dirname,
       },
