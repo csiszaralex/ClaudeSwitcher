@@ -1,5 +1,5 @@
 import type { DecisionKind } from '@claudeswitcher/core'
-import { isRecord } from '@claudeswitcher/core/browser'
+import { isEditTool, isRecord } from '@claudeswitcher/core/browser'
 import { DETAILS_LIMIT, formatToolInput, toolDetails, type ToolDetails } from './tool-details.js'
 
 /**
@@ -147,6 +147,9 @@ function notebookCells(path: unknown, content: string): PreviewBlock[] | undefin
 
 /** A blokkok a korlát nélkül; `undefined`, ha az alak ismeretlen. */
 function rawBlocks(toolName: string, input: Record<string, unknown>): PreviewBlock[] | undefined {
+  // Az `EDIT_TOOLS` minden elemének itt van ága: egy új fájlíró eszközre a fordító
+  // (TS7030) és a lint `switch-exhaustiveness-check` szabálya is hibát ad, amíg nem kap előnézetet.
+  if (!isEditTool(toolName)) return undefined
   switch (toolName) {
     case 'Write': {
       // A hook nem mondja meg, új-e a fájl vagy felülíródik — ezért „új tartalom", nem „új fájl".
@@ -179,8 +182,6 @@ function rawBlocks(toolName: string, input: Record<string, unknown>): PreviewBlo
       const block = notebookBlock(input)
       return block === undefined ? undefined : [block]
     }
-    default:
-      return undefined
   }
 }
 

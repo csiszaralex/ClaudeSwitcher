@@ -1,13 +1,11 @@
 import type { SessionView, SubagentView } from '@claudeswitcher/core'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
-import { isRecord } from '@claudeswitcher/core/browser'
+import { isDecisionKind, isRecord } from '@claudeswitcher/core/browser'
 
 export interface DaemonState {
   sessions: SessionView[]
   decisions: PendingDecisionView[]
 }
-
-const DECISION_KINDS = new Set(['tool', 'edit', 'question', 'plan'])
 
 function isQuestion(value: unknown): boolean {
   if (!isRecord(value)) return false
@@ -27,7 +25,6 @@ function isQuestion(value: unknown): boolean {
  */
 function isDecision(value: unknown): value is PendingDecisionView {
   if (!isRecord(value)) return false
-  const kind = value['kind']
   const questions = value['questions']
   const rules = value['suggestedRules']
   const description = value['description']
@@ -41,8 +38,7 @@ function isDecision(value: unknown): value is PendingDecisionView {
     typeof value['released'] === 'boolean' &&
     // Kötelező: ebből dönti el a panel, kínál-e engedélyezést. Hiányzó jelző nem számíthat olvashatónak.
     typeof value['readable'] === 'boolean' &&
-    typeof kind === 'string' &&
-    DECISION_KINDS.has(kind) &&
+    isDecisionKind(value['kind']) &&
     Array.isArray(questions) &&
     questions.every(isQuestion) &&
     Array.isArray(rules) &&

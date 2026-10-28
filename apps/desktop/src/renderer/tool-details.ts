@@ -1,5 +1,5 @@
 import type { DecisionKind } from '@claudeswitcher/core'
-import { isRecord } from '@claudeswitcher/core/browser'
+import { COMMAND_TOOLS, isRecord } from '@claudeswitcher/core/browser'
 
 /**
  * Ennyi karakter jelenik meg legfeljebb a lenyitható részletekben. Egy több száz kilobájtos
@@ -17,10 +17,9 @@ const LONG_STRING = 120
  * kikapcsolása) a részletekbe kerül: egy rejtett mező mellett a sandbox nélküli futás ugyanúgy
  * nézne ki, mint a sandboxos.
  */
-const SHOWN_ABOVE: Readonly<Record<string, ReadonlySet<string>>> = {
-  Bash: new Set(['command', 'description']),
-  PowerShell: new Set(['command', 'description']),
-}
+const SHOWN_ABOVE: Readonly<Record<string, ReadonlySet<string>>> = Object.fromEntries(
+  COMMAND_TOOLS.map((tool) => [tool, new Set(['command', 'description'])]),
+)
 
 export interface DetailBlock {
   /** A mező neve, ha a blokk egyetlen szöveges mező; a JSON-blokknak nincs. */

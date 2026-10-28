@@ -7,6 +7,7 @@
  */
 
 import { isRecord, nonEmptyString } from './guards.js'
+import { isEditTool } from './tool-names.js'
 
 /** Egy jogosultsági szabály, ahogy a Claude Code `permission_suggestions`-ben adja. */
 export interface PermissionRule {
@@ -37,7 +38,16 @@ export interface AskQuestion {
  * - `question`: AskUserQuestion — csak a felhasználó válaszával engedhető tovább
  * - `plan`: ExitPlanMode — elutasítható visszajelzéssel; jóváhagyni a hookból nem lehet
  */
-export type DecisionKind = 'tool' | 'edit' | 'question' | 'plan'
+export const DECISION_KINDS = ['tool', 'edit', 'question', 'plan'] as const
+
+export type DecisionKind = (typeof DECISION_KINDS)[number]
+
+const DECISION_KIND_SET: ReadonlySet<unknown> = new Set(DECISION_KINDS)
+
+/** Igaz, ha az érték a `DECISION_KINDS` egyike; a renderer ezzel ellenőrzi a daemontól jött fajtát. */
+export function isDecisionKind(value: unknown): value is DecisionKind {
+  return DECISION_KIND_SET.has(value)
+}
 
 export interface PermissionRequestInfo {
   sessionId: string
@@ -72,8 +82,6 @@ export interface PermissionRequestInfo {
   readable: boolean
 }
 
-const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
-
 /**
  * Eszközönként az a mező, ami nélkül a kérés vakon menne át: a parancs, a fájl útvonala, az URL.
  * A NotebookEdit a `notebook_path`-ban adja a fájlt. Erre nincs mért payload a fixture-ökben; a
@@ -102,7 +110,7 @@ function isReadable(toolName: string, input: Record<string, unknown>): boolean {
 function kindOf(toolName: string): DecisionKind {
   if (toolName === 'AskUserQuestion') return 'question'
   if (toolName === 'ExitPlanMode') return 'plan'
-  if (EDIT_TOOLS.has(toolName)) return 'edit'
+  if (isEditTool(toolName)) return 'edit'
   return 'tool'
 }
 

@@ -1,4 +1,5 @@
 import type { SessionActivity, SessionStatus, SubagentView } from '@claudeswitcher/core'
+import { isCommandTool } from '@claudeswitcher/core/browser'
 
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
@@ -13,16 +14,14 @@ export function formatDuration(ms: number): string {
   return `${seconds}mp`
 }
 
-/** Parancsot futtató eszközök: a részletük maga a parancs, kettősponttal jobban olvasható. */
-const COMMAND_TOOLS = new Set(['Bash', 'PowerShell'])
-
 /**
  * Egy futó tool a sorban: `Bash: pnpm test`, `Grep „createPanel"`, vagy részlet nélkül `Read fut`.
  * Ugyanez a fő sessionnél és a subagentnél, hogy a kettő egyformán olvasson.
  */
 export function toolLabel(tool: string, detail?: string): string {
   if (detail === undefined || detail === '') return `${tool} fut`
-  return COMMAND_TOOLS.has(tool) ? `${tool}: ${detail}` : `${tool} „${detail}"`
+  // A parancsot futtató eszköz részlete maga a parancs, kettősponttal jobban olvasható.
+  return isCommandTool(tool) ? `${tool}: ${detail}` : `${tool} „${detail}"`
 }
 
 /** Egy subagent munkája: `<leírás vagy típus> · <futó tool>`, tool nélkül csak a név. */
