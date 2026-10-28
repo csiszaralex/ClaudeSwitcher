@@ -1,29 +1,18 @@
-import type { UserDecision } from '@claudeswitcher/core'
 import { contextBridge, ipcRenderer } from 'electron'
-
-export interface DaemonConnection {
-  port: number
-  token: string
-}
+import type { ClaudeSwitcherApi } from './api.js'
 
 /**
- * A renderernek kitett API, egyetlen deklarációban: a renderer `window.claudeswitcher` típusa
- * ebből jön (`ClaudeSwitcherApi`, lásd `renderer/window-api.ts`). Ami `unknown`-t ad, azt a
- * renderer ellenőrizve olvassa.
+ * A `ClaudeSwitcherApi` megvalósítása. A kérések csatornái a main `ipcMain.handle` hívásaihoz
+ * tartoznak, az `overlay:shown` a main `webContents.send` hívásához.
  */
-const api = {
-  connection: (): Promise<DaemonConnection> => ipcRenderer.invoke('daemon:connection'),
-  // A daemon állapota; a renderer a `sanitizeState`-tel olvassa.
-  state: (): Promise<unknown> => ipcRenderer.invoke('daemon:state'),
-  focusSession: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('session:focus', sessionId),
-  hide: (): Promise<void> => ipcRenderer.invoke('overlay:hide'),
-  // A választ a main processz `DecideResult`-ként adja; a renderer ellenőrizve olvassa.
-  decide: (id: string, decision: UserDecision): Promise<unknown> => ipcRenderer.invoke('decision:decide', id, decision),
-  // A main `{ hideAfterLastDecision }`-t ad; a renderer ellenőrizve olvassa (readOverlaySettings).
-  settings: (): Promise<unknown> => ipcRenderer.invoke('settings:get'),
-  // Feliratkozás az overlay megjelenésére; a visszaadott függvény leiratkozik. A renderer csak a
-  // saját callbackjét kapja meg, az IpcRendererEvent-et nem — azon át az ipcRenderer elérhető lenne.
-  onShown: (callback: () => void): (() => void) => {
+const api: ClaudeSwitcherApi = {
+  connection: () => ipcRenderer.invoke('daemon:connection'),
+  state: () => ipcRenderer.invoke('daemon:state'),
+  focusSession: (sessionId) => ipcRenderer.invoke('session:focus', sessionId),
+  hide: () => ipcRenderer.invoke('overlay:hide'),
+  decide: (id, decision) => ipcRenderer.invoke('decision:decide', id, decision),
+  settings: () => ipcRenderer.invoke('settings:get'),
+  onShown: (callback) => {
     const listener = (): void => {
       callback()
     }
@@ -33,7 +22,5 @@ const api = {
     }
   },
 }
-
-export type ClaudeSwitcherApi = typeof api
 
 contextBridge.exposeInMainWorld('claudeswitcher', api)

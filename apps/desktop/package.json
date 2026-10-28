@@ -7,7 +7,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "check-types": "tsc -p tsconfig.json --noEmit",
+    "check-types": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.web.test.json --noEmit",
     "test": "vitest run",
     "lint": "eslint src electron.vite.config.ts"
   },

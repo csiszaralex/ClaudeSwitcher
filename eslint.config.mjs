@@ -12,8 +12,15 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         // A build-tsconfig kizárja a teszteket, a check-tsconfig nem — típusinformáció nélkül a
-        // tesztfájlok elemzési hibát adnának (lemérve: 13 ilyen).
-        project: ['./packages/*/tsconfig.check.json', './apps/desktop/tsconfig.json'],
+        // tesztfájlok elemzési hibát adnának (lemérve: 13 ilyen). A desktopnál egy fájl az első
+        // olyan projektből kap típust, amelyik tartalmazza: a renderer nem teszt fájljai így a
+        // Node-mentes `tsconfig.web.json`-ból, a tesztjei a `tsconfig.web.test.json`-ból.
+        project: [
+          './packages/*/tsconfig.check.json',
+          './apps/desktop/tsconfig.node.json',
+          './apps/desktop/tsconfig.web.json',
+          './apps/desktop/tsconfig.web.test.json',
+        ],
         tsconfigRootDir: import.meta.dirname,
       },
     },
