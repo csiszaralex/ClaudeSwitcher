@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
-import { POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
+import { DAEMON_PROTOCOL, POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
 import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
 import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
@@ -108,7 +108,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   // diffel, amit el lehet rontani.
   let lastBroadcast = ''
   function broadcast(): void {
-    const message = JSON.stringify({ type: 'state', payload: state() })
+    const message = JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: state() })
     if (message === lastBroadcast) return
     lastBroadcast = message
     hub.broadcastRaw(message)
@@ -169,7 +169,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         // változás", attól, hogy „megállt a poll" — és épp a monitorozó eszköznél a
         // legrosszabb kimenet, ha egy állott lista élőnek látszik. Egy WebSocket-ping ezt
         // NEM fedné: a socket akkor is egészséges, ha a szkennelés halt meg.
-        hub.broadcastRaw(JSON.stringify({ type: 'tick', at: Date.now() }))
+        hub.broadcastRaw(JSON.stringify({ type: 'tick', protocol: DAEMON_PROTOCOL, at: Date.now() }))
       } catch (error) {
         console.error('[daemon] refresh failed', error)
       } finally {

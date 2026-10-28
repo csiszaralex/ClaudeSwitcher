@@ -1,6 +1,6 @@
 import type { SessionView, SubagentView } from '@claudeswitcher/core'
 import type { DaemonState, PendingDecisionView } from '@claudeswitcher/daemon'
-import { isDecisionKind, isRecord } from '@claudeswitcher/core/browser'
+import { DAEMON_PROTOCOL, isDecisionKind, isRecord } from '@claudeswitcher/core/browser'
 
 function isQuestion(value: unknown): boolean {
   if (!isRecord(value)) return false
@@ -28,7 +28,7 @@ function isDecision(value: unknown): value is PendingDecisionView {
     typeof value['sessionId'] === 'string' &&
     typeof value['toolName'] === 'string' &&
     typeof value['summary'] === 'string' &&
-    // Opcionális: egy régebbi daemon nem küldi. Ha jön, szövegnek kell lennie — a panel annak rendereli.
+    // Opcionális a `PermissionRequestInfo`-ban: nincs, ha az eszköz nem ad leírást. Ha jön, szövegnek kell lennie, a panel annak rendereli.
     (description === undefined || typeof description === 'string') &&
     typeof value['released'] === 'boolean' &&
     // Kötelező: ebből dönti el a panel, kínál-e engedélyezést. Hiányzó jelző nem számíthat olvashatónak.
@@ -47,7 +47,7 @@ function optionalString(value: unknown): boolean {
 
 /**
  * Egy aktív subagent a daemontól. Szigorú: egy rossz típusú mező a sor szövegébe `[object Object]`-et
- * vagy számot írna, és a hiányzó kötelező mező (`agentId`, `updatedAt`) eltérő daemon-verziót jelez.
+ * vagy számot írna, és a hiányzó kötelező mező (`agentId`, `updatedAt`) hibás alakot jelez.
  * Mint a többi mezőnél: a hibás session kiesik, nem a renderelés dob.
  */
 function isSubagent(value: unknown): value is SubagentView {
@@ -86,14 +86,14 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
       (view: unknown): view is SessionView =>
         isRecord(view) &&
         typeof view['sessionId'] === 'string' &&
-        // Opcionális: egy régebbi daemon nem küldi. Ha jön, számnak kell lennie — időt számolnak belőle.
+        // Opcionális a `SessionView`-ban: csak az „épp végzett" sessionnél van. Ha jön, számnak kell lennie, időt számolnak belőle.
         (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number') &&
-        // Ugyanígy opcionális; ha jön, szöveg — a registry nyers `entrypoint` értéke.
+        // Opcionális: a registry rekordjából jön, ha ott van. Ha jön, szöveg, a nyers `entrypoint` érték.
         (view['entrypoint'] === undefined || typeof view['entrypoint'] === 'string') &&
-        // Opcionális; ha jön, minden eleme olyan alakú, amit a sor összefoglalója olvas.
+        // Opcionális: csak aktív subagent mellett van. Ha jön, minden eleme olyan alakú, amit a sor összefoglalója olvas.
         (view['subagents'] === undefined || (Array.isArray(view['subagents']) && view['subagents'].every(isSubagent))),
     ),
-    // Egy régebbi daemon nem küld döntéseket — az nem hiba, hanem „nincs függő döntés".
+    // A daemon mindig küldi; a hiánya itt sem dobja el a sessionöket, hanem „nincs függő döntés".
     decisions: Array.isArray(decisions) ? decisions.filter(isDecision) : [],
   }
 }
@@ -114,7 +114,8 @@ export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
   } catch {
     return undefined
   }
-  if (!isRecord(message)) return undefined
+  // Más protokollverzió (vagy hiányzó) üzenetét nem értelmezzük: az alakja eltérhet attól, amit itt olvasunk.
+  if (!isRecord(message) || message['protocol'] !== DAEMON_PROTOCOL) return undefined
   if (message['type'] === 'tick') return { kind: 'tick' }
   if (message['type'] !== 'state') return undefined
   const state = sanitizeState(message['payload'])

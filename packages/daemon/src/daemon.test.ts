@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { ProcessProbe } from '@claudeswitcher/core'
+import { DAEMON_PROTOCOL, type ProcessProbe } from '@claudeswitcher/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { startDaemon, type Daemon } from './daemon.js'
@@ -149,6 +149,30 @@ describe('startDaemon', () => {
     const types = messages.map((m) => (JSON.parse(m) as { type: string }).type)
     expect(types.filter((t) => t === 'state')).toHaveLength(0)
     expect(types.filter((t) => t === 'tick')).toHaveLength(2)
+  })
+
+  it('stamps every state and tick message with the protocol version', async () => {
+    running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
+    const messages: { type: string; protocol?: unknown }[] = []
+    const gotTick = new Promise<void>((resolve) => {
+      socket.on('message', (data) => {
+        const message = JSON.parse(data instanceof Buffer ? data.toString('utf8') : '') as { type: string }
+        messages.push(message)
+        if (message.type === 'tick') resolve()
+      })
+    })
+    await new Promise((resolve) => socket.on('open', resolve))
+
+    // Az első szkennelés megváltoztatja a pillanatképet (state), és utána életjelet küld (tick).
+    await running.refresh()
+    await gotTick
+    socket.close()
+
+    expect(messages.map((m) => m.type)).toEqual(['state', 'tick'])
+    // A konstans létezése is feltétel: hiányzó export mellett a két `undefined` egyezne.
+    expect(DAEMON_PROTOCOL).toEqual(expect.any(Number))
+    for (const message of messages) expect(message.protocol).toBe(DAEMON_PROTOCOL)
   })
 
   it('uses the token it is given instead of generating one', async () => {

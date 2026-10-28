@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { parseStateMessage, sanitizeState } from './state-message.js'
+import { parseDaemonMessage, parseStateMessage, sanitizeState } from './state-message.js'
 import { readFileSync } from 'node:fs'
-import { parsePermissionRequest } from '@claudeswitcher/core/browser'
+import { DAEMON_PROTOCOL, parsePermissionRequest } from '@claudeswitcher/core/browser'
 
 const fixtures = JSON.parse(
   readFileSync(new URL('../../../../packages/core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
@@ -16,13 +16,13 @@ function decisionFrom(name: string): Record<string, unknown> {
 
 describe('parseStateMessage', () => {
   it('returns the state carried by a well-formed state message', () => {
-    const message = JSON.stringify({ type: 'state', payload: { sessions: [], decisions: [] } })
+    const message = JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: { sessions: [], decisions: [] } })
     expect(parseStateMessage(message)).toEqual({ sessions: [], decisions: [] })
   })
 
   it('ignores messages that are not state updates', () => {
     expect(parseStateMessage(JSON.stringify({ type: 'other', payload: {} }))).toBeUndefined()
-    expect(parseStateMessage(JSON.stringify({ type: 'state', payload: { sessions: 'no' } }))).toBeUndefined()
+    expect(parseStateMessage(JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: { sessions: 'no' } }))).toBeUndefined()
   })
 
   it('never throws on garbage', () => {
@@ -37,6 +37,7 @@ describe('parseStateMessage', () => {
     // magától, az overlay onnantól véglegesen hibaszöveget mutatna.
     const message = JSON.stringify({
       type: 'state',
+      protocol: DAEMON_PROTOCOL,
       payload: { sessions: [null, { sessionId: 'a' }, 'nope', {}] },
     })
     expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a' }])
@@ -46,6 +47,7 @@ describe('parseStateMessage', () => {
     // A part B ebből számol „épp végzett" állapotot; egy szöveges érték ott NaN-t adna.
     const message = JSON.stringify({
       type: 'state',
+      protocol: DAEMON_PROTOCOL,
       payload: {
         sessions: [{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'b', stoppedAt: 'tegnap' }, { sessionId: 'c' }],
       },
@@ -54,9 +56,10 @@ describe('parseStateMessage', () => {
   })
 
   it('keeps a session carrying an entrypoint string, and drops one whose entrypoint is not a string', () => {
-    // Opcionális: egy régebbi daemon nem küldi. Ha jön, szövegnek kell lennie.
+    // Opcionális a `SessionView`-ban (a registry rekordjából jön, ha van). Ha jön, szövegnek kell lennie.
     const message = JSON.stringify({
       type: 'state',
+      protocol: DAEMON_PROTOCOL,
       payload: {
         sessions: [
           { sessionId: 'a', entrypoint: 'claude-vscode' },
@@ -73,11 +76,12 @@ describe('parseStateMessage', () => {
   })
 
   it('keeps a session carrying well-formed subagents, and drops one whose subagents are malformed', () => {
-    // Opcionális: egy régebbi daemon nem küldi. Ha jön, minden elemének a sor által olvasott alakja kell legyen.
+    // Opcionális a `SessionView`-ban (csak aktív subagent mellett van). Ha jön, minden elemének a sor által olvasott alakja kell legyen.
     const good = { agentId: 'a1', agentType: 'general-purpose', description: 'd', runningTool: 'Grep', toolDetail: 'x', updatedAt: 5 }
     const bare = { agentId: 'a2', updatedAt: 6 }
     const message = JSON.stringify({
       type: 'state',
+      protocol: DAEMON_PROTOCOL,
       payload: {
         sessions: [
           { sessionId: 'a', subagents: [good, bare] },
@@ -175,7 +179,23 @@ describe('sanitizeState', () => {
     expect(sanitizeState(Object.assign([], { sessions: [] }))).toBeUndefined()
   })
 
-  it('defaults decisions to an empty list when an older daemon omits them', () => {
+  it('defaults decisions to an empty list when the payload omits them', () => {
     expect(sanitizeState({ sessions: [] })?.decisions).toEqual([])
+  })
+})
+
+describe('parseDaemonMessage protocol', () => {
+  it('accepts state and tick messages of the current protocol', () => {
+    const state = JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: { sessions: [] } })
+    expect(parseDaemonMessage(state)).toEqual({ kind: 'state', state: { sessions: [], decisions: [] } })
+    expect(parseDaemonMessage(JSON.stringify({ type: 'tick', protocol: DAEMON_PROTOCOL, at: 1 }))).toEqual({ kind: 'tick' })
+  })
+
+  it('rejects a message without the protocol field or with another version', () => {
+    for (const protocol of [undefined, 0, DAEMON_PROTOCOL + 1, String(DAEMON_PROTOCOL), null]) {
+      const state = JSON.stringify({ type: 'state', protocol, payload: { sessions: [], decisions: [] } })
+      expect(parseDaemonMessage(state)).toBeUndefined()
+      expect(parseDaemonMessage(JSON.stringify({ type: 'tick', protocol, at: 1 }))).toBeUndefined()
+    }
   })
 })
