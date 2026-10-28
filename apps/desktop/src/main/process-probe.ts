@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { createSnapshotProbe, type ProcessProbe, type ProcessSnapshot } from '@claudeswitcher/core'
+import { PROBE_TTL_MS, createSnapshotProbe, type ProcessProbe, type ProcessSnapshot } from '@claudeswitcher/core'
 
 // Nem `require`-nek nevezzük: a CJS bundle modulburkolójában a `require` már
 // paraméterként létezik, és egy azonos nevű `const` ütközne vele.
@@ -239,7 +239,7 @@ export function takeNativeSnapshot(): ProcessSnapshot | undefined {
  * Ez elhanyagolható a korábbi 330 ms–10 s blokkoláshoz képest, de nem nulla, ezért a TTL a
  * régi 2 s marad: a poll és a lifecycle hookok által sűrűn indított szkennelések sem kérnek gyakrabban.
  */
-export function createNativeProcessProbe(ttlMs = 2000): ProcessProbe | undefined {
+export function createNativeProcessProbe(ttlMs = PROBE_TTL_MS): ProcessProbe | undefined {
   const api = loadKernel32()
   if (api === null) return undefined
   return createSnapshotProbe(() => Promise.resolve(snapshotWith(api)), { ttlMs })

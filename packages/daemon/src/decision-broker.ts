@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {
   PERMISSION_RELEASE_AFTER_MS,
+  POLL_INTERVAL_MS,
   buildHookResponse,
   type HookDecisionBody,
   type PermissionRequestInfo,
@@ -9,12 +10,12 @@ import {
 
 /**
  * Egy ELENGEDETT kérés ennyi ideig marad meg azután, hogy a sessionje kiesett a registry
- * pillanatképéből. A poll 3 mp-es: ez tíz kör, így egy kimaradt vagy félig írt registry-fájl nem
+ * pillanatképéből: tíz poll-kör (`POLL_INTERVAL_MS`), így egy kimaradt vagy félig írt registry-fájl nem
  * zár le egy élő sessiont. Ha a session processze meghalt, SessionEnd nem jön — e nélkül a sor
  * örökre megmaradna. A még dönthető kérést ez SOHA nem zárja (spec §8: a jóváhagyás felderítés
  * nélkül is működik); azt a hook-kliens bontása zárja, ami a processz halálával együtt jár.
  */
-export const ABSENT_SESSION_GRACE_MS = 30_000
+export const ABSENT_SESSION_GRACE_MS = 10 * POLL_INTERVAL_MS
 
 /** Ennyi ideig vár egy PreToolUse arra, hogy megérkezzen a hozzá tartozó PermissionRequest. */
 const PRE_TOOL_USE_TTL_MS = 60_000

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { PROBE_TTL_MS } from './timings.js'
 import type { IdeLock, LiveSession, SessionRecord } from './types.js'
 
 export interface ProcessProbe {
@@ -143,7 +144,7 @@ export interface ProcessSnapshot {
 }
 
 export interface SnapshotProbeOptions {
-  /** Ennyi ideig érvényes egy sikeres pillanatkép. */
+  /** Ennyi ideig érvényes egy sikeres pillanatkép, alapból `PROBE_TTL_MS`. */
   ttlMs?: number | undefined
   /** Az óra, hogy a TTL tesztelhető legyen. */
   now?: (() => number) | undefined
@@ -181,7 +182,7 @@ export function createSnapshotProbe(
   take: () => Promise<ProcessSnapshot>,
   options: SnapshotProbeOptions = {},
 ): ProcessProbe {
-  const ttlMs = options.ttlMs ?? 2000
+  const ttlMs = options.ttlMs ?? PROBE_TTL_MS
   const now = options.now ?? (() => Date.now())
   let snapshot = EMPTY_SNAPSHOT
   let primed = false
@@ -289,6 +290,6 @@ function runPowerShellSnapshot(): Promise<ProcessSnapshot> {
  * fut, így a fő szálat nem blokkolja; a TTL-t, az egyetlen futó lekérdezést és a hibakezelést
  * a `createSnapshotProbe` adja.
  */
-export function createWin32ProcessProbe(ttlMs = 2000): ProcessProbe {
+export function createWin32ProcessProbe(ttlMs = PROBE_TTL_MS): ProcessProbe {
   return createSnapshotProbe(runPowerShellSnapshot, { ttlMs })
 }

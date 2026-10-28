@@ -3,7 +3,7 @@ import type { LifecycleEvent, NotificationEvent } from './hook-server.js'
 
 /**
  * Meddig tartunk meg egy olyan várakozást, aminek a sessionje még nem szerepel a
- * pillanatképben. Bőven több, mint a 3 másodperces poll — de nem végtelen, hogy egy soha
+ * pillanatképben. Bőven több, mint egy poll-kör (`POLL_INTERVAL_MS`), de nem végtelen, hogy egy soha
  * meg nem jelenő session ne szivárogjon.
  */
 const UNMATCHED_WAIT_GRACE_MS = 10_000

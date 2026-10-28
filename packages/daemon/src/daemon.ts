@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
-import type { ProcessProbe, SessionView, UserDecision } from '@claudeswitcher/core'
+import { POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
 import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
 import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
@@ -29,7 +29,7 @@ export interface Daemon {
 export interface DaemonOptions {
   claudeDir: string
   probe: ProcessProbe
-  /** Poll periódus ms-ben. 0 kikapcsolja (tesztekhez). */
+  /** Poll periódus ms-ben, alapból `POLL_INTERVAL_MS`. 0 kikapcsolja (tesztekhez). */
   pollMs?: number | undefined
   /**
    * A port, amire a daemon köt. 0: ideiglenes (tesztekhez). A desktop fix portot ad, mert a
@@ -41,7 +41,7 @@ export interface DaemonOptions {
 }
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
-  const { claudeDir, probe, pollMs = 3000, port: requestedPort = 0 } = options
+  const { claudeDir, probe, pollMs = POLL_INTERVAL_MS, port: requestedPort = 0 } = options
   const token = options.token ?? randomBytes(16).toString('hex')
 
   const sessions = new SessionStore()
