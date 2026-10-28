@@ -29,7 +29,7 @@ export interface Row<S extends SessionLike, D extends DecisionLike> {
 
 /**
  * A panel kérése egy sor kérései közül: a legrégebbi, amit az app még eldönthet. Egy elengedett
- * kérés (590 mp) ne takarja el a mögötte várót — onnan már csak a VSCode dönthet. Ha mind
+ * kérés (`PERMISSION_RELEASE_AFTER_MS`) ne takarja el a mögötte várót: onnan már csak a VSCode dönthet. Ha mind
  * elengedett, a legrégebbi, hogy legalább az „Ugrás a VSCode-ba" látsszon.
  */
 export function activeDecision<D extends { released: boolean }>(list: readonly D[]): D | undefined {

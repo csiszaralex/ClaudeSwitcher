@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { serve } from '@hono/node-server'
-import { describe, expect, it, vi } from 'vitest'
+import { HOOK_CONTRACT, hookPath } from '@claudeswitcher/core'
+import { describe, expect, it, vi, type Mock } from 'vitest'
 import { createHookApp, type HookEvents } from './hook-server.js'
 
 const TOKEN = 'test-token'
@@ -349,6 +350,26 @@ describe('M2 decision routes — measured payloads', () => {
     const app = createHookApp(TOKEN, events())
     for (const route of ['/hooks/permission-request', '/hooks/pre-tool-use', '/hooks/post-tool-use', '/hooks/subagent-stop']) {
       expect((await post(app, route, {}, 'nope')).status).toBe(401)
+    }
+  })
+})
+
+describe('hook contract coverage', () => {
+  it('has a handler for every installed hook path', async () => {
+    // Minden mező, amit bármelyik route olvas: így a kezelő akkor is lefut, ha a route csak egy részét nézi.
+    const body = {
+      ...(payload('permissionRequest_bash') as Record<string, unknown>),
+      notification_type: 'permission_prompt',
+      tool_use_id: 'toolu_contract',
+      agent_id: 'agent-contract',
+    }
+    for (const hook of HOOK_CONTRACT) {
+      const ev = events()
+      const app = createHookApp(TOKEN, ev)
+      const res = await post(app, hookPath(hook.route), body)
+      expect(res.status, hook.event).toBe(200)
+      const calls = (Object.values(ev) as Mock[]).reduce((sum, handler) => sum + handler.mock.calls.length, 0)
+      expect(calls, `${hook.event} -> ${hookPath(hook.route)}`).toBeGreaterThan(0)
     }
   })
 })

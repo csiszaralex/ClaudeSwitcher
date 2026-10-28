@@ -6,6 +6,7 @@
  */
 export * from './decision.js'
 export * from './decision-response.js'
+export * from './hook-contract.js'
 export * from './rule-text.js'
 export * from './subagent.js'
 export * from './tool-detail.js'

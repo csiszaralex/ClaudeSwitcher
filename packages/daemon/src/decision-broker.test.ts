@@ -1,10 +1,14 @@
 import { readFileSync } from 'node:fs'
-import { parsePermissionRequest, type HookDecisionBody, type PermissionRequestInfo } from '@claudeswitcher/core'
+import {
+  PERMISSION_RELEASE_AFTER_MS,
+  parsePermissionRequest,
+  type HookDecisionBody,
+  type PermissionRequestInfo,
+} from '@claudeswitcher/core'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ABSENT_SESSION_GRACE_MS,
   DecisionBroker,
-  RELEASE_AFTER_MS,
   type BrokerClock,
   type ToolUseEvent,
 } from './decision-broker.js'
@@ -184,7 +188,7 @@ describe('DecisionBroker', () => {
     const held = observe(broker.hold(request('permissionRequest_bash')))
     const [view] = broker.views()
 
-    clock.advance(RELEASE_AFTER_MS - 1)
+    clock.advance(PERMISSION_RELEASE_AFTER_MS - 1)
     await flush()
     expect(held.done).toBe(false)
 
@@ -289,7 +293,7 @@ describe('DecisionBroker', () => {
     const gone = request('permissionRequest_bash')
     void broker.hold(gone)
     void broker.hold({ ...gone, sessionId: 'alive' })
-    clock.advance(RELEASE_AFTER_MS)
+    clock.advance(PERMISSION_RELEASE_AFTER_MS)
     expect(broker.views().every((v) => v.released)).toBe(true)
 
     const live = new Set(['alive'])
@@ -308,7 +312,7 @@ describe('DecisionBroker', () => {
     const broker = new DecisionBroker(clock)
     const held = request('permissionRequest_bash')
     void broker.hold(held)
-    clock.advance(RELEASE_AFTER_MS)
+    clock.advance(PERMISSION_RELEASE_AFTER_MS)
 
     broker.pruneAbsent(new Set())
     clock.advance(ABSENT_SESSION_GRACE_MS - 1)

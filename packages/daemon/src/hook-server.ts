@@ -1,5 +1,6 @@
 import { appendFile } from 'node:fs/promises'
 import {
+  hookPath,
   parsePermissionRequest,
   type HookDecisionBody,
   type PermissionRequestInfo,
@@ -118,10 +119,10 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     }
   }
 
-  app.post('/hooks/notification', async (c) => {
+  app.post(hookPath('notification'), async (c) => {
     try {
       const b = await body(c)
-      record('/hooks/notification', b)
+      record(hookPath('notification'), b)
       const sessionId = str(b['session_id'])
       const type = str(b['notification_type'])
       if (sessionId !== undefined && type !== undefined) {
@@ -143,6 +144,9 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     return c.body(null, 200)
   })
 
+  // A szerződés `lifecycle/*` route-jai egy paraméteres route-on, a kivezetett `lifecycle/start`-tal
+  // együtt (`LIFECYCLE_KINDS`). Hogy minden szerződésbeli útvonalnak van kezelője, azt a
+  // `hook contract coverage` teszt ellenőrzi.
   app.post('/hooks/lifecycle/:kind', async (c) => {
     try {
       const kind = c.req.param('kind')
@@ -165,10 +169,10 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     return c.body(null, 200)
   })
 
-  app.post('/hooks/permission-request', async (c) => {
+  app.post(hookPath('permission-request'), async (c) => {
     try {
       const b = await body(c)
-      record('/hooks/permission-request', b)
+      record(hookPath('permission-request'), b)
       const request = parsePermissionRequest(b)
       if (request === undefined) return c.body(null, 200)
       // A @hono/node-server ezt a jelet bontja, ha a válasz befejezése előtt zárul a kapcsolat
@@ -184,10 +188,10 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     }
   })
 
-  app.post('/hooks/pre-tool-use', async (c) => {
+  app.post(hookPath('pre-tool-use'), async (c) => {
     try {
       const b = await body(c)
-      record('/hooks/pre-tool-use', b)
+      record(hookPath('pre-tool-use'), b)
       const event = toolUseEvent(b)
       if (event !== undefined) events.onPreToolUse(event)
     } catch (error) {
@@ -196,10 +200,10 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     return c.body(null, 200)
   })
 
-  app.post('/hooks/post-tool-use', async (c) => {
+  app.post(hookPath('post-tool-use'), async (c) => {
     try {
       const b = await body(c)
-      record('/hooks/post-tool-use', b)
+      record(hookPath('post-tool-use'), b)
       const sessionId = str(b['session_id'])
       const toolUseId = str(b['tool_use_id'])
       if (sessionId !== undefined && toolUseId !== undefined) events.onPostToolUse({ sessionId, toolUseId })
@@ -209,10 +213,10 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     return c.body(null, 200)
   })
 
-  app.post('/hooks/subagent-stop', async (c) => {
+  app.post(hookPath('subagent-stop'), async (c) => {
     try {
       const b = await body(c)
-      record('/hooks/subagent-stop', b)
+      record(hookPath('subagent-stop'), b)
       const sessionId = str(b['session_id'])
       const agentId = str(b['agent_id'])
       if (sessionId !== undefined && agentId !== undefined) events.onSubagentStop({ sessionId, agentId })

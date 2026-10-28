@@ -1,4 +1,5 @@
 import type { SessionStatus } from '@claudeswitcher/core'
+import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
 
 /** A sor eleji jel öt állapota; a CSS `tone-…` osztálya adja a színét. */
 export type MarkerTone = 'waiting' | 'released' | 'working' | 'done' | 'idle'
@@ -16,7 +17,7 @@ const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
   released: {
     tone: 'released',
     glyph: '◆',
-    title: 'Az app elengedte (590 mp) — a VSCode-ban vagy a telefonon még dönthetsz',
+    title: `Az app elengedte (${PERMISSION_RELEASE_AFTER_MS / 1000} mp) — a VSCode-ban vagy a telefonon még dönthetsz`,
   },
   working: { tone: 'working', glyph: '◐', title: 'Dolgozik' },
   done: { tone: 'done', glyph: '✓', title: 'Épp végzett' },

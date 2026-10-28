@@ -1,5 +1,14 @@
 import { readFile } from 'node:fs/promises'
-import { isNotFoundError, transformSettingsFile, userSettingsPath } from '@claudeswitcher/core'
+import {
+  HOOK_CONTRACT,
+  LEGACY_HOOK_CONTRACT,
+  OUR_HOOK_PATHS,
+  hookPath,
+  isNotFoundError,
+  transformSettingsFile,
+  userSettingsPath,
+  type HookContractEntry,
+} from '@claudeswitcher/core'
 import { DAEMON_PORT } from './daemon-port.js'
 
 export { DAEMON_PORT } from './daemon-port.js'
@@ -15,45 +24,13 @@ export interface IntegrationResult {
   conflicts: string[]
 }
 
-interface HookRoute {
-  route: string
-  /** Másodperc. */
-  timeout: number
-}
-
 /**
- * A telepített hookok.
- *
- * A `PermissionRequest` az egyetlen, ami döntést tart: 600 mp-es timeoutját a DecisionBroker
- * 590 mp-nél előzi meg, hogy a lezárást mindig mi kezdeményezzük. A többi display-only, rövid
- * timeouttal. A `PreToolUse` / `PostToolUse` / `SubagentStop` azért kell, mert a VSCode-ban vagy
- * a telefonon hozott döntést csak ezekből lehet felismerni (spec §7).
- *
- * A két hibás végű esemény a sikeres párja route-ját kapja, mert ennek az appnak ugyanazt jelenti.
- * A `PostToolUseFailure` egy elindult, de hibával zárult tool: a döntés megvolt, a sor zárul. A
- * route csak a `session_id`-t és a `tool_use_id`-t olvassa, és a hookdokumentáció szerint mindkettő
- * benne van. A `StopFailure` a Stop helyett jön, ha a kör API-hibával ért véget (rate limit,
- * overloaded): a fő kör ugyanúgy véget ért. A válaszát a Claude Code a `terminalSequence`
- * kivételével figyelmen kívül hagyja, így az üres 200 elég. Mindkettő illeszkedik az
- * `OUR_HOOK_PATHS`-ra, tehát a telepítés és az eltávolítás külön kód nélkül kezeli őket.
+ * A telepített hookok és a kivezetettek a core szerződéséből (`HOOK_CONTRACT`,
+ * `LEGACY_HOOK_CONTRACT`). A hibás végű események (`PostToolUseFailure`, `StopFailure`) a sikeres
+ * párjuk route-ját kapják, ezért az `OUR_HOOK_PATHS`-ra illeszkednek, és a telepítés meg az
+ * eltávolítás külön kód nélkül kezeli őket.
  */
-const HOOK_ROUTES: Readonly<Record<string, HookRoute>> = {
-  Notification: { route: 'notification', timeout: 5 },
-  SessionEnd: { route: 'lifecycle/end', timeout: 5 },
-  Stop: { route: 'lifecycle/stop', timeout: 5 },
-  StopFailure: { route: 'lifecycle/stop', timeout: 5 },
-  PermissionRequest: { route: 'permission-request', timeout: 600 },
-  PreToolUse: { route: 'pre-tool-use', timeout: 5 },
-  PostToolUse: { route: 'post-tool-use', timeout: 5 },
-  PostToolUseFailure: { route: 'post-tool-use', timeout: 5 },
-  SubagentStop: { route: 'subagent-stop', timeout: 5 },
-}
-
-/**
- * Egy korábbi verzió telepítette, azóta kivezetve. A `SessionStart` HTTP-hookként soha nem
- * tüzel (mérve, M2 spike). Telepítéskor és eltávolításkor is kivesszük a mi bejegyzésünket.
- */
-const LEGACY_EVENTS: readonly string[] = ['SessionStart']
+const LEGACY_EVENTS: readonly string[] = LEGACY_HOOK_CONTRACT.map((hook) => hook.event)
 
 const TOKEN_ENV = 'CLAUDESWITCHER_TOKEN'
 
@@ -71,10 +48,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function without(source: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))
 }
-
-/** A saját hook-végpontjaink útvonalai, a kivezetett `lifecycle/start`-tal együtt. */
-const OUR_HOOK_PATHS =
-  /^\/hooks\/(notification|permission-request|pre-tool-use|post-tool-use|subagent-stop|lifecycle\/(start|end|stop))$/
 
 /**
  * Igaz, ha EGY hook a mienk.
@@ -105,7 +78,7 @@ export function isOurHook(hook: unknown): boolean {
       isHttp &&
       parsed.hostname === '127.0.0.1' &&
       parsed.port === String(DAEMON_PORT) &&
-      OUR_HOOK_PATHS.test(parsed.pathname)
+      OUR_HOOK_PATHS.has(parsed.pathname)
     )
   } catch {
     return false
@@ -164,17 +137,17 @@ function isOurStatusLine(statusLine: unknown): boolean {
 }
 
 /** A hook URL-je. A telepítés és az elavultság-ellenőrzés is innen veszi. */
-function hookUrl(port: number, { route }: HookRoute): string {
-  return `http://127.0.0.1:${String(port)}/hooks/${route}`
+function hookUrl(port: number, { route }: HookContractEntry): string {
+  return `http://127.0.0.1:${String(port)}${hookPath(route)}`
 }
 
-function ourHookEntry(port: number, hookRoute: HookRoute): Record<string, unknown> {
+function ourHookEntry(port: number, hook: HookContractEntry): Record<string, unknown> {
   return {
     hooks: [
       {
         type: 'http',
-        url: hookUrl(port, hookRoute),
-        timeout: hookRoute.timeout,
+        url: hookUrl(port, hook),
+        timeout: hook.timeoutSeconds,
         headers: { Authorization: `Bearer $${TOKEN_ENV}` },
         allowedEnvVars: [TOKEN_ENV],
       },
@@ -210,14 +183,14 @@ export function applyIntegration(
     conflicts.push('A "hooks" érték nem objektum, ezért a hookokat nem telepítettük.')
   } else {
     const hooks: Record<string, unknown> = isPlainObject(rawHooks) ? { ...rawHooks } : {}
-    for (const [event, route] of Object.entries(HOOK_ROUTES)) {
-      const current = hooks[event]
+    for (const hook of HOOK_CONTRACT) {
+      const current = hooks[hook.event]
       if (current !== undefined && !Array.isArray(current)) {
-        conflicts.push(`A "hooks.${event}" érték nem tömb, ezért ezt az eseményt kihagytuk.`)
+        conflicts.push(`A "hooks.${hook.event}" érték nem tömb, ezért ezt az eseményt kihagytuk.`)
         continue
       }
       const foreign = stripOurHooks(Array.isArray(current) ? current : [])
-      hooks[event] = [...foreign, ourHookEntry(options.port, route)]
+      hooks[hook.event] = [...foreign, ourHookEntry(options.port, hook)]
     }
     settings['hooks'] = stripEvents(hooks, LEGACY_EVENTS)
   }
@@ -245,7 +218,7 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
 
   const rawHooks = existing['hooks']
   if (isPlainObject(rawHooks)) {
-    const hooks = stripEvents(rawHooks, [...Object.keys(HOOK_ROUTES), ...LEGACY_EVENTS])
+    const hooks = stripEvents(rawHooks, [...HOOK_CONTRACT.map((hook) => hook.event), ...LEGACY_EVENTS])
     settings = Object.keys(hooks).length === 0 ? without(settings, ['hooks']) : { ...settings, hooks }
   }
 
@@ -261,11 +234,11 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
 /**
  * A telepített hookjaink állapota a settings.json szerint.
  *
- * - `not-installed`: egyik `HOOK_ROUTES` eseménynél sincs saját hookunk.
+ * - `not-installed`: egyik `HOOK_CONTRACT` eseménynél sincs saját hookunk.
  * - `current`: minden eseménynél van saját hookunk a helyes route-ra és a `DAEMON_PORT`-ra.
  * - `stale`: a mieink ott vannak, de a `missing` eseményeknél hiányzik a hook, vagy rossz route-ra
  *   vagy portra mutat. Egy korábbi verzió telepítése ilyen, ha azóta új esemény került a
- *   `HOOK_ROUTES`-ba.
+ *   `HOOK_CONTRACT`-ba.
  * - `unknown`: a fájl nem olvasható vagy nem értelmezhető. Ez nem „elavult": nem tudjuk.
  */
 export type HookInstallState =
@@ -287,17 +260,17 @@ function ourHooksOf(groups: unknown): Record<string, unknown>[] {
 
 /**
  * Tiszta függvény: a settings.json `hooks` szakaszából megmondja, mely eseményeink hiányoznak.
- * Az elvárt URL ugyanabból a `HOOK_ROUTES`-ból és `hookUrl`-ből jön, amiből a telepítés is ír.
+ * Az elvárt URL ugyanabból a `HOOK_CONTRACT`-ból és `hookUrl`-ből jön, amiből a telepítés is ír.
  */
 export function hookInstallState(hooks: unknown, port: number = DAEMON_PORT): HookInstallState {
   if (!isPlainObject(hooks)) return { kind: 'not-installed' }
   let anyOurs = false
   const missing: string[] = []
-  for (const [event, route] of Object.entries(HOOK_ROUTES)) {
-    const ours = ourHooksOf(hooks[event])
+  for (const entry of HOOK_CONTRACT) {
+    const ours = ourHooksOf(hooks[entry.event])
     if (ours.length > 0) anyOurs = true
-    const expected = hookUrl(port, route)
-    if (!ours.some((hook) => hook['url'] === expected)) missing.push(event)
+    const expected = hookUrl(port, entry)
+    if (!ours.some((hook) => hook['url'] === expected)) missing.push(entry.event)
   }
   if (!anyOurs) return { kind: 'not-installed' }
   return missing.length === 0 ? { kind: 'current' } : { kind: 'stale', missing }

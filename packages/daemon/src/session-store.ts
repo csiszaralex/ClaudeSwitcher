@@ -256,7 +256,7 @@ export class SessionStore {
    *
    * @param pendingSince — sessionönként a legrégebbi függő döntés kezdete. Egy ilyen session
    * akkor is várakozó, ha a Notification még nem jött meg: az csak ~6 mp függés után érkezik
-   * (mérve), a PermissionRequest viszont azonnal. Az elengedett (590 mp) döntés is benne van:
+   * (mérve), a PermissionRequest viszont azonnal. Az elengedett (`PERMISSION_RELEASE_AFTER_MS`) döntés is benne van:
    * a natív prompt ilyenkor még nyitva van.
    * @param resolvedByApp — a session, amelynek a döntését ez a változás az appban zárta le. Az ő
    * Notification-várakozását EGY lépésben töröljük a függéssel: két külön frissítés között a

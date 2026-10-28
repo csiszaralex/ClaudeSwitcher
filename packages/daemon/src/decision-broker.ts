@@ -1,17 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import {
+  PERMISSION_RELEASE_AFTER_MS,
   buildHookResponse,
   type HookDecisionBody,
   type PermissionRequestInfo,
   type UserDecision,
 } from '@claudeswitcher/core'
-
-/**
- * A PermissionRequest hook timeoutja 600 mp (apps/desktop/src/main/setup.ts). 10 mp-cel előtte
- * engedünk el, hogy a lezárást mindig mi kezdeményezzük, üres 200-zal. A natív prompt ettől nem
- * tűnik el, és utána is válaszolható (mérve: 2,5 perccel az elengedés után is).
- */
-export const RELEASE_AFTER_MS = 590_000
 
 /**
  * Egy ELENGEDETT kérés ennyi ideig marad meg azután, hogy a sessionje kiesett a registry
@@ -30,7 +24,7 @@ const PRE_TOOL_USE_CAP = 500
 export interface PendingDecisionView extends PermissionRequestInfo {
   id: string
   createdAt: number
-  /** Igaz, ha az app elengedte (590 mp): onnan már csak a VSCode-ban vagy a telefonon dönthető. */
+  /** Igaz, ha az app elengedte (`PERMISSION_RELEASE_AFTER_MS` után): onnan már csak a VSCode-ban vagy a telefonon dönthető. */
   released: boolean
 }
 
@@ -58,7 +52,7 @@ export interface DecisionChange {
 
 const NO_ABORT: DecisionChange = { abortedSessionId: undefined }
 
-/** Az idő és az időzítők. Tesztben hamisítható, hogy a 590 mp-et ne kelljen kivárni. */
+/** Az idő és az időzítők. Tesztben hamisítható, hogy az elengedési időt ne kelljen kivárni. */
 export interface BrokerClock {
   now(): number
   setTimeout(callback: () => void, ms: number): unknown
@@ -132,7 +126,7 @@ export class DecisionBroker {
   /** A `releaseAll` után igaz: a daemon leáll, új kérést már nem tartunk. */
   #closed = false
 
-  constructor(clock: BrokerClock = systemClock, releaseAfterMs: number = RELEASE_AFTER_MS) {
+  constructor(clock: BrokerClock = systemClock, releaseAfterMs: number = PERMISSION_RELEASE_AFTER_MS) {
     this.#clock = clock
     this.#releaseAfterMs = releaseAfterMs
   }
@@ -149,7 +143,7 @@ export class DecisionBroker {
    */
   hold(request: PermissionRequestInfo, signal?: AbortSignal): Promise<HookDecisionBody | undefined> {
     // Leállás után (releaseAll) semmit nem tartunk: egy ilyenkor érkező kérés különben a
-    // server.close()-t 590 mp-ig feltartaná. Az üres 200 „nincs döntés", a natív prompt marad.
+    // server.close()-t az elengedésig feltartaná. Az üres 200 „nincs döntés", a natív prompt marad.
     if (this.#closed || signal?.aborted === true) return Promise.resolve(undefined)
 
     const id = randomUUID()
