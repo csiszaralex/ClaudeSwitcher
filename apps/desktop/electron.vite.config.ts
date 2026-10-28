@@ -25,6 +25,17 @@ type Plugin = ReturnType<typeof swcPlugin>
 const BUNDLED_WORKSPACE_PACKAGES = ['@claudeswitcher/core', '@claudeswitcher/daemon']
 
 /**
+ * A `ws` opcionális natív gyorsítói. Nincsenek telepítve, és a `ws` egy try/catch-en belül
+ * `require`-eli őket, hiány esetén a saját JS változatára vált. Ha a bundler maga oldja fel őket, a
+ * Vite helyettesítő modult tesz a helyükre: devben egy modulbetöltéskor dobó modult (ettől nem indult
+ * el az `electron-vite dev`), buildben egy üres objektumot. Az utóbbit a `ws` try/catch-e elfogadja,
+ * aztán egy kliens legalább 32 bájtos maszkolt keretének kibontásakor `unmask is not a function`
+ * hibával elhasal (lemérve a buildelt bundle-ön). Külsőként a `require` a try/catch-en belül marad,
+ * így a `ws` mindkét módban a saját JS változatát használja.
+ */
+const WS_OPTIONAL_NATIVE_DEPS = ['bufferutil', 'utf-8-validate']
+
+/**
  * A renderer CSP-je az `index.html` helyőrzőjébe (lásd `rendererCsp`). A dev szerveren (`ctx.server`)
  * a lazább, csak fejlesztői változat megy ki, a buildben a szigorú.
  */
@@ -41,6 +52,7 @@ function rendererCspPlugin(): Plugin {
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: BUNDLED_WORKSPACE_PACKAGES })],
+    build: { rollupOptions: { external: WS_OPTIONAL_NATIVE_DEPS } },
   },
   preload: { plugins: [externalizeDepsPlugin()] },
   renderer: { plugins: [react(), rendererCspPlugin()] },
