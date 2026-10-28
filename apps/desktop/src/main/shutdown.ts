@@ -1,5 +1,5 @@
 /** Ennyit várunk kilépéskor a daemon leállására. Bőven elég az üres 200-ak kiküldésére. */
-export const STOP_TIMEOUT_MS = 2000
+const STOP_TIMEOUT_MS = 2000
 
 /**
  * A daemon leállítása legfeljebb `timeoutMs` ideig. Igazat ad, ha a leállás időben lezárult,

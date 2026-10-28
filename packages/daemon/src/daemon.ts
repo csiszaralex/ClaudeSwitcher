@@ -9,7 +9,7 @@ import { Hub } from './hub.js'
 import { scanSessions } from './scanner.js'
 import { SessionStore } from './session-store.js'
 
-export type { DecideResult, PendingDecisionView } from './decision-broker.js'
+export type { PendingDecisionView } from './decision-broker.js'
 
 export interface DaemonState {
   sessions: SessionView[]

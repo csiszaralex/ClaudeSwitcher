@@ -21,7 +21,7 @@ export interface NotificationEvent {
 export interface LifecycleEvent {
   sessionId: string
   cwd: string
-  kind: 'start' | 'end' | 'stop'
+  kind: (typeof LIFECYCLE_KINDS)[number]
 }
 
 export interface HookEvents {
@@ -53,7 +53,15 @@ function contain(result: void | Promise<void>, what: string): void {
   })
 }
 
-const LIFECYCLE_KINDS = new Set(['start', 'end', 'stop'])
+/**
+ * A daemon által fogadott `lifecycle/*` fajták. A kivezetett `lifecycle/start` nincs köztük: semmi
+ * nem telepíti (lásd `LEGACY_HOOK_CONTRACT`), az útvonalát csak az eltávolítás ismeri fel.
+ */
+const LIFECYCLE_KINDS = ['end', 'stop'] as const
+
+function isLifecycleKind(kind: string): kind is LifecycleEvent['kind'] {
+  return (LIFECYCLE_KINDS as readonly string[]).includes(kind)
+}
 
 function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
   const sessionId = nonEmptyString(b['session_id'])
@@ -138,21 +146,20 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     return c.body(null, 200)
   })
 
-  // A szerződés `lifecycle/*` route-jai egy paraméteres route-on, a kivezetett `lifecycle/start`-tal
-  // együtt (`LIFECYCLE_KINDS`). Hogy minden szerződésbeli útvonalnak van kezelője, azt a
-  // `hook contract coverage` teszt ellenőrzi.
+  // A szerződés `lifecycle/*` route-jai egy paraméteres route-on (`LIFECYCLE_KINDS`). Hogy minden
+  // szerződésbeli útvonalnak van kezelője, azt a `hook contract coverage` teszt ellenőrzi.
   app.post('/hooks/lifecycle/:kind', async (c) => {
     try {
       const kind = c.req.param('kind')
       const b = await body(c)
       record(`/hooks/lifecycle/${kind}`, b)
       const sessionId = nonEmptyString(b['session_id'])
-      if (sessionId !== undefined && LIFECYCLE_KINDS.has(kind)) {
+      if (sessionId !== undefined && isLifecycleKind(kind)) {
         contain(
           events.onLifecycle({
             sessionId,
             cwd: nonEmptyString(b['cwd']) ?? '',
-            kind: kind as LifecycleEvent['kind'],
+            kind,
           }),
           'lifecycle',
         )

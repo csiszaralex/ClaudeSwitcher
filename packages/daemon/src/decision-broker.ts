@@ -60,7 +60,7 @@ export interface BrokerClock {
   clearTimeout(handle: unknown): void
 }
 
-export const systemClock: BrokerClock = {
+const systemClock: BrokerClock = {
   now: () => Date.now(),
   setTimeout: (callback, ms) => {
     const handle = setTimeout(callback, ms)

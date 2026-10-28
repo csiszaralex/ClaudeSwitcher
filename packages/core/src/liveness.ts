@@ -74,7 +74,7 @@ export function fileTimeToEpochMs(fileTime: string): number | undefined {
  * már futott, tehát egy élő lockra ez nem igaz. Ha bármelyik idő ismeretlen, hamis: tipp alapján
  * nem dobunk el lockot.
  */
-export function lockPredatesProcess(lockMtimeMs: number | undefined, processStartMs: number | undefined): boolean {
+function lockPredatesProcess(lockMtimeMs: number | undefined, processStartMs: number | undefined): boolean {
   if (lockMtimeMs === undefined || processStartMs === undefined) return false
   return processStartMs > lockMtimeMs + LOCK_MTIME_SLACK_MS
 }

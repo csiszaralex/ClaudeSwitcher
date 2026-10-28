@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { SessionStatus as Status } from '@claudeswitcher/core'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 
-type Status = 'waiting' | 'working' | 'idle' | 'unknown'
 const session = (status: Status, stoppedAt?: number): { status: Status; stoppedAt?: number | undefined } => ({
   status,
   stoppedAt,
@@ -38,9 +38,8 @@ describe('statusMarker', () => {
     expect(statusMarker(session('waiting', 5_000), []).tone).toBe('waiting')
   })
 
-  it('falls back to idle for everything else', () => {
+  it('shows a plain idle session as idle', () => {
     expect(statusMarker(session('idle'), []).tone).toBe('idle')
-    expect(statusMarker(session('unknown'), []).tone).toBe('idle')
   })
 
   it('gives every state its own glyph and a Hungarian tooltip', () => {

@@ -16,7 +16,7 @@ export interface PreviewLine {
   text: string
 }
 
-export interface PreviewBlock {
+interface PreviewBlock {
   title: string
   /** Rövid megjegyzések a blokk fejlécében (pl. „minden előfordulás", a cella módja). */
   notes: string[]

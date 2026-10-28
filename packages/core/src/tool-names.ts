@@ -4,7 +4,7 @@
  */
 
 /** Fájlt író eszközök: `edit` fajtájú döntés, a panel előnézetet mutat róluk. */
-export const EDIT_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'] as const
+const EDIT_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'] as const
 
 export type EditTool = (typeof EDIT_TOOLS)[number]
 

@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { SessionStatus as Status } from '@claudeswitcher/core'
 import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, selectOnShow } from './selection.js'
-
-type Status = 'waiting' | 'working' | 'idle' | 'unknown'
 
 const session = (sessionId: string, status: Status, waitingSince?: number) => ({
   sessionId,

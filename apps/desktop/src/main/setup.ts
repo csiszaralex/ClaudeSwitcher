@@ -59,7 +59,7 @@ function without(source: Record<string, unknown>, keys: readonly string[]): Reco
  * engedélyezi. Ha valaki kiveszi, a bejegyzés felismerhetetlen árvává válna: minden újabb
  * telepítés egy újabb duplikátumot tenne mellé, az eltávolítás pedig soha nem vinné el.
  */
-export function isOurHook(hook: unknown): boolean {
+function isOurHook(hook: unknown): boolean {
   if (!isRecord(hook)) return false
   const allowed = hook['allowedEnvVars']
   if (Array.isArray(allowed) && allowed.includes(TOKEN_ENV)) return true

@@ -19,7 +19,7 @@ export interface PermissionRule {
 /** Hova írja a Claude Code a szabályt: a projekt helyi beállításaiba, vagy a gépszintűbe. */
 export type RuleDestination = 'localSettings' | 'userSettings'
 
-export interface AskOption {
+interface AskOption {
   label: string
   description?: string | undefined
 }
@@ -38,7 +38,7 @@ export interface AskQuestion {
  * - `question`: AskUserQuestion — csak a felhasználó válaszával engedhető tovább
  * - `plan`: ExitPlanMode — elutasítható visszajelzéssel; jóváhagyni a hookból nem lehet
  */
-export const DECISION_KINDS = ['tool', 'edit', 'question', 'plan'] as const
+const DECISION_KINDS = ['tool', 'edit', 'question', 'plan'] as const
 
 export type DecisionKind = (typeof DECISION_KINDS)[number]
 

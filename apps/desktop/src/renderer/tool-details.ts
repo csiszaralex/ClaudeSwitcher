@@ -21,7 +21,7 @@ const SHOWN_ABOVE: Readonly<Record<string, ReadonlySet<string>>> = Object.fromEn
   COMMAND_TOOLS.map((tool) => [tool, new Set(['command', 'description'])]),
 )
 
-export interface DetailBlock {
+interface DetailBlock {
   /** A mező neve, ha a blokk egyetlen szöveges mező; a JSON-blokknak nincs. */
   label?: string | undefined
   text: string

@@ -5,8 +5,6 @@ export interface SessionRecord {
   cwd: string
   startedAt: number
   procStart?: string | undefined
-  version?: string | undefined
-  kind?: string | undefined
   entrypoint?: string | undefined
   name?: string | undefined
   bridgeSessionId?: string | null | undefined
@@ -28,7 +26,6 @@ export interface IdeLock {
   pid: number
   workspaceFolders: string[]
   ideName?: string | undefined
-  transport?: string | undefined
   /**
    * A lock fájl utolsó írása (epoch ms, a fájl `mtimeMs`-e), ha a szkenner le tudta kérdezni.
    * Nem a fájl tartalmából jön: a lock nem tárol időt. Ebből látszik, ha a pid azóta egy később
@@ -37,7 +34,7 @@ export interface IdeLock {
   mtimeMs?: number | undefined
 }
 
-export type SessionStatus = 'waiting' | 'working' | 'idle' | 'unknown'
+export type SessionStatus = 'waiting' | 'working' | 'idle'
 
 export interface SessionActivity {
   lastAssistantText?: string | undefined
@@ -66,7 +63,6 @@ export interface LiveSession {
 /** Amit a daemon a UI-nak küld. */
 export interface SessionView {
   sessionId: string
-  pid: number
   name: string
   cwd: string
   status: SessionStatus

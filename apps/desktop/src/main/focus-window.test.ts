@@ -181,7 +181,6 @@ const SESSION_ID = '0b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f'
 function extensionView(over: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: SESSION_ID,
-    pid: 1,
     name: 'alpha',
     cwd: 'p:\\proj\\alpha\\sub',
     status: 'waiting',

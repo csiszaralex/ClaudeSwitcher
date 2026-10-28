@@ -315,7 +315,6 @@ export class SessionStore {
 
       views.push({
         sessionId,
-        pid: session.record.pid,
         name: displayName(session.record),
         cwd: session.record.cwd,
         status,

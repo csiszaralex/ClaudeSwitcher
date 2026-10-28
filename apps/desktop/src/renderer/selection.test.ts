@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { SessionStatus as Status } from '@claudeswitcher/core'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 
-type Status = 'waiting' | 'working' | 'idle' | 'unknown'
 const view = (sessionId: string, status: Status): { sessionId: string; status: Status } => ({ sessionId, status })
 const pending = (id: string, sessionId: string): { id: string; sessionId: string } => ({ id, sessionId })
 

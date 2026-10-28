@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  // A spike eldobható kísérlet, a .superpowers munkajegyzet: egyik sem termékkód.
+  "ignore": ["spikes/**", ".superpowers/**"],
+  // A csomagjaink csak egymásnak exportálnak, kívülről senki nem importálja őket: a belépési pont
+  // fel nem használt exportja is halott kód.
+  "includeEntryExports": true,
+  // A core két belépési pontját (a fő és az IO-mentes `/browser`) a package.json `exports`-ából,
+  // a daemonét a `main`-ből, az electron-vite main és preload belépési pontját és a vitest
+  // konfigokat a knip saját pluginjai ismerik fel; ami ide kerül, azt nem találják meg.
+  "workspaces": {
+    "apps/desktop": {
+      // A renderer belépési pontja a HTML, és a `window-api.ts` importálatlan globális
+      // típusdeklaráció, amit a tsconfig `include`-ja hoz be.
+      "entry": ["src/renderer/index.html", "src/renderer/window-api.ts"]
+    }
+  }
+}

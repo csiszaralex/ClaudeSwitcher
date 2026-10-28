@@ -2,7 +2,7 @@ import type { SessionStatus } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
 
 /** A sor eleji jel öt állapota; a CSS `tone-…` osztálya adja a színét. */
-export type MarkerTone = 'waiting' | 'released' | 'working' | 'done' | 'idle'
+type MarkerTone = 'waiting' | 'released' | 'working' | 'done' | 'idle'
 
 export interface StatusMarker {
   tone: MarkerTone

@@ -18,8 +18,6 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
     cwd,
     startedAt,
     procStart: typeof raw['procStart'] === 'string' ? raw['procStart'] : undefined,
-    version: typeof raw['version'] === 'string' ? raw['version'] : undefined,
-    kind: typeof raw['kind'] === 'string' ? raw['kind'] : undefined,
     entrypoint: typeof raw['entrypoint'] === 'string' ? raw['entrypoint'] : undefined,
     name: typeof raw['name'] === 'string' ? raw['name'] : undefined,
     bridgeSessionId:
@@ -48,6 +46,5 @@ export function parseIdeLock(raw: unknown, port: number): IdeLock | null {
     pid,
     workspaceFolders: folders,
     ideName: typeof raw['ideName'] === 'string' ? raw['ideName'] : undefined,
-    transport: typeof raw['transport'] === 'string' ? raw['transport'] : undefined,
   }
 }

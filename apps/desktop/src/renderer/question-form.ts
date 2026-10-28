@@ -1,7 +1,7 @@
 import type { AskQuestion } from '@claudeswitcher/core'
 import { joinAnswerLabels } from '@claudeswitcher/core/browser'
 
-export interface QuestionState {
+interface QuestionState {
   selected: string[]
   other: string
 }

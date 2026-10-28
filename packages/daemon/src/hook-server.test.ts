@@ -178,10 +178,10 @@ describe('POST /hooks/notification', () => {
 })
 
 describe('POST /hooks/lifecycle/:kind', () => {
-  it('forwards start, end and stop', async () => {
+  it('forwards end and stop', async () => {
     const ev = events()
     const app = createHookApp(TOKEN, ev)
-    for (const kind of ['start', 'end', 'stop'] as const) {
+    for (const kind of ['end', 'stop'] as const) {
       await post(app, `/hooks/lifecycle/${kind}`, { session_id: 'sid-1', cwd: 'c' })
       expect(ev.onLifecycle).toHaveBeenCalledWith({ sessionId: 'sid-1', cwd: 'c', kind })
     }
@@ -191,6 +191,13 @@ describe('POST /hooks/lifecycle/:kind', () => {
     const ev = events()
     const app = createHookApp(TOKEN, ev)
     expect((await post(app, '/hooks/lifecycle/bogus', { session_id: 's', cwd: 'c' })).status).toBe(200)
+    expect(ev.onLifecycle).not.toHaveBeenCalled()
+  })
+
+  it('ignores the retired lifecycle/start: nothing installs it, only uninstall still recognises its path', async () => {
+    const ev = events()
+    const app = createHookApp(TOKEN, ev)
+    expect((await post(app, hookPath('lifecycle/start'), { session_id: 's', cwd: 'c' })).status).toBe(200)
     expect(ev.onLifecycle).not.toHaveBeenCalled()
   })
 })

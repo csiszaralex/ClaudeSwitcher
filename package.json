@@ -10,7 +10,8 @@
     "test": "nx run-many -t test",
     "check-types": "nx run-many -t check-types",
     "lint": "nx run-many -t lint",
-    "verify": "nx run-many -t check-types lint test build",
+    "knip": "knip",
+    "verify": "nx run-many -t check-types lint test build && knip",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "eslint": "^9.39.5",
+    "knip": "^6.43.0",
     "nx": "^21.0.0",
     "simple-git-hooks": "^2.14.0",
     "typescript": "^5.7.0",
