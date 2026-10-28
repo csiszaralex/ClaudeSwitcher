@@ -15,6 +15,7 @@
     "noUnusedParameters": true,
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
+    "noUncheckedSideEffectImports": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "declaration": true,
