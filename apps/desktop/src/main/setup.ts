@@ -5,6 +5,7 @@ import {
   OUR_HOOK_PATHS,
   hookPath,
   isNotFoundError,
+  isRecord,
   transformSettingsFile,
   userSettingsPath,
   type HookContractEntry,
@@ -40,10 +41,6 @@ const TOKEN_ENV = 'CLAUDESWITCHER_TOKEN'
  */
 const LEGACY_PORT_ENV = 'CLAUDESWITCHER_PORT'
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 /** Új objektum a megadott kulcsok nélkül — `delete` helyett, ami mutálna. */
 function without(source: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))
@@ -63,7 +60,7 @@ function without(source: Record<string, unknown>, keys: readonly string[]): Reco
  * telepítés egy újabb duplikátumot tenne mellé, az eltávolítás pedig soha nem vinné el.
  */
 export function isOurHook(hook: unknown): boolean {
-  if (!isPlainObject(hook)) return false
+  if (!isRecord(hook)) return false
   const allowed = hook['allowedEnvVars']
   if (Array.isArray(allowed) && allowed.includes(TOKEN_ENV)) return true
   const url = hook['url']
@@ -94,7 +91,7 @@ export function isOurHook(hook: unknown): boolean {
  */
 function stripOurHooks(list: readonly unknown[]): unknown[] {
   return list.flatMap((entry) => {
-    if (!isPlainObject(entry)) return [entry]
+    if (!isRecord(entry)) return [entry]
     const hooks = entry['hooks']
     if (!Array.isArray(hooks)) return [entry]
     const foreign = hooks.filter((hook) => !isOurHook(hook))
@@ -131,7 +128,7 @@ const STATUS_LINE_MARKER = '--claudeswitcher'
 
 /** Igaz, ha a status line a kivezetett saját bejegyzésünk: a jelölőnk alapján, nem az útvonala alapján. */
 function isOurStatusLine(statusLine: unknown): boolean {
-  if (!isPlainObject(statusLine)) return false
+  if (!isRecord(statusLine)) return false
   const command = statusLine['command']
   return typeof command === 'string' && command.includes(STATUS_LINE_MARKER)
 }
@@ -179,10 +176,10 @@ export function applyIntegration(
   const conflicts: string[] = []
 
   const rawHooks = existing['hooks']
-  if (rawHooks !== undefined && !isPlainObject(rawHooks)) {
+  if (rawHooks !== undefined && !isRecord(rawHooks)) {
     conflicts.push('A "hooks" érték nem objektum, ezért a hookokat nem telepítettük.')
   } else {
-    const hooks: Record<string, unknown> = isPlainObject(rawHooks) ? { ...rawHooks } : {}
+    const hooks: Record<string, unknown> = isRecord(rawHooks) ? { ...rawHooks } : {}
     for (const hook of HOOK_CONTRACT) {
       const current = hooks[hook.event]
       if (current !== undefined && !Array.isArray(current)) {
@@ -196,11 +193,11 @@ export function applyIntegration(
   }
 
   const rawEnv = existing['env']
-  if (rawEnv !== undefined && !isPlainObject(rawEnv)) {
+  if (rawEnv !== undefined && !isRecord(rawEnv)) {
     conflicts.push('Az "env" érték nem objektum, ezért a tokent nem állítottuk be.')
   } else {
     settings['env'] = {
-      ...without(isPlainObject(rawEnv) ? rawEnv : {}, [LEGACY_PORT_ENV]),
+      ...without(isRecord(rawEnv) ? rawEnv : {}, [LEGACY_PORT_ENV]),
       [TOKEN_ENV]: options.token,
     }
   }
@@ -217,13 +214,13 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
   let settings: Record<string, unknown> = withoutOurStatusLine(existing)
 
   const rawHooks = existing['hooks']
-  if (isPlainObject(rawHooks)) {
+  if (isRecord(rawHooks)) {
     const hooks = stripEvents(rawHooks, [...HOOK_CONTRACT.map((hook) => hook.event), ...LEGACY_EVENTS])
     settings = Object.keys(hooks).length === 0 ? without(settings, ['hooks']) : { ...settings, hooks }
   }
 
   const rawEnv = existing['env']
-  if (isPlainObject(rawEnv)) {
+  if (isRecord(rawEnv)) {
     const env = without(rawEnv, [LEGACY_PORT_ENV, TOKEN_ENV])
     settings = Object.keys(env).length === 0 ? without(settings, ['env']) : { ...settings, env }
   }
@@ -251,10 +248,10 @@ export type HookInstallState =
 function ourHooksOf(groups: unknown): Record<string, unknown>[] {
   if (!Array.isArray(groups)) return []
   return groups.flatMap((group) => {
-    if (!isPlainObject(group)) return []
+    if (!isRecord(group)) return []
     const hooks = group['hooks']
     if (!Array.isArray(hooks)) return []
-    return hooks.filter((hook): hook is Record<string, unknown> => isPlainObject(hook) && isOurHook(hook))
+    return hooks.filter((hook): hook is Record<string, unknown> => isRecord(hook) && isOurHook(hook))
   })
 }
 
@@ -263,7 +260,7 @@ function ourHooksOf(groups: unknown): Record<string, unknown>[] {
  * Az elvárt URL ugyanabból a `HOOK_CONTRACT`-ból és `hookUrl`-ből jön, amiből a telepítés is ír.
  */
 export function hookInstallState(hooks: unknown, port: number = DAEMON_PORT): HookInstallState {
-  if (!isPlainObject(hooks)) return { kind: 'not-installed' }
+  if (!isRecord(hooks)) return { kind: 'not-installed' }
   let anyOurs = false
   const missing: string[] = []
   for (const entry of HOOK_CONTRACT) {
@@ -299,7 +296,7 @@ export async function readHookInstallState(claudeDir: string): Promise<HookInsta
   } catch {
     return { kind: 'unknown' }
   }
-  return isPlainObject(parsed) ? hookInstallState(parsed['hooks']) : { kind: 'unknown' }
+  return isRecord(parsed) ? hookInstallState(parsed['hooks']) : { kind: 'unknown' }
 }
 
 /** Telepít a felhasználó settings.json-jába. Az ütközések leírását adja vissza. */

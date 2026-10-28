@@ -1,6 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { isNotFoundError, transformSettingsFile } from '@claudeswitcher/core'
+import { isNotFoundError, isRecord, transformSettingsFile } from '@claudeswitcher/core'
 
 /**
  * Az overlay gyorsbillentyűjének alapértéke.
@@ -57,9 +57,7 @@ async function readRaw(file: string): Promise<string | undefined> {
 function parseObject(raw: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(raw)
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>
-    }
+    if (isRecord(parsed)) return parsed
   } catch {
     // Elrontott fájl: a hívó dönti el, mi legyen — írni sosem szabad bele.
   }

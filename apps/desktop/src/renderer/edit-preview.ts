@@ -1,4 +1,5 @@
 import type { DecisionKind } from '@claudeswitcher/core'
+import { isRecord } from '@claudeswitcher/core/browser'
 import { DETAILS_LIMIT, formatToolInput, toolDetails, type ToolDetails } from './tool-details.js'
 
 /**
@@ -37,10 +38,6 @@ export const LINE_MARK = { add: '+', remove: '-', same: ' ' } as const satisfies
 const NOTEBOOK_MODE: Record<string, string> = { replace: 'csere', insert: 'beszúrás', delete: 'törlés' }
 
 const REPLACE_ALL = 'minden előfordulás'
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 /** Sorokra bont; az üres szövegnek nincs sora, a záró sortörés nem nyit újat. */
 function splitLines(text: string): string[] {
@@ -82,7 +79,7 @@ function contextLines(text: string): PreviewLine[] {
 
 /** Egy Edit- vagy MultiEdit-módosítás blokkja; `undefined`, ha nem olvasható. */
 function editBlock(edit: unknown, title: string): PreviewBlock | undefined {
-  if (!isPlainObject(edit)) return undefined
+  if (!isRecord(edit)) return undefined
   const { old_string: oldText, new_string: newText, replace_all: replaceAll } = edit
   if (typeof oldText !== 'string' || typeof newText !== 'string') return undefined
   return {
@@ -132,13 +129,13 @@ function notebookCells(path: unknown, content: string): PreviewBlock[] | undefin
   } catch {
     return undefined
   }
-  if (!isPlainObject(parsed) || !Array.isArray(parsed['cells'])) return undefined
+  if (!isRecord(parsed) || !Array.isArray(parsed['cells'])) return undefined
   const cells: unknown[] = parsed['cells']
   if (cells.length === 0) return [{ title: 'új jegyzetfüzet', notes: ['nincs cellája'], lines: [], hiddenLines: 0 }]
   const blocks: PreviewBlock[] = []
   for (const [index, cell] of cells.entries()) {
     // Ahogy a MultiEditnél: egy cella kihagyása a jóváhagyandó tartalom egy részét rejtené el.
-    if (!isPlainObject(cell)) return undefined
+    if (!isRecord(cell)) return undefined
     const { cell_type: cellType } = cell
     const source = cellSource(cell['source'])
     if (typeof cellType !== 'string' || source === undefined) return undefined
@@ -201,7 +198,7 @@ export function editPreview(
   limit: number = DETAILS_LIMIT,
   maxLines: number = PREVIEW_LINES,
 ): EditPreview | undefined {
-  if (!isPlainObject(input)) return undefined
+  if (!isRecord(input)) return undefined
   const all = rawBlocks(toolName, input)
   if (all === undefined) return undefined
 

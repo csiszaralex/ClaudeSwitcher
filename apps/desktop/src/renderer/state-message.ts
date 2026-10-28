@@ -1,25 +1,22 @@
 import type { SessionView, SubagentView } from '@claudeswitcher/core'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
+import { isRecord } from '@claudeswitcher/core/browser'
 
 export interface DaemonState {
   sessions: SessionView[]
   decisions: PendingDecisionView[]
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
 const DECISION_KINDS = new Set(['tool', 'edit', 'question', 'plan'])
 
 function isQuestion(value: unknown): boolean {
-  if (!isObject(value)) return false
+  if (!isRecord(value)) return false
   const options = value['options']
   return (
     typeof value['question'] === 'string' &&
     typeof value['multiSelect'] === 'boolean' &&
     Array.isArray(options) &&
-    options.every((option: unknown) => isObject(option) && typeof option['label'] === 'string')
+    options.every((option: unknown) => isRecord(option) && typeof option['label'] === 'string')
   )
 }
 
@@ -29,7 +26,7 @@ function isQuestion(value: unknown): boolean {
  * ErrorBoundary miatt az egész overlayt hibaszövegbe fagyasztaná.
  */
 function isDecision(value: unknown): value is PendingDecisionView {
-  if (!isObject(value)) return false
+  if (!isRecord(value)) return false
   const kind = value['kind']
   const questions = value['questions']
   const rules = value['suggestedRules']
@@ -49,7 +46,7 @@ function isDecision(value: unknown): value is PendingDecisionView {
     Array.isArray(questions) &&
     questions.every(isQuestion) &&
     Array.isArray(rules) &&
-    rules.every((rule: unknown) => isObject(rule) && typeof rule['toolName'] === 'string')
+    rules.every((rule: unknown) => isRecord(rule) && typeof rule['toolName'] === 'string')
   )
 }
 
@@ -64,7 +61,7 @@ function optionalString(value: unknown): boolean {
  */
 function isSubagent(value: unknown): value is SubagentView {
   return (
-    isObject(value) &&
+    isRecord(value) &&
     typeof value['agentId'] === 'string' &&
     typeof value['updatedAt'] === 'number' &&
     optionalString(value['agentType']) &&
@@ -87,7 +84,7 @@ function isSubagent(value: unknown): value is SubagentView {
  * mutatna. Egy rossz alakú elemet inkább eldobunk, mint hogy az egész listát elveszítsük.
  */
 export function sanitizeState(payload: unknown): DaemonState | undefined {
-  if (!isObject(payload)) return undefined
+  if (!isRecord(payload)) return undefined
 
   const sessions = payload['sessions']
   const decisions = payload['decisions']
@@ -96,7 +93,7 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
   return {
     sessions: sessions.filter(
       (view: unknown): view is SessionView =>
-        isObject(view) &&
+        isRecord(view) &&
         typeof view['sessionId'] === 'string' &&
         // Opcionális: egy régebbi daemon nem küldi. Ha jön, számnak kell lennie — időt számolnak belőle.
         (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number') &&
@@ -126,7 +123,7 @@ export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
   } catch {
     return undefined
   }
-  if (!isObject(message)) return undefined
+  if (!isRecord(message)) return undefined
   if (message['type'] === 'tick') return { kind: 'tick' }
   if (message['type'] !== 'state') return undefined
   const state = sanitizeState(message['payload'])

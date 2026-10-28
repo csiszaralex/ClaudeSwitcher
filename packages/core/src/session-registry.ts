@@ -1,8 +1,5 @@
 import type { IdeLock, SessionRecord } from './types.js'
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
+import { isRecord } from './guards.js'
 
 /**
  * Toleráns parse: ismeretlen mezőket figyelmen kívül hagy, hiányzó kötelező

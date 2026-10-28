@@ -164,6 +164,17 @@ describe('sanitizeState', () => {
     })
   })
 
+  it('rejects an array where an object is expected, even one carrying the right named fields', () => {
+    // Szándékos változás: korábban a renderer `isObject`-je tömböt is elfogadott, a többi őr nem.
+    // JSON-ból ilyen tömb nem jöhet, de az IPC-s út `unknown`-t ad, és az őr mindenhol ugyanaz legyen.
+    const arraySession = Object.assign([], { sessionId: 'array' })
+    const arrayDecision = Object.assign([], decisionFrom('permissionRequest_bash'))
+    const clean = sanitizeState({ sessions: [arraySession, { sessionId: 'a' }], decisions: [arrayDecision] })
+    expect(clean?.sessions).toEqual([{ sessionId: 'a' }])
+    expect(clean?.decisions).toEqual([])
+    expect(sanitizeState(Object.assign([], { sessions: [] }))).toBeUndefined()
+  })
+
   it('defaults decisions to an empty list when an older daemon omits them', () => {
     expect(sanitizeState({ sessions: [] })?.decisions).toEqual([])
   })

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { copyFile, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { isRecord } from './guards.js'
 
 /**
  * Az a néhány fájlművelet, amit ez a modul használ. Teszteléshez cserélhető: egy foglalt
@@ -48,10 +49,6 @@ export function isNotFoundError(error: unknown): boolean {
   return errorCode(error) === 'ENOENT'
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
 /**
  * Rekurzív merge. Objektumokat mélyen egyesít, tömböket és skalárokat cserél.
  * A tömb-csere szándékos: a hook-konfigot idempotensen akarjuk újraírni, nem
@@ -69,7 +66,7 @@ export function mergeSettings(
     if (key === '__proto__') continue
     const current = out[key]
     out[key] =
-      isPlainObject(value) && isPlainObject(current)
+      isRecord(value) && isRecord(current)
         ? mergeSettings(current, value)
         : value
   }
@@ -217,7 +214,7 @@ async function readSnapshot(fs: SettingsFs, filePath: string): Promise<Snapshot>
     } catch (cause) {
       throw new Error(`Cannot parse existing settings at ${filePath}; refusing to write`, { cause })
     }
-    if (!isPlainObject(parsed)) {
+    if (!isRecord(parsed)) {
       throw new Error(`Settings at ${filePath} is not a JSON object; refusing to write`)
     }
     return { raw, existing: parsed, seen }

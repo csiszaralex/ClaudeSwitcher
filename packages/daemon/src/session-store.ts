@@ -1,4 +1,10 @@
-import type { LiveSession, SessionActivity, SessionView, SubagentView } from '@claudeswitcher/core'
+import {
+  lastPathSegment,
+  type LiveSession,
+  type SessionActivity,
+  type SessionView,
+  type SubagentView,
+} from '@claudeswitcher/core'
 import type { LifecycleEvent, NotificationEvent } from './hook-server.js'
 
 /**
@@ -27,8 +33,7 @@ interface WaitState {
 
 function displayName(record: LiveSession['record']): string {
   if (record.name !== undefined && record.name !== '') return record.name
-  const parts = record.cwd.split(/[\\/]/).filter((p) => p !== '')
-  return parts[parts.length - 1] ?? record.sessionId
+  return lastPathSegment(record.cwd) ?? record.sessionId
 }
 
 /**

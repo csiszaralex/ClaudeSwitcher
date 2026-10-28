@@ -1,6 +1,8 @@
 import { appendFile } from 'node:fs/promises'
 import {
   hookPath,
+  isRecord,
+  nonEmptyString,
   parsePermissionRequest,
   type HookDecisionBody,
   type PermissionRequestInfo,
@@ -53,24 +55,16 @@ function contain(result: void | Promise<void>, what: string): void {
 
 const LIFECYCLE_KINDS = new Set(['start', 'end', 'stop'])
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-function str(v: unknown): string | undefined {
-  return typeof v === 'string' && v !== '' ? v : undefined
-}
-
 function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
-  const sessionId = str(b['session_id'])
-  const toolName = str(b['tool_name'])
-  const toolUseId = str(b['tool_use_id'])
+  const sessionId = nonEmptyString(b['session_id'])
+  const toolName = nonEmptyString(b['tool_name'])
+  const toolUseId = nonEmptyString(b['tool_use_id'])
   const toolInput = b['tool_input']
   if (sessionId === undefined || toolName === undefined || toolUseId === undefined || !isRecord(toolInput)) {
     return undefined
   }
   // Subagentnél ott van; a mezőnév a mért permissionRequest_subagent és subagentStop fixture-ökből.
-  const agentId = str(b['agent_id'])
+  const agentId = nonEmptyString(b['agent_id'])
   return { sessionId, ...(agentId === undefined ? {} : { agentId }), toolName, toolInput, toolUseId }
 }
 
@@ -123,17 +117,17 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     try {
       const b = await body(c)
       record(hookPath('notification'), b)
-      const sessionId = str(b['session_id'])
-      const type = str(b['notification_type'])
+      const sessionId = nonEmptyString(b['session_id'])
+      const type = nonEmptyString(b['notification_type'])
       if (sessionId !== undefined && type !== undefined) {
         contain(
           events.onNotification({
             sessionId,
-            cwd: str(b['cwd']) ?? '',
+            cwd: nonEmptyString(b['cwd']) ?? '',
             type,
             // A Claude Code `message`-ben küldi — a CLAUDESWITCHER_HOOK_LOG nyers naplójából
             // mérve. A `notification_text` csak tartalék, ha egy jövőbeli verzió átnevezné.
-            text: str(b['message']) ?? str(b['notification_text']),
+            text: nonEmptyString(b['message']) ?? nonEmptyString(b['notification_text']),
           }),
           'notification',
         )
@@ -152,12 +146,12 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       const kind = c.req.param('kind')
       const b = await body(c)
       record(`/hooks/lifecycle/${kind}`, b)
-      const sessionId = str(b['session_id'])
+      const sessionId = nonEmptyString(b['session_id'])
       if (sessionId !== undefined && LIFECYCLE_KINDS.has(kind)) {
         contain(
           events.onLifecycle({
             sessionId,
-            cwd: str(b['cwd']) ?? '',
+            cwd: nonEmptyString(b['cwd']) ?? '',
             kind: kind as LifecycleEvent['kind'],
           }),
           'lifecycle',
@@ -204,8 +198,8 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     try {
       const b = await body(c)
       record(hookPath('post-tool-use'), b)
-      const sessionId = str(b['session_id'])
-      const toolUseId = str(b['tool_use_id'])
+      const sessionId = nonEmptyString(b['session_id'])
+      const toolUseId = nonEmptyString(b['tool_use_id'])
       if (sessionId !== undefined && toolUseId !== undefined) events.onPostToolUse({ sessionId, toolUseId })
     } catch (error) {
       console.error('[hook] post-tool-use handler failed', error)
@@ -217,8 +211,8 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     try {
       const b = await body(c)
       record(hookPath('subagent-stop'), b)
-      const sessionId = str(b['session_id'])
-      const agentId = str(b['agent_id'])
+      const sessionId = nonEmptyString(b['session_id'])
+      const agentId = nonEmptyString(b['agent_id'])
       if (sessionId !== undefined && agentId !== undefined) events.onSubagentStop({ sessionId, agentId })
     } catch (error) {
       console.error('[hook] subagent-stop handler failed', error)

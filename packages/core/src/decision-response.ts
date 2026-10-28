@@ -1,4 +1,5 @@
 import type { PermissionRequestInfo, PermissionRule, RuleDestination } from './decision.js'
+import { isRecord } from './guards.js'
 
 /** A felhasználó döntése egy függő kérésről — az overlayből, IPC-n át érkezik. */
 export type UserDecision =
@@ -106,10 +107,6 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
 /** Többválasztós válasz a dokumentált formában (a tömb „Other"-ként jelent meg — spike R1a). */
 export function joinAnswerLabels(labels: readonly string[]): string {
   return labels.join(', ')
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseRule(raw: unknown): PermissionRule | undefined {

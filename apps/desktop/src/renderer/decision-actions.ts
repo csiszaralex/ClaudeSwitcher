@@ -1,4 +1,5 @@
 import type { DecisionKind } from '@claudeswitcher/core'
+import { isRecord } from '@claudeswitcher/core/browser'
 
 export type DecisionAction = 'allow' | 'deny' | 'rule-project' | 'rule-machine' | 'session-edits'
 
@@ -69,10 +70,10 @@ export type DecideOutcome = { ok: true } | { ok: false; reason: string }
 
 /** A main processz `DecideResult`-ja, ellenőrizve — az IPC-n át bármi jöhet. */
 export function readDecideResult(raw: unknown): DecideOutcome {
-  if (typeof raw === 'object' && raw !== null) {
-    const result = raw as { ok?: unknown; reason?: unknown }
-    if (result.ok === true) return { ok: true }
-    if (result.ok === false && typeof result.reason === 'string') return { ok: false, reason: result.reason }
+  if (isRecord(raw)) {
+    if (raw['ok'] === true) return { ok: true }
+    const reason = raw['reason']
+    if (raw['ok'] === false && typeof reason === 'string') return { ok: false, reason }
   }
   return { ok: false, reason: 'Ismeretlen válasz a daemontól.' }
 }
@@ -87,8 +88,8 @@ export interface OverlaySettings {
  * amit a main config is ad, ha a kulcs hiányzik.
  */
 export function readOverlaySettings(raw: unknown): OverlaySettings {
-  if (typeof raw === 'object' && raw !== null) {
-    const { hideAfterLastDecision } = raw as { hideAfterLastDecision?: unknown }
+  if (isRecord(raw)) {
+    const hideAfterLastDecision = raw['hideAfterLastDecision']
     if (typeof hideAfterLastDecision === 'boolean') return { hideAfterLastDecision }
   }
   return { hideAfterLastDecision: true }

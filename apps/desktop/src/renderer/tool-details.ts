@@ -1,4 +1,5 @@
 import type { DecisionKind } from '@claudeswitcher/core'
+import { isRecord } from '@claudeswitcher/core/browser'
 
 /**
  * Ennyi karakter jelenik meg legfeljebb a lenyitható részletekben. Egy több száz kilobájtos
@@ -33,10 +34,6 @@ export interface ToolDetails {
   truncated: boolean
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 interface DetailSource {
   kind: DecisionKind
   toolName: string
@@ -58,14 +55,14 @@ function detailFields(toolName: string, input: Record<string, unknown>): Record<
 export function showsDetails(decision: DetailSource): boolean {
   return (
     decision.kind === 'tool' &&
-    isPlainObject(decision.toolInput) &&
+    isRecord(decision.toolInput) &&
     Object.keys(detailFields(decision.toolName, decision.toolInput)).length > 0
   )
 }
 
 /** A `tool` fajtájú kérés részletei a `showsDetails` szerint; `undefined`, ha nincs mit mutatni. */
 export function toolDetails(decision: DetailSource): ToolDetails | undefined {
-  if (!showsDetails(decision) || !isPlainObject(decision.toolInput)) return undefined
+  if (!showsDetails(decision) || !isRecord(decision.toolInput)) return undefined
   return formatToolInput(detailFields(decision.toolName, decision.toolInput))
 }
 
@@ -74,7 +71,7 @@ export function toolDetails(decision: DetailSource): ToolDetails | undefined {
  * ezt piros sorban, a részletek lenyitása nélkül is mutatja. Csak a kifejezett `true` számít.
  */
 export function sandboxDisabled(toolInput: unknown): boolean {
-  return isPlainObject(toolInput) && toolInput['dangerouslyDisableSandbox'] === true
+  return isRecord(toolInput) && toolInput['dangerouslyDisableSandbox'] === true
 }
 
 /**
@@ -85,7 +82,7 @@ export function sandboxDisabled(toolInput: unknown): boolean {
  * lennének, amit senki nem tud elolvasni. A többi mező szép JSON-ként, elöl.
  */
 export function formatToolInput(input: unknown, limit: number = DETAILS_LIMIT): ToolDetails {
-  if (!isPlainObject(input)) return { blocks: [], truncated: false }
+  if (!isRecord(input)) return { blocks: [], truncated: false }
 
   const rest: Record<string, unknown> = {}
   const texts: DetailBlock[] = []

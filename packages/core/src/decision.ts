@@ -6,6 +6,8 @@
  * használják.
  */
 
+import { isRecord, nonEmptyString } from './guards.js'
+
 /** Egy jogosultsági szabály, ahogy a Claude Code `permission_suggestions`-ben adja. */
 export interface PermissionRule {
   toolName: string
@@ -89,14 +91,6 @@ const REQUIRED_FIELD: Readonly<Record<string, string>> = {
   WebFetch: 'url',
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' && value !== '' ? value : undefined
-}
-
 /** A kötelező mező egy nem üres szöveg; csupa szóköz nem az, abból sem látszana semmi. */
 function isReadable(toolName: string, input: Record<string, unknown>): boolean {
   const field = REQUIRED_FIELD[toolName]
@@ -121,9 +115,9 @@ function parseOptions(raw: unknown): AskOption[] {
   const options: AskOption[] = []
   for (const option of raw) {
     if (!isRecord(option)) continue
-    const label = str(option['label'])
+    const label = nonEmptyString(option['label'])
     if (label === undefined) continue
-    options.push({ label, description: str(option['description']) })
+    options.push({ label, description: nonEmptyString(option['description']) })
   }
   return options
 }
@@ -133,11 +127,11 @@ function parseQuestions(raw: unknown): AskQuestion[] {
   const questions: AskQuestion[] = []
   for (const item of raw) {
     if (!isRecord(item)) continue
-    const question = str(item['question'])
+    const question = nonEmptyString(item['question'])
     if (question === undefined) continue
     questions.push({
       question,
-      header: str(item['header']),
+      header: nonEmptyString(item['header']),
       multiSelect: item['multiSelect'] === true,
       options: parseOptions(item['options']),
     })
@@ -163,13 +157,13 @@ function parseSuggestedRules(raw: unknown): PermissionRule[] {
     if (!Array.isArray(list)) continue
     for (const rule of list) {
       if (!isRecord(rule)) continue
-      const toolName = str(rule['toolName'])
+      const toolName = nonEmptyString(rule['toolName'])
       if (toolName === undefined) continue
       if (!('ruleContent' in rule)) {
         rules.push({ toolName, ruleContent: undefined })
         continue
       }
-      const ruleContent = str(rule['ruleContent'])
+      const ruleContent = nonEmptyString(rule['ruleContent'])
       if (ruleContent !== undefined) rules.push({ toolName, ruleContent })
     }
   }
@@ -183,7 +177,7 @@ function metaField(meta: string, field: string): string | undefined {
   const match = new RegExp(String.raw`\b${field}\s*:\s*${QUOTED}`).exec(meta)
   const raw = match?.[2]
   if (raw === undefined) return undefined
-  return str(oneLine(raw.replace(/\\(.)/g, '$1')))
+  return nonEmptyString(oneLine(raw.replace(/\\(.)/g, '$1')))
 }
 
 /**
@@ -196,7 +190,7 @@ function metaField(meta: string, field: string): string | undefined {
  * ne legyen a workflow neve. A név és a leírás a mintákban a blokk elején áll.
  */
 function workflowMeta(input: Record<string, unknown>): { name?: string | undefined; description?: string | undefined } {
-  const script = str(input['script'])
+  const script = nonEmptyString(input['script'])
   if (script === undefined) return {}
   const start = /\bmeta\s*=\s*\{/.exec(script)
   if (start === null) return {}
@@ -214,7 +208,7 @@ function summarize(
 ): string {
   if (kind === 'question') return questions[0]?.question ?? toolName
   if (kind === 'plan') {
-    const title = str(input['plan'])
+    const title = nonEmptyString(input['plan'])
       ?.split('\n')
       .find((line) => line.trim() !== '')
     return title === undefined ? toolName : oneLine(title.replace(/^#+\s*/, ''))
@@ -222,9 +216,9 @@ function summarize(
   if (toolName === 'Workflow') return workflowMeta(input).name ?? toolName
   // A parancs sortörései jelentést hordoznak (többsoros szkript, heredoc): laposítva a panel
   // mást mutatna, mint amit a felhasználó jóváhagy. Csak a két végét vágjuk.
-  const command = str(input['command'])
+  const command = nonEmptyString(input['command'])
   if (command !== undefined) return command.replace(/\r\n?/g, '\n').trim()
-  const target = str(input['file_path']) ?? str(input['notebook_path']) ?? str(input['url'])
+  const target = nonEmptyString(input['file_path']) ?? nonEmptyString(input['notebook_path']) ?? nonEmptyString(input['url'])
   return target === undefined ? toolName : oneLine(target)
 }
 
@@ -232,15 +226,15 @@ function summarize(
 function describeTool(kind: DecisionKind, toolName: string, input: Record<string, unknown>): string | undefined {
   if (kind !== 'tool') return undefined
   if (toolName === 'Workflow') return workflowMeta(input).description
-  const description = str(input['description'])
-  return description === undefined ? undefined : str(oneLine(description))
+  const description = nonEmptyString(input['description'])
+  return description === undefined ? undefined : nonEmptyString(oneLine(description))
 }
 
 /** A PermissionRequest hook törzse, értelmezve; `undefined`, ha nem használható. Soha nem dob. */
 export function parsePermissionRequest(body: unknown): PermissionRequestInfo | undefined {
   if (!isRecord(body)) return undefined
-  const sessionId = str(body['session_id'])
-  const toolName = str(body['tool_name'])
+  const sessionId = nonEmptyString(body['session_id'])
+  const toolName = nonEmptyString(body['tool_name'])
   if (sessionId === undefined || toolName === undefined) return undefined
 
   const rawInput = body['tool_input']
@@ -250,17 +244,17 @@ export function parsePermissionRequest(body: unknown): PermissionRequestInfo | u
 
   return {
     sessionId,
-    cwd: str(body['cwd']) ?? '',
+    cwd: nonEmptyString(body['cwd']) ?? '',
     toolName,
     toolInput,
-    agentId: str(body['agent_id']),
-    agentType: str(body['agent_type']),
+    agentId: nonEmptyString(body['agent_id']),
+    agentType: nonEmptyString(body['agent_type']),
     kind,
     summary: summarize(kind, toolName, toolInput, questions),
     description: describeTool(kind, toolName, toolInput),
     suggestedRules: parseSuggestedRules(body['permission_suggestions']),
     questions,
-    plan: kind === 'plan' ? str(toolInput['plan']) : undefined,
+    plan: kind === 'plan' ? nonEmptyString(toolInput['plan']) : undefined,
     readable: isReadable(toolName, toolInput),
   }
 }

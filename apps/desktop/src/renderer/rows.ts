@@ -1,4 +1,5 @@
 import type { SessionStatus } from '@claudeswitcher/core'
+import { lastPathSegment } from '@claudeswitcher/core/browser'
 
 interface DecisionLike {
   id: string
@@ -54,11 +55,6 @@ export function pendingBadge(decisions: readonly { released: boolean }[]): strin
   return count > 1 ? `${String(count)} vár` : undefined
 }
 
-function lastSegment(cwd: string): string | undefined {
-  const parts = cwd.split(/[\\/]/).filter((part) => part !== '')
-  return parts[parts.length - 1]
-}
-
 /**
  * A sessionök és a függő kérések egy listában.
  *
@@ -100,7 +96,7 @@ export function buildRows<S extends SessionLike, D extends DecisionLike>(
     orphans.push({
       sessionId,
       status: 'waiting',
-      name: lastSegment(first.cwd) ?? sessionId,
+      name: lastPathSegment(first.cwd) ?? sessionId,
       waitingSince: first.createdAt,
       session: undefined,
       decisions: sorted,

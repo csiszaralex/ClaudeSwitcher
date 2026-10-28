@@ -7,6 +7,8 @@
  * Nem dokumentált formátum. Ez a modul IO-mentes: a daemon olvas, itt csak értelmezünk és választunk.
  */
 
+import { flatText, isRecord } from './guards.js'
+
 /**
  * Ennyi ideig számít aktívnak egy subagent az utolsó transcript-írása után, ha a meta-ja nem
  * mondja, hogy kész. Egy összeomlott (vagy régebbi verzióval futott) subagent sosem írja ki a
@@ -46,23 +48,13 @@ export interface SubagentFile {
   mtimeMs: number
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function text(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const flat = value.replace(/\s+/g, ' ').trim()
-  return flat === '' ? undefined : flat
-}
-
 /** A `meta.json` tartalma, értelmezve. Hiányzó vagy rossz típusú mező: nincs róla információ. Soha nem dob. */
 export function parseSubagentMeta(raw: unknown): SubagentMeta {
   if (!isRecord(raw)) return { finished: false }
   const meta: SubagentMeta = { finished: raw['finished'] === true }
-  const agentType = text(raw['agentType'])
-  const description = text(raw['description'])
-  const toolUseId = text(raw['toolUseId'])
+  const agentType = flatText(raw['agentType'])
+  const description = flatText(raw['description'])
+  const toolUseId = flatText(raw['toolUseId'])
   if (agentType !== undefined) meta.agentType = agentType
   if (description !== undefined) meta.description = description
   if (toolUseId !== undefined) meta.toolUseId = toolUseId
