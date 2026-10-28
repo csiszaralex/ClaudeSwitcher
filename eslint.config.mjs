@@ -1,5 +1,10 @@
 import tseslint from 'typescript-eslint'
 
+const SYNC_SPAWN_NAMES = ['execSync', 'execFileSync', 'spawnSync']
+const SYNC_SPAWN_PATTERN = `/^(${SYNC_SPAWN_NAMES.join('|')})$/`
+const SYNC_SPAWN_MESSAGE =
+  'A szinkron gyerekprocessz blokkolja az Electron főszálát, vele a daemont és minden session hookját. Használd az aszinkron változatot (execFile, spawn).'
+
 export default tseslint.config(
   { ignores: ['**/dist/**', '**/out/**', '**/node_modules/**', 'spikes/**', 'eslint.config.mjs'] },
   ...tseslint.configs.strictTypeChecked,
@@ -38,6 +43,33 @@ export default tseslint.config(
             { name: '@claudeswitcher/daemon', allowTypeImports: true, message: 'A daemon szerver-kód.' },
           ],
         },
+      ],
+    },
+  },
+  {
+    // A szinkron gyerekprocessz megállítja az Electron főszálát, vele a daemont és minden session
+    // hookját: ez okozta a fagyást (lásd `createSnapshotProbe` a core `liveness.ts`-ében). Tesztben
+    // megengedett.
+    // A mag `no-restricted-imports` szabálya külön szabály a fenti typescript-eslint változattól,
+    // így a renderer blokkja nem írja felül.
+    files: ['packages/*/src/**/*.{ts,tsx}', 'apps/desktop/src/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts', '**/*.test.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['node:child_process', 'child_process'].map((name) => ({
+            name,
+            importNames: SYNC_SPAWN_NAMES,
+            message: SYNC_SPAWN_MESSAGE,
+          })),
+        },
+      ],
+      // Névtér-importon (`cp.execSync`) vagy dinamikus import destrukturálásán át is tilos.
+      'no-restricted-syntax': [
+        'error',
+        { selector: `MemberExpression[property.name=${SYNC_SPAWN_PATTERN}]`, message: SYNC_SPAWN_MESSAGE },
+        { selector: `Property[key.name=${SYNC_SPAWN_PATTERN}]`, message: SYNC_SPAWN_MESSAGE },
       ],
     },
   },
