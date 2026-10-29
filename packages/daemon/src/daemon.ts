@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import type { Server as HttpServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import type { Server as HttpServer, IncomingMessage, ServerResponse } from 'node:http'
+import type { AddressInfo, Socket } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
 import { DAEMON_PROTOCOL, POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
 import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
@@ -95,6 +95,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   // A @hono/node-server `serve()` egy node:http Servert ad vissza a
   // default (nem HTTP/2) konfigurációval; a WS hub ezen osztozik.
   const hub = new Hub(server as HttpServer, token)
+  const connections = trackOpenRequests(server as HttpServer)
 
   function state(): DaemonState {
     return { sessions: sessions.views(), decisions: decisions.views() }
@@ -202,7 +203,38 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         server.close(() => {
           resolve()
         })
+        connections.destroyIdle()
       })
+    },
+  }
+}
+
+/**
+ * A `server.close()` a befejezett kérés utáni, tétlen keep-alive kapcsolatot bontja, azt viszont
+ * nem, amelyen még nem jött kérés, és addig nem tér vissza, amíg a kliens azt nem bontja. Mérve
+ * (2026-10-28, Node 24): a Node `fetch` egy megszakított tartott kérés után ilyen üres kapcsolatot
+ * nyit, és csak ~4 mp múlva bontja. Ez hosszabb, mint amennyit a desktop kilépéskor vár
+ * (`STOP_TIMEOUT_MS`).
+ * Leállításkor ezért minden kapcsolatot bontunk, amelyen épp nincs nyitott kérés. A nyitott
+ * kérésűt nem: azon a `releaseAll` üres 200-a még úton lehet.
+ */
+function trackOpenRequests(server: HttpServer): { destroyIdle(): void } {
+  const openRequests = new Map<Socket, number>()
+  server.on('connection', (socket: Socket) => {
+    openRequests.set(socket, 0)
+    socket.on('close', () => openRequests.delete(socket))
+  })
+  server.on('request', (request: IncomingMessage, response: ServerResponse) => {
+    const socket = request.socket
+    openRequests.set(socket, (openRequests.get(socket) ?? 0) + 1)
+    response.on('close', () => {
+      const open = openRequests.get(socket)
+      if (open !== undefined) openRequests.set(socket, open - 1)
+    })
+  })
+  return {
+    destroyIdle() {
+      for (const [socket, open] of openRequests) if (open === 0) socket.destroy()
     },
   }
 }

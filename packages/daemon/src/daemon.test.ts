@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { mkdir, utimes, writeFile } from 'node:fs/promises'
+import { connect } from 'node:net'
 import path from 'node:path'
 import { DAEMON_PROTOCOL, type ProcessProbe } from '@claudeswitcher/core'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -543,5 +544,21 @@ describe('startDaemon — held decisions', () => {
     const res = await response
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('')
+  })
+
+  it('stops without waiting for a connection that has not sent a request yet', async () => {
+    // Ilyet a Node fetch nyit egy megszakított tartott kérés után. A javítás nélkül a stop() a
+    // kliens bontásáig állna, ez a kliens pedig nem bont: a teszt időtúllépéssel bukna.
+    const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
+    const silent = connect(daemon.port, '127.0.0.1')
+    const closed = new Promise((resolve) => silent.on('close', resolve))
+    silent.on('error', () => undefined)
+    await new Promise((resolve) => silent.on('connect', resolve))
+    // Egy teljes kérés egy MÁSIK kapcsolaton: a szerver a beérkezés sorrendjében fogadja a
+    // kapcsolatokat, így a válasz idejére a néma kapcsolatot is elfogadta.
+    expect((await postHook(daemon, '/hooks/notification', payload('notification_permissionPrompt'))).status).toBe(200)
+
+    await daemon.stop()
+    await closed
   })
 })
