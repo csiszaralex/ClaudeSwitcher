@@ -13,3 +13,14 @@ export async function tempDir(prefix: string): Promise<string> {
   onTestFinished(() => rm(dir, { recursive: true, force: true }))
   return dir
 }
+
+/** Addig olvas, amíg a lista nem üres, és azt adja vissza. Időtúllépésnél dob. */
+export async function waitFor<T>(read: () => T[] | Promise<T[]>, timeoutMs = 2000): Promise<T[]> {
+  const started = Date.now()
+  for (;;) {
+    const value = await read()
+    if (value.length > 0) return value
+    if (Date.now() - started > timeoutMs) throw new Error('timed out waiting')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}

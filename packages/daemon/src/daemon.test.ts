@@ -5,7 +5,7 @@ import { DAEMON_PROTOCOL, type ProcessProbe } from '@claudeswitcher/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { startDaemon, type Daemon } from './daemon.js'
-import { tempDir } from './test-helpers.js'
+import { tempDir, waitFor } from './test-helpers.js'
 
 const aliveProbe: ProcessProbe = {
   isAlive: () => true,
@@ -31,6 +31,17 @@ async function fixture(): Promise<string> {
     }),
   )
   return dir
+}
+
+/**
+ * Megvárja, hogy a szerver minden eddig küldött üzenete megérkezzen. A ws szerver a pingre pongot
+ * küld (`autoPong`, alapból be), és egy socketen a keretek sorrendben jönnek, így a pong előtt
+ * minden korábbi üzenet megjött. A ping maga nem vált ki állapotüzenetet, nem torzítja a számlálást.
+ */
+async function drained(socket: WebSocket): Promise<void> {
+  const pong = new Promise((resolve) => socket.once('pong', resolve))
+  socket.ping()
+  await pong
 }
 
 describe('startDaemon', () => {
@@ -143,7 +154,7 @@ describe('startDaemon', () => {
 
     await running.refresh()
     await running.refresh()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await drained(socket)
     socket.close()
 
     const types = messages.map((m) => (JSON.parse(m) as { type: string }).type)
@@ -212,16 +223,6 @@ function postHook(daemon: Daemon, route: string, body: unknown): Promise<Respons
     headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.token}` },
     body: JSON.stringify(body),
   })
-}
-
-async function waitFor<T>(read: () => T[], timeoutMs = 2000): Promise<T[]> {
-  const started = Date.now()
-  for (;;) {
-    const value = read()
-    if (value.length > 0) return value
-    if (Date.now() - started > timeoutMs) throw new Error('timed out waiting')
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
 }
 
 describe('startDaemon — held decisions', () => {
@@ -308,7 +309,7 @@ describe('startDaemon — held decisions', () => {
     await new Promise((resolve) => socket.on('open', resolve))
 
     daemon.decide(pending!.id, { type: 'allow' })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await drained(socket)
     socket.close()
 
     expect(states).toHaveLength(1)
@@ -487,7 +488,7 @@ describe('startDaemon — held decisions', () => {
 
     await held.abort()
     await waitFor(() => (daemon.state().decisions.length === 0 ? [true] : []))
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await drained(socket)
     socket.close()
 
     expect(daemon.state().sessions[0]?.status).toBe('idle')

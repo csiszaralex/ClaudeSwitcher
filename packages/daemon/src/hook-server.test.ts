@@ -7,7 +7,7 @@ import { serve } from '@hono/node-server'
 import { HOOK_CONTRACT, hookPath } from '@claudeswitcher/core'
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import { createHookApp, type HookEvents } from './hook-server.js'
-import { tempDir } from './test-helpers.js'
+import { tempDir, waitFor } from './test-helpers.js'
 
 const TOKEN = 'test-token'
 
@@ -67,12 +67,20 @@ describe('raw hook logging', () => {
     const dir = await tempDir('cs-hooklog-')
     const logFile = path.join(dir, 'hooks.jsonl')
     const app = createHookApp(TOKEN, events(), logFile)
+    /** A log teljes (sorvéggel lezárt) sorai, ha már legalább `count` van belőlük. */
+    const completeLines = async (count: number): Promise<string[]> => {
+      const content = await readFile(logFile, 'utf8').catch(() => '')
+      const lines = content.split('\n').slice(0, -1)
+      return lines.length >= count ? lines : []
+    }
 
+    // Az írás tűz-és-felejts `appendFile`: a második kérés csak az első sor után megy, különben
+    // a két párhuzamos írás sorrendje nem garantált.
     await post(app, '/hooks/notification', { session_id: 's1', notification_type: 'x', odd_field: 42 })
+    await waitFor(() => completeLines(1))
     await post(app, '/hooks/lifecycle/stop', { session_id: 's1' })
-    await new Promise((resolve) => setTimeout(resolve, 50))
 
-    const lines = (await readFile(logFile, 'utf8')).trim().split('\n').map((l) => JSON.parse(l) as { route: string; body: Record<string, unknown> })
+    const lines = (await waitFor(() => completeLines(2))).map((l) => JSON.parse(l) as { route: string; body: Record<string, unknown> })
     expect(lines).toHaveLength(2)
     expect(lines[0]?.route).toBe('/hooks/notification')
     // A kulcs: egy olyan mező is megmarad, amiről a kódunk nem tud.
