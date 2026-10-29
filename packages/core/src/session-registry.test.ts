@@ -21,7 +21,7 @@ const REAL_LOCK = {
   ideName: 'Visual Studio Code',
   transport: 'ws',
   runningInWindows: true,
-  authToken: 'cc6b82e3-2562-4ff4-a85f-ea6c95aa57e7',
+  authToken: '9602c76f-7555-46a2-be31-9507b93f4c64',
 }
 
 describe('parseSessionRecord', () => {
