@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { describe, expect, it, onTestFinished } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { DEFAULT_HOTKEY, configPath, loadConfig, updateConfig } from './config.js'
+import { tempDir } from './test-helpers.js'
 
-const freshDir = (): Promise<string> => mkdtemp(path.join(tmpdir(), 'cs-config-'))
+const freshDir = (): Promise<string> => tempDir('cs-config-')
 
 const DEFAULTS = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true, jumpToTab: true }
 
@@ -153,7 +153,6 @@ describe('updateConfig', () => {
     // A két tálcapipa egymás után, várakozás nélkül hívja. Sorbaállítás nélkül a második a
     // régi tartalmat olvasná, és az első változás elveszne.
     const dir = await freshDir()
-    onTestFinished(() => rm(dir, { recursive: true, force: true }))
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9' }))
 
     const results = await Promise.all([
@@ -173,7 +172,6 @@ describe('updateConfig', () => {
   it('does not overwrite a config it cannot read for a reason other than a missing file', async () => {
     // Egy könyvtár a config helyén nem ENOENT olvasási hibát ad: ez nem „nincs meg".
     const dir = await freshDir()
-    onTestFinished(() => rm(dir, { recursive: true, force: true }))
     await mkdir(configPath(dir))
 
     await expect(updateConfig(dir, { jumpToTab: false })).resolves.toBe(false)

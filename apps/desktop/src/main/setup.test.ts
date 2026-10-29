@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -11,6 +10,7 @@ import {
   removeIntegration,
   uninstallIntegration,
 } from './setup.js'
+import { tempDir } from './test-helpers.js'
 
 function without<T>(source: Record<string, T>, keys: readonly string[]): Record<string, T> {
   return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))
@@ -338,24 +338,24 @@ describe('integrationNotice', () => {
 
 describe('readHookInstallState on a real file', () => {
   it('reads a fresh install as current, and an absent file as not installed', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    const dir = await tempDir('cs-setup-')
     expect(await readHookInstallState(dir)).toEqual({ kind: 'not-installed' })
     await installIntegration(dir, OPTIONS)
     expect(await readHookInstallState(dir)).toEqual({ kind: 'current' })
   })
 
   it('treats an unreadable or unparsable file as unknown, not as stale', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    const dir = await tempDir('cs-setup-')
     await writeFile(path.join(dir, 'settings.json'), '{ not json')
     expect(await readHookInstallState(dir)).toEqual({ kind: 'unknown' })
 
-    const asDir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    const asDir = await tempDir('cs-setup-')
     await mkdir(path.join(asDir, 'settings.json'))
     expect(await readHookInstallState(asDir)).toEqual({ kind: 'unknown' })
   })
 
   it('never writes the file it reads', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    const dir = await tempDir('cs-setup-')
     const file = path.join(dir, 'settings.json')
     const raw = JSON.stringify({ hooks: { Notification: [FOREIGN_NOTIFICATION] } })
     await writeFile(file, raw)
@@ -367,7 +367,7 @@ describe('readHookInstallState on a real file', () => {
 
 describe('installIntegration and uninstallIntegration on a real file', () => {
   it('round-trips the real settings through the file system unchanged', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-setup-'))
+    const dir = await tempDir('cs-setup-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify(USER_SETTINGS, null, 2))
 

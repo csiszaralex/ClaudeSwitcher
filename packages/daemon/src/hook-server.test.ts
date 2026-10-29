@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
@@ -7,6 +7,7 @@ import { serve } from '@hono/node-server'
 import { HOOK_CONTRACT, hookPath } from '@claudeswitcher/core'
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import { createHookApp, type HookEvents } from './hook-server.js'
+import { tempDir } from './test-helpers.js'
 
 const TOKEN = 'test-token'
 
@@ -63,7 +64,7 @@ describe('raw hook logging', () => {
     // Azért kell, mert a hookok VALÓS alakja nincs dokumentálva: a mezőneveket csak
     // méréssel lehet megtudni. A saját értelmezésünk ilyenkor pont a hibaforrás, ezért a
     // nyers törzset írjuk ki, nem a kiolvasott mezőket.
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-hooklog-'))
+    const dir = await tempDir('cs-hooklog-')
     const logFile = path.join(dir, 'hooks.jsonl')
     const app = createHookApp(TOKEN, events(), logFile)
 

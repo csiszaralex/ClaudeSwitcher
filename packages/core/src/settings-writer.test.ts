@@ -1,8 +1,7 @@
 import * as realFs from 'node:fs/promises'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { describe, expect, it, onTestFinished } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   SETTINGS_BACKUP_SUFFIX,
   mergeSettings,
@@ -10,13 +9,7 @@ import {
   updateSettingsFile,
   type SettingsFs,
 } from './settings-writer.js'
-
-/** Saját mkdtemp könyvtár, amit a teszt végén eltakarítunk. */
-async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'cs-writer-'))
-  onTestFinished(() => rm(dir, { recursive: true, force: true }))
-  return dir
-}
+import { tempDir } from './test-helpers.js'
 
 /** A valódi fájlrendszer, amelynek egyes műveleteit a teszt felülírja. */
 function fsWith(overrides: Partial<SettingsFs>): SettingsFs {
@@ -83,14 +76,14 @@ describe('mergeSettings', () => {
 
 describe('updateSettingsFile', () => {
   it('creates the file when it does not exist', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await updateSettingsFile(file, { model: 'opus' })
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ model: 'opus' })
   })
 
   it('merges into an existing file', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ model: 'opus', tui: 'fullscreen' }))
     await updateSettingsFile(file, { statusLine: { type: 'command' } })
@@ -103,7 +96,7 @@ describe('updateSettingsFile', () => {
   })
 
   it('refuses to write when the existing file is unparseable', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, '{ this is not json')
     await expect(updateSettingsFile(file, { model: 'opus' })).rejects.toThrow(/parse/i)
@@ -113,7 +106,7 @@ describe('updateSettingsFile', () => {
   it('serialises concurrent updates instead of interleaving them', async () => {
     // Sorbaállítás nélkül a három írás egymásba fésülődik, és a fájl
     // olvashatatlan JSON lesz — a pontos katasztrófa, amit ez a modul megelőz.
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ model: 'opus' }))
 
@@ -132,7 +125,7 @@ describe('updateSettingsFile', () => {
   })
 
   it('keeps writing after a failed update on the same file', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, '{ broken')
     await expect(updateSettingsFile(file, { a: 1 })).rejects.toThrow(/parse/i)
@@ -143,7 +136,7 @@ describe('updateSettingsFile', () => {
   })
 
   it('leaves no temp files behind', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await updateSettingsFile(file, { model: 'opus' })
     expect(await readdir(dir)).toEqual(['settings.json'])
@@ -152,7 +145,7 @@ describe('updateSettingsFile', () => {
 
 describe('transformSettingsFile', () => {
   it('passes the parsed file to the transform and writes its result', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ keep: 1, drop: 2 }))
 
@@ -166,7 +159,7 @@ describe('transformSettingsFile', () => {
 
   it('can remove nested keys, which a merge patch cannot express', async () => {
     // Ezért kell egyáltalán: az eltávolítás kulcsokat töröl, a mergeSettings csak ad.
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ env: { A: '1', B: '2' } }))
     await transformSettingsFile(file, () => ({ env: { A: '1' } }))
@@ -174,7 +167,7 @@ describe('transformSettingsFile', () => {
   })
 
   it('refuses to write an unparseable file and never calls the transform', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, '{ broken')
     let called = false
@@ -190,7 +183,7 @@ describe('transformSettingsFile', () => {
 
   it('shares one write queue with updateSettingsFile', async () => {
     // Közös sor nélkül egy telepítés és egy párhuzamos merge egymás írását dobná el.
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-'))
+    const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({}))
 
@@ -210,7 +203,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   it('refuses to write when the read fails with anything but ENOENT', async () => {
     // Egy foglalt fájl (EBUSY) nem „nincs meg": régen `{}` lett belőle, és a telepítés csak a mi
     // kulcsainkkal írta felül a felhasználó teljes beállítását.
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
     let called = false
@@ -230,7 +223,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
 
   it('retries an empty read and writes once the content shows up', async () => {
     // Egy másik író épp csonkolta a fájlt: a következő olvasás már a teljes tartalmat látja.
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
     let reads = 0
@@ -252,7 +245,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   })
 
   it('refuses to write a file that stays empty instead of treating it as {}', async () => {
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, '')
     let called = false
@@ -272,7 +265,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   it('redoes the write when another writer changed the file meanwhile, keeping its keys', async () => {
     // Claude Code vagy egy szerkesztő a mi olvasásunk és átnevezésünk között ír a fájlba.
     // Az átnevezés előtti stat ezt észreveszi, és az ő tartalmára dolgozunk újra.
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
     let interfered = false
@@ -293,7 +286,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   })
 
   it('gives up after a bounded number of conflicting writes, leaving the other writer\'s file', async () => {
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
     let round = 0
@@ -314,7 +307,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   })
 
   it('backs up the existing file once before the first change and never overwrites the backup', async () => {
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     const backup = `${file}${SETTINGS_BACKUP_SUFFIX}`
     await writeFile(file, ORIGINAL)
@@ -327,7 +320,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   })
 
   it('keeps a backup that already exists', async () => {
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     const backup = `${file}${SETTINGS_BACKUP_SUFFIX}`
     await writeFile(file, ORIGINAL)
@@ -340,14 +333,14 @@ describe('transformSettingsFile never loses the existing settings', () => {
 
   it('makes no backup for a file that did not exist', async () => {
     // Egy vadonatúj gépen nincs settings.json (ENOENT): ez továbbra is üres beállításként indul.
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await updateSettingsFile(file, { a: 1 })
     expect(await readdir(dir)).toEqual(['settings.json'])
   })
 
   it('neither writes nor backs up when the transform changes nothing', async () => {
-    const dir = await tempDir()
+    const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     const formatted = `${JSON.stringify({ a: 1 }, null, 2)}\n`
     await writeFile(file, formatted)

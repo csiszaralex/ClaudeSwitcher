@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { ProcessProbe } from '@claudeswitcher/core'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { scanSessions } from './scanner.js'
+import { tempDir } from './test-helpers.js'
 
 // A lock fájlok nem tárolnak `procStart`-ot, ezért a ProcessProbe `imageName`-je és
 // `startedAtMs`-e árulja el, ha egy elárvult lock pidjét időközben egy másik processz
@@ -22,7 +23,7 @@ const deadProbe: ProcessProbe = {
 }
 
 async function fixture(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'cs-scan-'))
+  const dir = await tempDir('cs-scan-')
   await mkdir(path.join(dir, 'sessions'), { recursive: true })
   await mkdir(path.join(dir, 'ide'), { recursive: true })
   await mkdir(path.join(dir, 'projects', 'encoded-alpha'), { recursive: true })
@@ -108,7 +109,6 @@ describe('scanSessions', () => {
 
   it('records when each lock file was last written', async () => {
     const dir = await fixture()
-    onTestFinished(() => rm(dir, { recursive: true, force: true }))
     const written = new Date('2026-10-01T08:00:00.000Z')
     await utimes(path.join(dir, 'ide', '50269.lock'), written, written)
     const { sessions } = await scanSessions(dir, aliveProbe)
@@ -118,7 +118,6 @@ describe('scanSessions', () => {
   it('drops a lock whose pid now belongs to a process started after the lock was written', async () => {
     // Pid-újrahasznosítás: a lock egy azóta kilépett VS Code-é, a pidet egy később indult Code.exe kapta.
     const dir = await fixture()
-    onTestFinished(() => rm(dir, { recursive: true, force: true }))
     const written = new Date('2026-10-01T08:00:00.000Z')
     await utimes(path.join(dir, 'ide', '50269.lock'), written, written)
     const recycled: ProcessProbe = { ...aliveProbe, startedAtMs: () => written.getTime() + 3_600_000 }

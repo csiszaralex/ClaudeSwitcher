@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { tempDir } from './test-helpers.js'
 import { findTranscriptPath, readActivityFromLines, tailLines } from './transcript.js'
 
 const assistantText = JSON.stringify({
@@ -156,7 +157,7 @@ describe('readActivityFromLines', () => {
 
 describe('findTranscriptPath', () => {
   async function projectsFixture(): Promise<string> {
-    const claudeDir = await mkdtemp(path.join(tmpdir(), 'cs-tx-'))
+    const claudeDir = await tempDir('cs-tx-')
     await mkdir(path.join(claudeDir, 'projects', 'some-encoded-name'), { recursive: true })
     return claudeDir
   }
@@ -180,14 +181,14 @@ describe('findTranscriptPath', () => {
   })
 
   it('returns undefined when there is no projects directory at all', async () => {
-    const claudeDir = await mkdtemp(path.join(tmpdir(), 'cs-tx-'))
+    const claudeDir = await tempDir('cs-tx-')
     expect(await findTranscriptPath(claudeDir, 'sid-1')).toBeUndefined()
   })
 })
 
 describe('tailLines', () => {
   async function fileWith(content: string): Promise<string> {
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-tail-'))
+    const dir = await tempDir('cs-tail-')
     const file = path.join(dir, 'transcript.jsonl')
     await writeFile(file, content, 'utf8')
     return file
@@ -220,7 +221,7 @@ describe('tailLines', () => {
     // A Windows-on `open()` egy könyvtárra is működik, és az stat().size nulla.
     // Az `if (length === 0)` korai visszatérés ezt kezeli, nem a catch blokk.
     // Ez a test azt bizonyítja, hogy a korai return működik.
-    const dir = await mkdtemp(path.join(tmpdir(), 'cs-tail-'))
+    const dir = await tempDir('cs-tail-')
     expect(await tailLines(dir)).toEqual([])
   })
 

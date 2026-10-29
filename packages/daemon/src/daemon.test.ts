@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, utimes, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { DAEMON_PROTOCOL, type ProcessProbe } from '@claudeswitcher/core'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { startDaemon, type Daemon } from './daemon.js'
+import { tempDir } from './test-helpers.js'
 
 const aliveProbe: ProcessProbe = {
   isAlive: () => true,
@@ -21,7 +21,7 @@ afterEach(async () => {
 })
 
 async function fixture(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'cs-daemon-'))
+  const dir = await tempDir('cs-daemon-')
   await mkdir(path.join(dir, 'sessions'), { recursive: true })
   await writeFile(
     path.join(dir, 'sessions', '100.json'),
