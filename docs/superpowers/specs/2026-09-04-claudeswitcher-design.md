@@ -1,9 +1,15 @@
 # ClaudeSwitcher — design
 
-**Dátum:** 2026-09-04 · **Revízió:** 2026-10-08
-**Állapot:** M1 kész és élesben használt. Az M2 design a §10 spike mérései alapján
-átdolgozva — jóváhagyásra vár.
+**Dátum:** 2026-09-04 · **Revízió:** 2026-10-30
+**Állapot:** az M1, az M2 és az M3 kész, élesben használt (§11). A 2026-10-25-i teljes
+repó-átnézés javításai is benne vannak: `docs/reviews/2026-10-25-repo-review.md`, „Eredmény”.
 **Platform:** Windows 11, VSCode + Claude Code extension (v2.1.259)
+
+> **A 2026-10-30-i revízió.** A spec igazítása a kódhoz az átnézés után: a rate limit
+> kivezetése (§3.5), a natív Nem/Esc mérése és a két hibás végű hook (§3.4), a core valódi
+> felosztása (§4, §7), a poll a fájlfigyelő helyett (§7), a billentyűk (§4), az eldobott
+> registry-rekord (§8), a natív tiltás jelei (§9), az Electron-keményítés (§7) és a
+> mérföldkövek állapota (§11).
 
 > **A 2026-10-08-i revízió lényege.** Az M2 spike (§10) megmutatta, hogy a VSCode
 > bővítményben a natív prompt **a hook tartása alatt is látszik**, és az első döntés nyer,
@@ -33,7 +39,8 @@ nem — vagyis pont a releváns halmazt hagyja ki.
    kivéve a terv jóváhagyását** (§10). A felhasználó kérésére bővült: kérdésre válasz és
    terv elutasítása visszajelzéssel is.
 4. Látni a session (5 órás) és a heti limit állását, és hogy mikor újul. — **❌ a VSCode
-   bővítményben nem teljesíthető** (§3.5); a felhasználó elengedte.
+   bővítményben nem teljesíthető** (§3.5); a felhasználó elengedte, a funkció 2026-10-27-én
+   kikerült.
 
 ### Nem célok
 
@@ -134,10 +141,22 @@ Az eredeti szöveg a dokumentációból dolgozott. Az alábbi a **mért** viselk
   VSCode-kattintás, telefon, vagy a hook `allow`/`deny`-ja — az utóbbi esetén a panel promptja
   eltűnik, és a tool ugyanabban a másodpercben lefut. A hook elengedése (üres 200) után a
   prompt megmarad és korlátlanul válaszolható (2,5 perccel később mérve).
-- **Natív döntéskor a Claude Code nem bontja a tartott HTTP kérést** — a daemon a kapcsolatból
-  nem tudja meg, hogy már eldőlt. Jelek: engedélyezéskor `PostToolUse` (ugyanaz a
-  `tool_use_id`), tiltáskor a session `Stop`-ja / `SessionEnd`-je, subagentnél a
-  `SubagentStop` (§7 `DecisionBroker`).
+- **Natív engedélyezéskor a Claude Code nem bontja a tartott HTTP kérést**, a daemon a
+  kapcsolatból nem tudja meg, hogy már eldőlt. A jel a `PostToolUse` (ugyanaz a `tool_use_id`),
+  vagy a `PostToolUseFailure`, ha az elindult tool hibával zárult. Ha a kör közben véget ér, a
+  session `Stop`-ja / `SessionEnd`-je, subagentnél a `SubagentStop` zárja a sort (§7
+  `DecisionBroker`).
+- **Natív Nem vagy Esc a VSCode-ban** (mérve, 2026-10-25): **egyetlen hook sem érkezik**, se
+  `Stop`, se `PostToolUse`, se `Notification`. A Claude Code ehelyett **megszakítja a tartott
+  `PermissionRequest` kapcsolatot**. A broker a megszakításra zárja a sort, és ha a sessionnek
+  nem maradt más függő kérése, a daemon ugyanabban a változásban törli a `Notification` okozta
+  várakozást is (`DecisionBroker` `DecisionChange.abortedSessionId`, `SessionStore`
+  `applyPending`). ~6 mp-en belüli natív válaszra `Notification` sem jön.
+- **`PostToolUseFailure` és `StopFailure`** (a hookdokumentáció szerint, 2026-10-25; a
+  fixture-ök a dokumentációból készültek, élőben nem rögzítettük őket). Az elsőt egy elindult,
+  de hibával zárult tool kapja a `PostToolUse` helyett, a másodikat egy API-hibával (rate limit,
+  overloaded) végződő kör a `Stop` helyett. Mindkettő a sikeres párja route-jára megy
+  (`hook-contract.ts` `HOOK_CONTRACT`).
 - **`Notification`** — csak akkor jön `permission_prompt`, ha a prompt **~6 mp-ig** függ; a
   gyorsan megválaszolt kérések nem jeleznek. A szöveg a **`message`** mezőben van
   („Claude needs your permission to use Bash"), nem `notification_text`-ben. `agent_id`
@@ -159,7 +178,17 @@ HTTP hook konfiguráció (változatlan):
 Alapértelmezett timeout 600 s. Mivel a natív prompt a timeout után is megmarad, a timeout
 csak azt korlátozza, meddig dönthet az app — azt nem, meddig dönthet a felhasználó.
 
-### 3.5 Limitek (dokumentált)
+### 3.5 Limitek (dokumentált, kivezetve)
+
+> **Döntés (Alex, 2026-10-27): a rate-limit funkció kikerült** (`ca9f528`). Az indok: a VSCode
+> bővítmény a statusLine-t nem futtatja (lent, mérve), a telepítés mégis beírt egy statusLine-t
+> a globális `~/.claude/settings.json`-ba, amely ráadásul abszolút úttal a repó build-kimenetére
+> mutatott. Egy olyan funkcióért írt a felhasználó globális konfigurációjába, amely a fő
+> platformon nem működik. Kikerült a `packages/statusline`, a daemon `/statusline` route-ja és a
+> renderer limitkijelzése. A telepítés és az eltávolítás a régi, `--claudeswitcher` jelölős
+> statusLine-t és az `env.CLAUDESWITCHER_PORT`-ot felismeri és kiveszi (`setup.ts`
+> `withoutOurStatusLine`), egy idegen statusLine-hoz nem nyúl. A lenti mérés a döntés alapja,
+> ezért marad.
 
 Az egyetlen forrás a statusLine script stdin-JSON-je:
 
@@ -183,8 +212,7 @@ némán posztolnia.
 `claude-vscode` session megkapta a telepített `env` változókat, mégsem érkezett egyetlen
 jelentés sem; a script közvetlenül meghívva hibátlanul eljutott a daemonig. Más helyi forrás
 nincs (`~/.claude` és hat projekt átirata átnézve). A limitkijelzés így csak terminálos
-sessionökből kaphat adatot; a funkció változtatás nélkül bent marad, és működni kezd, ha a
-bővítmény egyszer futtatja a statusLine-t. **A 4. cél ezen a platformon nem teljesíthető.**
+sessionökből kaphatott volna adatot. **A 4. cél ezen a platformon nem teljesíthető.**
 
 ### 3.6 Permission-szabályok írása (dokumentált)
 
@@ -223,26 +251,34 @@ A hook tartása alatt a prompt a telefonon is megjelenik, és onnan jóváhagyva
 A hivatalos extension (`anthropic.claude-code-2.1.259-win32-x64`) többek között:
 `claude-vscode.editor.openLast`, `claude-vscode.editor.open`,
 `claude-vscode.focus`, `claude-vscode.markSessionUnread`,
-`claude-vscode.renameSessionTab`. **Kívülről nem hívhatók** — ezért kell a saját
-companion extension, ami a saját ablakából hívja őket.
+`claude-vscode.renameSessionTab`. **Kívülről nem hívhatók.** ~~Ezért kell a saját
+companion extension, ami a saját ablakából hívja őket.~~ Nem kell: a tabfókuszt a bővítmény
+saját URI-kezelője adja (§7, „Tabfókusz”), a companion extension nem készült el (§11, M3).
 
 ## 4. Architektúra
 
 ```
 claudeswitcher/                    pnpm workspace + Nx
-├─ packages/core/          session-felderítés, transcript-parse, döntés-modell
-│                          — tiszta TS, IO nélkül
-├─ packages/daemon/        hook HTTP endpoint, WS hub, fájlfigyelők, DecisionBroker
+├─ packages/core/          session-felderítés, transcript-parse, döntés-modell, hook-szerződés
+│                          két belépési ponttal: `index` (Node) és `/browser` (Node-mentes)
+├─ packages/daemon/        hook HTTP endpoint, WS hub, poll, DecisionBroker
 ├─ apps/desktop/           Electron: tray, global hotkey, overlay
 ```
+
+**A core nem IO-mentes.** A `liveness.ts` (PowerShell-tartalék probe), a `transcript.ts`, a
+`settings-writer.ts` és a `paths.ts` `node:` modulokat használ. Ezért két belépési pontja van:
+a fő `index` mindent exportál, a `/browser` csak a `node:` importot nem tartalmazó modulokat
+(`browser.ts`: döntés-modell, guardok, hook-szerződés, protokoll, szabályszöveg, subagent,
+tool-részletek, eszköznevek). A renderer csak a `/browser`-t importálhatja értékként; ezt egy
+ESLint-szabály kényszeríti ki (`eslint.config.mjs`, `@typescript-eslint/no-restricted-imports`).
 
 (Az eredetileg tervezett `apps/vscode-ext` companion extension nem készült el, és nem is
 kell: a tabfókuszt a Claude Code saját URI-ja adja — lásd §7 és §11.)
 
 **Stack:** 100% TypeScript. Electron (nem Tauri — a memória-érv 64 GB mellett
 nem áll, és Tauri Rustot keverne egy egyébként tiszta TS repóba). A
-`SetForegroundWindow` / `ShowWindow` hívás `koffi`-val (prebuilt FFI, nincs
-node-gyp). Nx, mert az a repók alapértelmezése (axiom, hub) — négy csomaghoz nem
+`SetForegroundWindow` / `ShowWindowAsync` hívás `koffi`-val (prebuilt FFI, nincs
+node-gyp). Nx, mert az a repók alapértelmezése (axiom, hub) — három csomaghoz nem
 szükséges, de a belépési költség egy config fájl.
 
 **A daemon az Electron main processzében fut**, nem külön processzként: egy
@@ -250,20 +286,31 @@ tulajdonosa van a WS hubnak, egyszerűbb az életciklus. A modulhatár viszont
 megvan, ha később ki kell emelni.
 
 **Form factor:** tálcaikon + global hotkey overlay. Normálisan láthatatlan, a
-tray badge mutatja a várakozók számát; a hotkey előhoz egy kompakt listát
-(Enter = approve, Tab = ugrás, Esc = eltűnik).
+tray badge mutatja a várakozók számát; a hotkey előhoz egy kompakt listát.
+
+**Billentyűk** (`App.tsx` `onKey`, `decision-actions.ts` `SHORTCUTS`):
+- a nyilak a kijelölést mozgatják, az Esc elrejti az overlayt;
+- az Enter a kijelölt session ablakára (és tabjára) ugrik, kivéve egy fókuszált gombon,
+  `<summary>`-n vagy linken, ahol az elemé. A Tab is ugrik, de csak nyitott döntési panel nélkül:
+  a panelen a gombok között lép;
+- jóváhagyni a panel betűivel lehet: `tool` kérésnél A = engedélyez, D = tilt, P = projekt-szint,
+  G = gép-szint; `edit` kérésnél A, D és S = a session további szerkesztései. Kérdésre és tervre
+  nincs betű. Olvashatatlan kérésnél csak a D marad;
+- szövegmezőben a gépelés az övé. A betűk ismétlésre, egy frissen megjelent panelen és gépelés
+  után rövid ideig nem sülnek el (`key-guard.ts`).
 
 ## 5. Adatfolyam
 
-Négy bemenet táplál egy állapotgépet:
+Három bemenet táplál egy állapotgépet:
 
-1. **Felderítés** — `sessions/*.json` + `ide/*.lock` figyelése, liveness pid +
-   `procStart` alapján, párosítás `cwd` ⊂ `workspaceFolders`.
+1. **Felderítés** — `sessions/*.json` + `ide/*.lock` pollozása (§7, `POLL_INTERVAL_MS`), liveness
+   pid + `procStart` alapján, párosítás `cwd` ⊂ `workspaceFolders`.
 2. **Státusz** — transcript `.jsonl` tailelése → mit csinál épp.
 3. **Események** — hookok: `PermissionRequest` (döntést tart), `PostToolUse` /
-   `PreToolUse` (natív döntés észlelése), `Notification` (jelez), `Stop` / `SessionEnd`
-   (életciklus).
-4. **Limitek** — statusLine `rate_limits` (a VSCode bővítményben nem érkezik, §3.5).
+   `PostToolUseFailure` / `PreToolUse` / `SubagentStop` (natív döntés észlelése),
+   `Notification` (jelez), `Stop` / `StopFailure` / `SessionEnd` (életciklus). A teljes lista:
+   `hook-contract.ts` `HOOK_CONTRACT`.
+4. ~~**Limitek** — statusLine `rate_limits`~~: kivezetve (§3.5).
 
 ### A döntés életciklusa (M2, a spike után)
 
@@ -277,8 +324,9 @@ PermissionRequest ─→ PendingDecision, a HTTP válasz felfüggesztve
 
    ELSŐ DÖNTÉS NYER — három forrásból:
    ├─ az app (overlay)   → HTTP válasz: allow / deny (+ updatedInput / updatedPermissions)
-   ├─ VSCode / telefon   → a daemon a PostToolUse-ból (allow) vagy a Stop/SessionEnd/
-   │                       SubagentStop-ból (tiltás/megszakítás) tudja meg;
+   ├─ VSCode / telefon   → a daemon a PostToolUse/PostToolUseFailure-ből (allow), a
+   │                       megszakított kapcsolatból (natív Nem/Esc, §3.4), vagy a
+   │                       Stop/SessionEnd/SubagentStop-ból (a kör vége) tudja meg;
    │                       a függő kérésre üres 200 megy, amit a Claude Code eldob
    └─ elengedés          → 590 mp-nél üres 200 (a hook timeoutja 600); a sor
                            „döntés a VSCode-ban" állapotba vált, a prompt marad
@@ -311,7 +359,9 @@ ugyanúgy megkapja a promptot, és onnan is el lehet dönteni. Nincs mit védeni
 
 ## 7. Komponensek
 
-### `packages/core` — IO-mentes, a tesztelhető mag
+### `packages/core`, a tesztelhető mag
+
+Nem IO-mentes; a Node-mentes rész a `/browser` belépési ponton érhető el (§4).
 
 - **`SessionRegistry`** — `sessions/*.json` és `ide/*.lock` parse, liveness,
   párosítás. Bemenete már beolvasott fájltartalom + egy `ProcessProbe`
@@ -330,25 +380,40 @@ ugyanúgy megkapja a promptot, és onnan is el lehet dönteni. Nincs mit védeni
   - *szabály-előnézet*: `permission_suggestions` ⇄ szerkeszthető szöveg (`Bash(echo x *)`),
     érvénytelen szerkesztésnél hiba, nem csendes továbbengedés.
 - **`SettingsWriter`** — az M1-ben a hookok telepítésére marad (atomikus, sorba állított,
-  parse-biztos). **Az M2 nem használja szabályírásra**: azt a Claude Code végzi.
+  parse-biztos). **Az M2 nem használja szabályírásra**: azt a Claude Code végzi. Csak az
+  `ENOENT` számít hiányzó fájlnak, minden más olvasási hiba és a tartósan üres olvasás dob; az
+  átnevezés előtt `mtimeMs` és méret alapján ellenőrzi, hogy közben nem írt-e más a fájlba; az
+  első írás előtt egyszer `settings.json.claudeswitcher-backup` másolatot készít. A desktop
+  `config.ts` is ezen át ír.
+- **Közös modulok, egy tény egy helyen:** `hook-contract.ts` (a telepített hookok, route-jaik,
+  timeoutjuk és az elengedés ideje: `PERMISSION_RELEASE_AFTER_MS` a 600 mp-es timeoutból
+  számolva), `timings.ts` (`POLL_INTERVAL_MS`, `PROBE_TTL_MS`), `guards.ts` (bemenet-őrök),
+  `tool-names.ts` (eszköznév-halmazok), `protocol.ts` (`DAEMON_PROTOCOL`).
 
 ### `packages/daemon`
 
-- **`HookServer`** — csak loopback bind, bearer token headerben. Új route-ok:
-  `PermissionRequest` (tartott válasz), `PreToolUse`, `PostToolUse`.
+- **`HookServer`**: csak loopback bind, bearer token headerben, állandó idejű összevetéssel
+  (`token-compare.ts`). A route-ok útvonala a core `HOOK_CONTRACT`-jából jön; a
+  `PermissionRequest` tartott választ kap.
 - **`DecisionBroker`** (M2) — a `PendingDecision`-ök tulajdonosa: létrehozás, idempotens
   resolve, elengedés 590 mp-nél. **A rendszer egyetlen valódi konkurens állapotgépe**,
   ezért külön modul és külön tesztkészlet. Lease-időzítő nincs; a natív döntést a
   `tool_use_id` alapján ismeri fel: a `PreToolUse` (ami közvetlenül a `PermissionRequest`
   előtt jön, ugyanazzal a session/tool/bemenettel) adja a `tool_use_id`-t, a
-  `PostToolUse` ugyanazzal zárja le. Tiltás/megszakítás: a session `Stop`-ja vagy
-  `SessionEnd`-je, subagent kérésénél a `SubagentStop` (ugyanazzal az `agent_id`-vel).
+  `PostToolUse` (vagy a `PostToolUseFailure`) ugyanazzal zárja le. A párosítás kulcsa az
+  `agent_id`-t is tartalmazza (`callKey`). Natív Nem/Esc: a Claude Code megszakítja a tartott
+  kapcsolatot, a broker erre zár (§3.4). A kör vége: a session `Stop`-ja vagy `SessionEnd`-je,
+  subagent kérésénél a `SubagentStop` (ugyanazzal az `agent_id`-vel).
   **Nem** a következő `PreToolUse`: a Claude Code egy sessionen belül párhuzamosan is indíthat
   tool-hívásokat, és egy másik hívás `PreToolUse`-ja egy még függő, jogos kérést zárna le.
   Ami így nyitva marad, azt az 590 mp-es elengedés zárja.
 - ~~**`PresencePolicy`**~~ — **kikerült** (§6).
-- **`Watchers`** — fájlfigyelők debounce-szal.
-- **`Hub`** — WS, közös csatorna az overlay és az extensionök felé.
+- ~~**`Watchers`** — fájlfigyelők debounce-szal.~~ Fájlfigyelő nincs: a daemon
+  `POLL_INTERVAL_MS`-enként (3 mp) újraolvassa a registryt, a lockokat és a transcripteket, és
+  minden `Stop`/`StopFailure`/`SessionEnd` hook után azonnal is (`daemon.ts` `refresh`, egyszerre
+  csak egy fut). Minden sikeres szkennelés után `tick` megy az overlaynek.
+- **`Hub`**: WS az overlay felé (extension nincs). A tokent a kézfogás előtt ellenőrzi
+  (`verifyClient`), és minden üzenet hordozza a `protocol` verziót (`DAEMON_PROTOCOL`).
 
 ### `apps/desktop`
 
@@ -358,7 +423,18 @@ várakozóknál a tool és a bemenete. Az M2-ben a várakozó sor kinyitható: a
 szerinti gombok, a kérdésekhez opció-választó, a tervhez a teljes szöveg és
 visszajelzés-mező, a szabályhoz szerkeszthető előnézet. A billentyűzetes vezérlés
 megmarad (nyilak, Enter, Esc), az overlay a döntés után sem zárul be automatikusan, ha más
-is vár. ~~Limitsávok~~ — csak ha van adat (§3.5).
+is vár. ~~Limitsávok~~: kivezetve (§3.5).
+
+**Keményítés** (az átnézés 5. hulláma): az overlay nem navigálhat (`will-navigate` tiltva), új
+ablakot nem nyithat (`setWindowOpenHandler` → `deny`), és minden engedélykérést elutasít. Minden
+IPC-kezelő ellenőrzi, hogy a hívás a saját rendererünkből jött (`ipc-sender.ts`
+`isOverlaySender`). A renderer CSP-je egy helyen készül (`csp/renderer-csp.ts`): a WebSocket a
+pontos daemon-portra (`DAEMON_PORT`, 47821) szűkül, `object-src`, `base-uri` és `form-action`
+`'none'`, az `'unsafe-inline'` csak a dev szerveren.
+
+**Elavult telepítés.** Indításkor és minden telepítés vagy eltávolítás után a main összeveti a
+`settings.json` hookjait a `HOOK_CONTRACT`-tal (`setup.ts` `hookInstallState`). Ha hiányzik egy
+hook, a tálcamenü figyelmeztet: „Integráció elavult, telepítsd újra”. A fájlt ez csak olvassa.
 
 ### Tabfókusz (M3) — saját bővítmény nélkül
 
@@ -394,10 +470,13 @@ Vezérelv: **az app hibája soha ne blokkoljon egy sessiont.**
   felhasználó által választott opciókkal ad `allow`-t, `ExitPlanMode`-ra soha nem ad
   `allow`-t. Egy hibás besorolás tehát legfeljebb egy fölösleges sort jelent, nem egy
   válasz nélkül továbbengedett kérdést.
-- **Ismeretlen `sessions/*.json` séma verzióváltás után** → az érintett session
-  "ismeretlen" státusszal jelenik meg, de az approve továbbra is működik, mert
-  az a hook `session_id`-jára épül, nem a registryre. Szándékos rétegzés: a
-  törékeny felderítés bukása nem viszi magával a stabil részt.
+- **Ismeretlen `sessions/*.json` séma verzióváltás után** → ha egy kötelező mező (`pid`,
+  `sessionId`, `cwd`, `startedAt`) hiányzik vagy rossz típusú, a `parseSessionRecord` `null`-t
+  ad, és a scanner **eldobja a rekordot**, naplózás nélkül: a session nem jelenik meg a listában.
+  Ismeretlen státusz nincs (a `SessionStatus` csak `waiting`, `working`, `idle`). Az approve
+  továbbra is működik, mert az a hook `session_id`-jára épül, nem a registryre: a tartott kérés
+  saját sorként látszik (`rows.ts`, árva sorok). Szándékos rétegzés: a törékeny felderítés
+  bukása nem viszi magával a stabil részt.
 - Parse-olhatatlan settings fájl → nem írunk, hibát mutatunk; az Allow attól még
   lemegy.
 - Single instance: a második példány csak előhozza az overlay-t.
@@ -410,8 +489,10 @@ Vezérelv: **az app hibája soha ne blokkoljon egy sessiont.**
   payloadokkal** fixture-ként (Bash, Write, Edit, WebFetch, MCP, AskUserQuestion,
   ExitPlanMode, subagent).
 - **`DecisionBroker`** — konkurencia: app és natív döntés egyszerre; natív döntés a
-  `PostToolUse`-ból; tiltás a következő `PreToolUse`-ból; elengedés 590 mp-nél; kattintás
-  elengedés után; azonos bemenetű párhuzamos hívások ugyanabban a sessionben.
+  `PostToolUse`-ból és a `PostToolUseFailure`-ből; a kör vége a `Stop`/`SessionEnd`/
+  `SubagentStop`-ból; a hook kliensének megszakítása (natív Nem/Esc, §3.4); elengedés 590
+  mp-nél; kattintás elengedés után; azonos bemenetű párhuzamos hívások ugyanabban a sessionben,
+  a fő agent és egy subagent külön párosítva. A következő `PreToolUse` **nem** zár sort (§7).
 - **`HookServer`** — szerződéses teszt a **mért** hook JSON-sémákra (nem a dokumentáltakra:
   az M1-ben a dokumentációra hagyatkozás egy rossz mezőnevet eredményezett).
 - **Elfogadási teszt** — a spike forgatókönyvének mintájára, a felhasználó gépén.
@@ -475,8 +556,12 @@ kódolvasás megtalálta a Claude Code saját URI-kezelőjét (§7, „Tabfókus
 szerint a jó ablak előhozása után ez a pontos tabra vált. A tervezett companion extension
 emiatt elmaradt; a VSCode-on belüli döntési felület már korábban kikerült (2026-10-20).
 
-**Következő:** a subagent-átiratok olvasása (`subagents/agent-*.jsonl`), hogy a sor
-összefoglalója a futó subagent munkáját is mutassa, ne csak a fő session „Agent" eszközét.
+~~**Következő:** a subagent-átiratok olvasása (`subagents/agent-*.jsonl`).~~ Kész
+(2026-10-21, `0eee9b1`): a sor a futó subagent aktuális lépését is mutatja.
+
+**Teljes repó-átnézés (2026-10-25) és javításai.** ✅ Az első hat hullám kész, a 7. (Electron-frissítés)
+következik: `docs/reviews/2026-10-25-repo-review.md`, „Eredmény”. Az utána jövő funkciók
+ütemezése: `docs/backlog.md`.
 
 Az M1 halasztott tételei (a daemon blokkoló PowerShell-hívása, CSP-szűkítés stb.) a
 `.superpowers/sdd/…/progress.md` naplóban vannak; az M2 tervezésekor kell eldönteni, mi
@@ -489,7 +574,7 @@ kerül bele.
 | `sessions/` és `ide/` formátum nem dokumentált, verzióváltásnál törhet | a lista elromlik | §8 rétegzés: az approve független tőle; séma-validáció, graceful degradation |
 | A hookok a globális `~/.claude/settings.json`-be kerülnek → minden sessionre hatnak | szélesebb blast radius, mint az app | a natív prompt a tartás alatt is él (§3.4); a leállt vagy összeomló daemon mérten nem blokkol és nem tilt (§8) |
 | ~~Az interception elveszi a promptot a Remote Controltól~~ | — | mérve: nem veszi el (§3.7) |
-| statusLine bevezetése elrejti a footer hinteket | apró UX-veszteség a TUI-ban | a statusLine hasznosat is mutat |
+| ~~statusLine bevezetése elrejti a footer hinteket~~ | — | a statusLine kivezetve (§3.5) |
 | Túl bő szabály kerül be projekt- vagy gépszinten | tartós, nem szándékolt engedély | a szabály szerkeszthetően megjelenik, a gépszint külön megerősítést kér |
 | Az app „engedélyez" egy kérdést válasz nélkül | a session rossz feltevéssel megy tovább | a `DecisionModel` kérdésre csak kiválasztott opcióval ad `allow`-t |
 | A dokumentálatlan viselkedés egy Claude Code frissítéssel változik | egy funkció csendben elromlik | a nyers hook-napló (`CLAUDESWITCHER_HOOK_LOG`) gyorsan megmutatja; a szerződéses tesztek a mért payloadokra épülnek |
