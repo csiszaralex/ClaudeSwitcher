@@ -78,7 +78,7 @@ function createOverlay(): BrowserWindow {
     skipTaskbar: true,
     alwaysOnTop: true,
     webPreferences: {
-      preload: path.join(dirname, '../preload/index.js'),
+      preload: path.join(dirname, '../preload/index.cjs'),
       // Ezek az Electron alapértelmezései (a 45-ös típusdefiníciói szerint is). Szándékosan
       // kiírjuk őket: így a biztonsági állás önmagát dokumentálja, és egy jövőbeli
       // Electron-verzió megváltozott alapértéke sem tudja csendben meggyengíteni. A preload
