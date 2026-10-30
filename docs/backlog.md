@@ -23,7 +23,7 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
 - a spec elavult pontjainak javítása;
 - az M1 halasztott tételeinek áthozása ide;
 - „Eredmény” rész a review dokumentumba;
-- a régi, halott IDE token (`cc6b82e3-…`) kivétele a `docs/superpowers/plans/2026-09-04-claudeswitcher-m1-monitor.md`-ből;
+- a régi, halott IDE token kivétele a `docs/superpowers/plans/2026-09-04-claudeswitcher-m1-monitor.md`-ből;
 - a tesztekben maradt valódi helyi adatok (session-azonosítók, mappanevek, `win32:alex`) cseréje kitalált értékekre.
 
 **Utána:** 7. Electron-frissítés, majd a lenti ütemezés.

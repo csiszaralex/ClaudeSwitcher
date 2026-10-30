@@ -94,7 +94,7 @@ a VSCode hozhatja); a `busy` dolgozónak számít.
   "ideName": "Visual Studio Code",
   "transport": "ws",
   "runningInWindows": true,
-  "authToken": "cc6b82e3-…"
+  "authToken": "9602c76f-…"
 }
 ```
 
