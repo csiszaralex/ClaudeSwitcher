@@ -24,13 +24,7 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
 
 **Következő lépés:** 7. Electron-frissítés, majd a lenti ütemezés.
 
-**A munkamódszer:**
-- Egy implementáló agent dolgozik egyszerre, és `git add`-ig megy.
-- A vezető ellenőrzi a `pnpm verify`-vel, Alex élőben teszteli a pontos teszt-protokoll alapján.
-- OK után jön a commit, független változásonként külön commit. Közös fájloknál az agent `apply_step.sh` lépésenkénti változatokat készít.
-- Végül fast-forward merge a `main`-be.
-
-**Gépváltás után:** a `pnpm install` újratelepíti a pre-commit hookot.
+A munkamódszer a `CLAUDE.md`-ben, a telepítés (a pre-commit hookkal együtt) a `README.md`-ben van.
 
 ## Ütemezés
 
