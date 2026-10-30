@@ -283,7 +283,9 @@ szükséges, de a belépési költség egy config fájl.
 
 Verziók (2026-10-30, a review 7. hulláma): Electron 45 (Node 24), electron-vite 6, Vite 7
 (egy főverzió a buildben és a vitestben), `@vitejs/plugin-react` 5, React 19. A pontos
-verziókat a `package.json`-ok és a `pnpm-lock.yaml` rögzítik.
+verziókat a `package.json`-ok és a `pnpm-lock.yaml` rögzítik. A főprocessz ES modul, a
+preload CommonJS (sandboxolt preload nem lehet ES modul), a workspace csomagok a főprocessz
+bundle-jébe épülnek: `apps/desktop/electron.vite.config.ts`.
 
 **A daemon az Electron main processzében fut**, nem külön processzként: egy
 tulajdonosa van a WS hubnak, egyszerűbb az életciklus. A modulhatár viszont

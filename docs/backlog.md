@@ -88,8 +88,7 @@ Az M1 implementálásakor és átnézésekor „minor (deferred)” jelzéssel f
 - Teszthiányok: nincs teszt arra, hogy a hitelesítés egy route nélküli úton is előbb fut (`hook-server.test.ts`); arra, hogy egy dobó `onChange` figyelő után a többi is lefut (`session-store.ts`); a `scanner.test.ts` `aliveProbe` `'Code'` image neve hatástalan, mert a fixture lockjában nincs `ideName`; és a `100.abc123` testvérfájlos eset a `.json` szűrő nélkül is átmenne.
 
 **Desktop**
-- `electron.vite.config.ts` `BUNDLED_WORKSPACE_PACKAGES`: kézzel vezetett lista. Egy új ESM workspace-csomag, ami kimarad belőle, `ERR_REQUIRE_ESM`-et ad indításkor. Hangosan bukik, de csak egy kézi indítás veszi észre.
-- `electron.vite.config.ts`: a CJS főprocesszt és a `BUNDLED_WORKSPACE_PACKAGES`-t az Electron 33 Node 20-a tette szükségessé. Az Electron 45 Node 24-et hoz, ahol a `require(esm)` flag nélkül működik. Újra kell mérni, élő indítással, hogy az externalizált workspace csomagok így is betöltődnek-e, és ha igen, a lista elhagyható. A 7. hullám szándékosan nem változtatott rajta: egyszerre egy változó.
+- ~~`electron.vite.config.ts` `BUNDLED_WORKSPACE_PACKAGES`: kézzel vezetett lista; a CJS főprocessz újramérése az Electron 45-ön.~~ Kész (7/2. hullám): a főprocessz ES modul, a lista a desktop `package.json` `workspace:` függőségeiből jön (`workspaceDependencies`), és ha üres, a build megáll. A bundle csomagolási okból maradt, a mérés és az indoklás a config kommentjében.
 - `focus-window.ts`: a user32 deklarációkon nincs `__stdcall`. A koffi x64-en figyelmen kívül hagyja, csak 32 biten számítana.
 - `index.ts` `syncTray`: a tálca másodpercenként lekérdezi az állapotot (`setInterval(syncTray, 1000)`), ahelyett hogy feliratkozna a változásra.
 - `tray.ts`: az ikonok útja `../../resources`. Dev és preview módban jó, egy csomagolt appban nem (a telepítő a fenti ütemezésben a 8-as tétel).
