@@ -3,16 +3,16 @@ import { parseIdeLock, parseSessionRecord } from './session-registry.js'
 
 const REAL_SESSION = {
   pid: 21548,
-  sessionId: '02df22e9-0cb8-4e89-8124-fb3c597ee4f0',
-  cwd: 'p:\\01_Fullstack\\journal',
+  sessionId: '5f8f1fc5-b7f1-4a9a-a80c-c83aff747732',
+  cwd: 'p:\\proj\\alpha',
   startedAt: 1788447404737,
   procStart: '134329210033019891',
   version: '2.1.259',
   kind: 'interactive',
   entrypoint: 'claude-vscode',
-  name: 'journal-58',
+  name: 'alpha-58',
   nameSource: 'derived',
-  bridgeSessionId: 'session_01LtDxAq3W2y7XNbXfPk1nVF',
+  bridgeSessionId: 'session_01Qx7RmZ4kT9bWcN2vHs8LpD',
 }
 
 const REAL_LOCK = {
@@ -29,11 +29,11 @@ describe('parseSessionRecord', () => {
     const r = parseSessionRecord(REAL_SESSION)
     expect(r).not.toBeNull()
     expect(r!.pid).toBe(21548)
-    expect(r!.sessionId).toBe('02df22e9-0cb8-4e89-8124-fb3c597ee4f0')
-    expect(r!.cwd).toBe('p:\\01_Fullstack\\journal')
+    expect(r!.sessionId).toBe('5f8f1fc5-b7f1-4a9a-a80c-c83aff747732')
+    expect(r!.cwd).toBe('p:\\proj\\alpha')
     expect(r!.procStart).toBe('134329210033019891')
-    expect(r!.name).toBe('journal-58')
-    expect(r!.bridgeSessionId).toBe('session_01LtDxAq3W2y7XNbXfPk1nVF')
+    expect(r!.name).toBe('alpha-58')
+    expect(r!.bridgeSessionId).toBe('session_01Qx7RmZ4kT9bWcN2vHs8LpD')
   })
 
   it('tolerates a missing bridgeSessionId', () => {
@@ -72,8 +72,8 @@ describe('parseSessionRecord', () => {
 // A 2.1.301-es rekord (2026-10-20, mérve), a pipe útvonala rövidítve.
 const REAL_STATUS_SESSION = {
   pid: 13884,
-  sessionId: '86f00485-4b4d-4afc-b4c5-a7d0331739c1',
-  cwd: 'd:\\06_Bohem\\bohem-marketing',
+  sessionId: '10cd5459-1375-4c8e-8c6a-ce86a7dc2a6e',
+  cwd: 'd:\\proj\\beta',
   startedAt: 1792493825481,
   procStart: '134369674249683679',
   version: '2.1.301',
@@ -81,9 +81,9 @@ const REAL_STATUS_SESSION = {
   peerFeatures: ['notify_idle', 'artifact_yield'],
   kind: 'interactive',
   entrypoint: 'claude-vscode',
-  pidDomain: 'win32:alex',
+  pidDomain: 'win32:user',
   messagingSocketPath: '\\\\.\\pipe\\LOCAL\\cc-msg-x',
-  name: 'bohem-marketing-c2',
+  name: 'beta-c2',
   nameSource: 'derived',
   nameSince: 1792493825481,
   status: 'idle',

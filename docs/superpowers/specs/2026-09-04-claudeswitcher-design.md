@@ -52,8 +52,8 @@ Minden alábbi a gépen ellenőrizve, Claude Code v2.1.259 mellett.
 ```json
 {
   "pid": 21548,
-  "sessionId": "02df22e9-0cb8-4e89-8124-fb3c597ee4f0",
-  "cwd": "p:\\01_Fullstack\\journal",
+  "sessionId": "5f8f1fc5-b7f1-4a9a-a80c-c83aff747732",
+  "cwd": "p:\\proj\\alpha",
   "startedAt": 1788447404737,
   "procStart": "134329210033019891",
   "version": "2.1.259",
@@ -61,12 +61,12 @@ Minden alábbi a gépen ellenőrizve, Claude Code v2.1.259 mellett.
   "peerFeatures": ["notify_idle", "artifact_yield"],
   "kind": "interactive",
   "entrypoint": "claude-vscode",
-  "pidDomain": "win32:alex",
-  "messagingSocketPath": "\\\\.\\pipe\\LOCAL\\cc-msg-c8069e676803e36cb1544f862324e43c",
-  "name": "journal-58",
+  "pidDomain": "win32:user",
+  "messagingSocketPath": "\\\\.\\pipe\\LOCAL\\cc-msg-2c65229760e23d2e33060f185c17dad9",
+  "name": "alpha-58",
   "nameSource": "derived",
   "nameSince": 1788447404738,
-  "bridgeSessionId": "session_01LtDxAq3W2y7XNbXfPk1nVF"
+  "bridgeSessionId": "session_01Qx7RmZ4kT9bWcN2vHs8LpD"
 }
 ```
 

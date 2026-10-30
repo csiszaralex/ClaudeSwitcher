@@ -110,17 +110,17 @@ describe('POST /hooks/notification', () => {
     // minden várakozásnál üres volt, és az pont úgy nézett ki, mint ha nem jönne szöveg.
     const ev = events()
     await post(createHookApp(TOKEN, ev), '/hooks/notification', {
-      session_id: '672b0e7c-b1a1-488e-aca0-b44c545e515b',
+      session_id: '8d6721e2-3da6-4566-94fb-4030173389ee',
       transcript_path: 'C:\\x.jsonl',
-      cwd: 'P:\\05_Scripts\\BSZ-Parser',
-      prompt_id: 'cc77cf3d-310d-4a4b-9fa8-3638863009c8',
+      cwd: 'P:\\proj\\gamma',
+      prompt_id: '2acfe21c-7823-4bf5-beaa-d71cd419badb',
       hook_event_name: 'Notification',
       message: 'Claude needs your permission to use Bash',
       notification_type: 'permission_prompt',
     })
     expect(ev.onNotification).toHaveBeenCalledWith({
-      sessionId: '672b0e7c-b1a1-488e-aca0-b44c545e515b',
-      cwd: 'P:\\05_Scripts\\BSZ-Parser',
+      sessionId: '8d6721e2-3da6-4566-94fb-4030173389ee',
+      cwd: 'P:\\proj\\gamma',
       type: 'permission_prompt',
       text: 'Claude needs your permission to use Bash',
     })
