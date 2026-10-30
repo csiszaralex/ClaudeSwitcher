@@ -79,10 +79,10 @@ function createOverlay(): BrowserWindow {
     alwaysOnTop: true,
     webPreferences: {
       preload: path.join(dirname, '../preload/index.js'),
-      // Ezek az Electron 33 alapértelmezései. Szándékosan kiírjuk őket: így a
-      // biztonsági állás önmagát dokumentálja, és egy jövőbeli Electron-verzió
-      // megváltozott alapértéke sem tudja csendben meggyengíteni. A preload csak
-      // contextBridge-et és ipcRenderer-t használ, ami sandboxban is működik.
+      // Ezek az Electron alapértelmezései (a 45-ös típusdefiníciói szerint is). Szándékosan
+      // kiírjuk őket: így a biztonsági állás önmagát dokumentálja, és egy jövőbeli
+      // Electron-verzió megváltozott alapértéke sem tudja csendben meggyengíteni. A preload
+      // csak az `electron` modult tölti be (contextBridge, ipcRenderer), ami sandboxban is működik.
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

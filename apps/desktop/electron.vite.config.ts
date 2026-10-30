@@ -1,28 +1,27 @@
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
-import { defineConfig, externalizeDepsPlugin, type swcPlugin } from 'electron-vite'
+import { defineConfig } from 'electron-vite'
+import type { Plugin } from 'vite'
 import { injectCsp, rendererCsp } from './src/csp/renderer-csp.js'
 import { DAEMON_PORT } from './src/main/daemon-port.js'
 
 /**
- * A Vite `Plugin` típusa. A `vite` nem közvetlen függősége ennek a csomagnak (az electron-vite hozza),
- * így a pnpm alatt közvetlenül nem importálható; az electron-vite `swcPlugin`-je pont ezt adja vissza.
- */
-type Plugin = ReturnType<typeof swcPlugin>
-
-/**
- * A főprocessz CommonJS, és ez nem opcionális: az Electron 33 Node 20-at hoz, ahol a
- * CJS `require()` nem tud ES modult betölteni. A saját workspace csomagjaink viszont
- * ESM-only-k, ezért egy externalizált `require("@claudeswitcher/core")` induláskor
- * `ERR_REQUIRE_ESM`-mel hal meg. Ezt valódi Electron főprocesszben mértük le.
+ * A főprocessz CommonJS. Ezt az Electron 33-on mértük, valódi Electron főprocesszben: az a
+ * Node 20-at hozta, ahol a CJS `require()` nem tudott ES modult betölteni. A saját workspace
+ * csomagjaink viszont ESM-only-k, ezért egy externalizált `require("@claudeswitcher/core")`
+ * induláskor `ERR_REQUIRE_ESM`-mel halt meg.
  *
  * Megoldás: a workspace csomagokat kizárjuk az externalizálásból, így beépülnek a
  * bundle-be, a tranzitív függőségeikkel (hono, @hono/node-server, ws) együtt: azok nem
  * szerepelnek ennek az appnak a `dependencies`-ében, tehát nem externalizálódnak.
  *
- * Az ESM főprocessz nem járható alternatíva: az Electron 33 ESM-loadere elhasal, ha
- * egy ESM main CJS függőséget tölt be. Ezt is lemértük.
+ * Az ESM főprocessz az Electron 33-on nem volt járható: az ESM-loadere elhasalt, ha egy ESM
+ * main CJS függőséget töltött be. Ezt is lemértük.
+ *
+ * Az Electron 45 a Node 24-et hozza, ahol a `require(esm)` már flag nélkül működik. Hogy ezzel
+ * a kerülőút elhagyható-e, az Electron 45-ön még nincs lemérve (backlog: a CJS főprocessz
+ * újramérése), ezért marad.
  */
 const BUNDLED_WORKSPACE_PACKAGES = ['@claudeswitcher/core', '@claudeswitcher/daemon']
 
@@ -61,9 +60,13 @@ const RENDERER_ROOT = realpathSync.native(fileURLToPath(new URL('./src/renderer'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: BUNDLED_WORKSPACE_PACKAGES })],
-    build: { rollupOptions: { external: WS_OPTIONAL_NATIVE_DEPS } },
+    build: {
+      externalizeDeps: { exclude: BUNDLED_WORKSPACE_PACKAGES },
+      rollupOptions: { external: WS_OPTIONAL_NATIVE_DEPS },
+    },
   },
-  preload: { plugins: [externalizeDepsPlugin()] },
+  // Üresen is kell: kulcs nélkül az electron-vite a preloadot nem buildeli. A függőségeket
+  // alapból (`build.externalizeDeps`) externalizálja.
+  preload: {},
   renderer: { root: RENDERER_ROOT, plugins: [react(), rendererCspPlugin()] },
 })
