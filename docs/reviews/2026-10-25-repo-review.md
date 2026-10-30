@@ -318,3 +318,56 @@ Rangsorolva. Ezek nem hibák.
 Minden tétel a szokásos módon megy: egy implementáló agent, a vezető ellenőrzése, `git add`, Alex átnézése, commit.
 
 Az átnézők teljes jelentései helyben, a gitignorált `.superpowers/sdd/2026-10-25-repo-review/` alatt vannak.
+
+---
+
+## Eredmény (2026-10-30)
+
+A fenti szöveg az átnézés állapota, változatlanul. Ez a rész azt rögzíti, mi lett belőle. Minden hullám a szokásos módon ment (implementáló agent, a vezető ellenőrzése, Alex átnézése és élő tesztje, commit). A commit-tartományok git-tartományok, az első commitot is beleértve (`git log --oneline <tartomány>`). A tesztszámok a 6/4 után: core 187, daemon 168, desktop 351 + 1 kihagyott kézi mérés.
+
+**1. hullám, `63f59f9^..272d5ab`: billentyűzet és amit a panel mutat.**
+- Kész: az 1.1-től az 1.6-ig minden tétel. A billentyűvédelem tiszta függvényekben él (`key-guard.ts`: `SHORTCUT_ARM_MS` 400 ms, `TYPING_COOLDOWN_MS` 1,5 s, az `event.repeat` tiltva; `decision-actions.ts` `isActivationTarget`). Olvashatatlan kérésre a core minden allow-t elutasít, és csak `allow` szabályjavaslat jön át.
+- A tervhez képest: a `keyAction` helyett két modul lett, ugyanazokkal a feltételekkel. Két kis funkció is ide került: „N vár” a session során (`9ad62fe`) és a subagent neve a döntés fejlécében (`272d5ab`).
+
+**2. hullám, `46b1f68^..8326bd7`: a settings.json és az app saját fájljai.**
+- Kész: a 2.1, a 2.2 és a 2.3, a javítás minden pontja (csak az `ENOENT` hiány, az üres fájl nem hiány, `mtimeMs` + méret a `rename` előtt, egyszeri `settings.json.claudeswitcher-backup`, a `config.ts` és a `token.ts` a core íróján át, `isOurHook` a `DAEMON_PORT`-ra szűrve).
+- A tervhez képest: változatlan tartalmat az író nem ír ki, így biztonsági másolat sem készül egy nem-változáshoz.
+
+**3. hullám, `c8d7d04^..de28c98`: ablakkezelés és a main processz.**
+- Kész: a 3.1-től a 3.6-ig minden tétel. A `code` CLI `-r` nélkül fut, és ismerten nem `claude-vscode` sessionre egyáltalán nem; `IsIconic` + `ShowWindowAsync`; a hibás gyorsbillentyűnél az alapértelmezett él; a lock dobandó, ha a pid processze a lock utolsó írása után indult (`LOCK_MTIME_SLACK_MS` 5 s tűréssel).
+
+**4. hullám, `511751f^..ca05562`: lezáratlan sorok.**
+- Kész: 4.1, 4.2 (új kezelő nélkül, a sikeres pár route-ján), az elavult telepítés jelzése a tálcán, 4.4 (`agentId` a `callKey`-ben, `#recentPre` takarítása Post-nál). Ráadásként: egy engedélyre váró subagent címkéje megmarad (`ca05562`).
+- A 4.3 itt nem készült el, mert mérés kellett hozzá.
+
+**5. hullám, `7a256b9^..9f3fa37`: Electron-keményítés és a 4.3.**
+- Kész: az 5.1-től az 5.5-ig minden tétel. A CSP egy helyen készül (`renderer-csp.ts`), a pontos portra szűkül, és az `'unsafe-inline'` a buildből is kikerült, csak a dev szerveren marad.
+- **4.3, szándékosan más, mint a terv.** Alex mérése (2026-10-25, cs-spike): natív Nem vagy Esc után egyetlen hook sem jön, a Claude Code megszakítja a tartott kapcsolatot, és a broker erre már eddig is zárta a sort. A javasolt transcript-alapú (`tool_result`) mechanizmus ezért nem kellett, csak a várakozás törlése a megszakításkor (`9f3fa37`).
+
+**6/1, `ca9f528^..01e75f0`: a rate limit és a `chokidar` eltávolítása.**
+- Alex döntése a 2. rész 1. pontjára: a rate limit és a statusline kikerült, a régi statusLine-t a telepítés és az eltávolítás kiveszi.
+- A tervhez képest: a lábléc megmaradt (`status-bar`), mert az „ellenőrizve” életjel is ott van.
+
+**6/2, `c68cdaf^..5c288f0`: egy tény egy helyen.**
+- Kész: `hook-contract.ts` (az elengedés ideje a 600 s timeoutból számolva), `timings.ts`, `guards.ts`, `tool-names.ts`, a `DaemonState` és a preload API típusa egy helyről, `protocol: 1`.
+- Ismert maradék duplikáció: `decision.ts` `oneLine` és `REQUIRED_FIELD`.
+
+**6/3, `505ee3d^..89f7768`: a szigorúság kikényszerítése.**
+- Kész: `pnpm verify` és pre-commit hook (`simple-git-hooks`, nem husky), a szinkron gyerekprocessz tiltása, `knip`, a tsconfig szétválasztása (node, web, web-teszt), a config fájlok lintje. Útközben javult a `dev` mód (`8889dc3`, `89f7768`).
+- Nem készült: CI, mert a repónak nincs remote-ja.
+
+**6/4, `4d85c0c^..0116458`: tesztek.**
+- Kész: temp-könyvtár segéd takarítással, determinisztikus várások a fix alvások helyett, gyors leállítás kérés nélküli kapcsolatoknál, kitalált token az IDE lock fixture-ben.
+- Nem készült a 6.3-ból: a komponens-tesztek (happy-dom), a `registerIpcHandlers` és `createDaemonConnection` kiemelése, és a daemon→renderer szerződésteszt. Ezek a 4. rész 2. pontjában maradnak.
+
+**6/5: dokumentáció.**
+- `README.md`, projekt `CLAUDE.md`, a spec igazítása a kódhoz, a még nyitott M1 halasztott tételek a `docs/backlog.md` „Halasztott tételek” részébe, ez az „Eredmény” rész, a halott IDE token és a tesztekben maradt valódi helyi adatok cseréje.
+- Előtte, egy új gépen: `b42f2c7` (a renderer a valódi útjáról épül egy `subst` meghajtón), `6ea2ee8` (a PowerShell probe-tartalék 30 s időkorlátja), `6537a05` (bő időkorlát az élő Windows-teszteknek).
+
+**A 2. rész döntései.**
+1. Rate limit: eltávolítva (6/1).
+2. `Co-Authored-By`: a történet átírva, a `git log --all --grep=Co-Authored-By` ma üres.
+3. Csomagolás: a `docs/backlog.md` ütemezésében a 8-as tétel.
+4. `feat/m1-monitor`: törölve.
+
+**Ami a backlogba került:** a 4. rész fejlesztései nem készültek el, ezek itt maradnak. Az 1. pontból (diagnosztika) csak egy kis rész van meg: a tálca jelzi az elavult integrációt. Az utána jövő funkciók és az M1 nyitott halasztott tételei a `docs/backlog.md`-ben vannak. A 7. hullám (Electron-frissítés) a következő.
