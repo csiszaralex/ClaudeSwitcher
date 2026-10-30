@@ -57,7 +57,7 @@ function runningVSCodeWindowPid(): number | undefined {
         'Where-Object { $_.MainWindowHandle -ne 0 } | ' +
         'Select-Object -First 1 -ExpandProperty Id',
     ],
-    { encoding: 'utf8', windowsHide: true, timeout: 10_000 },
+    { encoding: 'utf8', windowsHide: true, timeout: 30_000 },
   ).trim()
   const pid = Number.parseInt(out, 10)
   return Number.isNaN(pid) ? undefined : pid
@@ -92,7 +92,8 @@ describe('findMainWindow', () => {
       return
     }
     expect(countMainWindows(pid)).toBeGreaterThan(0)
-  })
+    // A segéd egy valódi PowerShellt indít (lásd `runningVSCodeWindowPid`): terhelés alatt lassú.
+  }, 40_000)
 })
 
 describe('scanWindowsForPid', () => {
@@ -172,7 +173,9 @@ describe('quoteForCli', () => {
     for (const folder of folders) {
       expect(await roundTrip(folder)).toBe(folder)
     }
-  })
+    // Hat valódi `node` indítás egymás után: egy terhelt vagy frissen telepített gépen (víruskereső,
+    // hideg cache) a teljes futás alatt az alap 5 mp kevés volt, egyedül 1,2 mp (mérve 2026-10-30).
+  }, 20_000)
 })
 
 const SESSION_ID = '0b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f'
