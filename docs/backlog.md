@@ -2,9 +2,9 @@
 
 Alex kérései 2026-10-28-án, a döntéseivel együtt. A hibajavító kör (6–8. hullám) a `docs/reviews/2026-10-25-repo-review.md` szerint fut, ez a fájl az utána jövő munkáé.
 
-## Hol tartunk (2026-10-29)
+## Hol tartunk (2026-10-30)
 
-A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási köréből ezek készültek el. Mind a `main`-en vannak, Alex élő tesztjével együtt.
+A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási köréből ezek készültek el. Az 1. hullámtól a 6/4-ig mind a `main`-en vannak, Alex élő tesztjével együtt. A részletes eredmény hullámonként: a review „Eredmény” része.
 
 | Hullám | Tartalom | Commitok |
 |---|---|---|
@@ -17,16 +17,12 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
 | 6/2 | egy tény egy helyen (hook-szerződés, időzítések, guardok, eszköznevek, közös típusok, protokollverzió) | `c68cdaf`–`5c288f0` |
 | 6/3 | `pnpm verify` + pre-commit hook, szinkron spawn tiltás, knip, tsconfig-szétválasztás, dev mód javítása | `505ee3d`–`89f7768` |
 | 6/4 | tesztek takarítása, determinisztikus várások, gyors leállítás, kitalált token a fixture-ben | `4d85c0c`–`0116458` |
+| gép | új gépen: a renderer build `subst` meghajtón, 30 s a PowerShell probe-tartaléknak, bő időkorlát az élő Windows-teszteknek | `b42f2c7`, `6ea2ee8`, `6537a05` |
+| 6/5 | dokumentáció: README, projekt CLAUDE.md, a spec igazítása a kódhoz, az M1 halasztott tételei ide, „Eredmény” a review-ba, a halott IDE token és a tesztekben maradt valódi helyi adatok cseréje | a `docs/refresh` ág |
 
-**Következő lépés: 6/5, dokumentáció.** Ez még nem kezdődött el. A brief a gitignorált `.superpowers/sdd/2026-10-25-repo-review/w6e-docs-brief.md` fájlban van, ha átjön a másik gépre. A tartalma röviden:
-- README és projekt CLAUDE.md;
-- a spec elavult pontjainak javítása;
-- az M1 halasztott tételeinek áthozása ide;
-- „Eredmény” rész a review dokumentumba;
-- a régi, halott IDE token kivétele a `docs/superpowers/plans/2026-09-04-claudeswitcher-m1-monitor.md`-ből;
-- a tesztekben maradt valódi helyi adatok (session-azonosítók, mappanevek, egy helyi felhasználónév) cseréje kitalált értékekre.
+**A 6/5 kész.** Ezzel a review 6. hulláma lezárult.
 
-**Utána:** 7. Electron-frissítés, majd a lenti ütemezés.
+**Következő lépés:** 7. Electron-frissítés, majd a lenti ütemezés.
 
 **A munkamódszer:**
 - Egy implementáló agent dolgozik egyszerre, és `git add`-ig megy.
@@ -56,7 +52,7 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
    - Be- és kikapcsolás: a **Shift+A** legalább 3 mp-ig nyomva tartva.
    - A bekapcsolt sessiont a háttere jelzi: zöld.
 2. **Új jóváhagyandóra ugrás.** A kijelölés rá ugrik, de csak akkor, ha a kijelölt sornál épp nincs döntés. Gépelés vagy olvasás közben nem rántja el.
-3. **Elengedettre ne ugorjon vissza.** Ez hiba: a `selection.ts` `firstWaiting` az elengedett (590 mp utáni) kérést is várakozónak veszi. Elengedettre csak akkor ugorjon, ha más nem vár.
+3. **Hiba: elengedettre ne ugorjon vissza.** A `selection.ts` `firstWaiting` az elengedett (590 mp utáni) kérést is várakozónak veszi. Elengedettre csak akkor ugorjon, ha más nem vár.
 4. **Saját szabálymotor és AI.** Két részből áll:
    - (a) Algoritmikus jóváhagyás a Claude Code szabályainál kifejezőbb szabályokkal. Példa: törölhet, de csak a saját projektmappáján belül. Ez a `Bash(rm ./*)` szerű prefix-egyezésnél szigorúbb, útvonal-alapú ellenőrzés.
    - (b) Az AI elmagyarázza a parancsot, és kockázat szerint jelöli. Ezt kérésre kéri le az app, nem minden kérésnél.
@@ -71,7 +67,7 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
    - A Space vagy az Enter kijelöl.
    - A Ctrl+Enter küld.
    - Főleg a kérdésekhez kell, ott ma nincs betűjel.
-9. **„vagy telefonon” csak Remote Control mellett.** Ez hiba: a `session-marker.ts` és a `DecisionPanel.tsx` mindig kiírja.
+9. **Hiba: „vagy telefonon” csak Remote Control mellett.** A `session-marker.ts` és a `DecisionPanel.tsx` mindig kiírja.
 10. **Villogó tálcaikon 9 perc után.** Pirosan villog, ha bármely kérés 540 mp-nél régebben vár. Az app 590 mp-nél engedi el a kérést.
 11. **Hosszú parancsnál az indoklás görgetés nélkül.** A leírás a parancs fölé kerül.
 12. **Fókusz vissza bezáráskor.** Megnyitáskor az app megjegyzi az előtérben lévő ablakot, Esc-re oda adja vissza. Enter (ugrás) után nem.
