@@ -266,12 +266,20 @@ export function parsePowerShellSnapshot(output: string): ProcessSnapshot {
   }
 }
 
+/**
+ * A PowerShell-pillanatkép időkorlátja. Egy terheletlen gépen is lehet lassú: 2026-10-30-án egy
+ * frissen beállított gépen egyedül 5,9 mp volt (az előzőn ~0,3 mp), a teljes tesztfutás terhelése
+ * alatt pedig a korábbi 10 mp-et is túllépte. Az `execFile` aszinkron, a hosszabb korlát tehát semmit
+ * nem tart fel, csak azt dönti el, mikor adjuk fel.
+ */
+export const POWERSHELL_SNAPSHOT_TIMEOUT_MS = 30_000
+
 function runPowerShellSnapshot(): Promise<ProcessSnapshot> {
   return new Promise((resolve, reject) => {
     execFile(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-Command', SNAPSHOT_SCRIPT],
-      { encoding: 'utf8', windowsHide: true, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 },
+      { encoding: 'utf8', windowsHide: true, timeout: POWERSHELL_SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
       (error, stdout) => {
         if (error !== null) reject(new Error(`PowerShell snapshot failed: ${error.message}`, { cause: error }))
         else resolve(parsePowerShellSnapshot(stdout))

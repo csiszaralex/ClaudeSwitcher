@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   LOCK_MTIME_SLACK_MS,
+  POWERSHELL_SNAPSHOT_TIMEOUT_MS,
   createSnapshotProbe,
   createWin32ProcessProbe,
   fileTimeToEpochMs,
@@ -384,28 +385,31 @@ describe('parsePowerShellSnapshot', () => {
 
 describe('createWin32ProcessProbe', () => {
   const onWindows = process.platform === 'win32'
+  // Valódi PowerShellt indít: a teszt a pillanatkép saját korlátjánál tovább várhat, hogy egy lassú
+  // gépen a probe döntsön (hiba vagy siker), ne a teszt időkorlátja.
+  const LIVE_TEST_TIMEOUT_MS = POWERSHELL_SNAPSHOT_TIMEOUT_MS + 10_000
 
   it.skipIf(!onWindows)('reports the current process as alive after a refresh', async () => {
     const probe = createWin32ProcessProbe()
     await probe.refresh()
     expect(probe.isAlive(process.pid)).toBe(true)
-  }, 20_000)
+  }, LIVE_TEST_TIMEOUT_MS)
 
   it.skipIf(!onWindows)('reports an implausible pid as dead', async () => {
     const probe = createWin32ProcessProbe()
     await probe.refresh()
     expect(probe.isAlive(999_999_998)).toBe(false)
-  }, 20_000)
+  }, LIVE_TEST_TIMEOUT_MS)
 
   it.skipIf(!onWindows)('returns an image name for the current process', async () => {
     const probe = createWin32ProcessProbe()
     await probe.refresh()
     expect(probe.imageName(process.pid)).toMatch(/\S/)
-  }, 20_000)
+  }, LIVE_TEST_TIMEOUT_MS)
 
   it.skipIf(!onWindows)('rejects the current pid when the start time disagrees', async () => {
     const probe = createWin32ProcessProbe()
     await probe.refresh()
     expect(probe.isAlive(process.pid, 'not-a-filetime')).toBe(false)
-  }, 20_000)
+  }, LIVE_TEST_TIMEOUT_MS)
 })
