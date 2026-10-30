@@ -281,6 +281,10 @@ nem áll, és Tauri Rustot keverne egy egyébként tiszta TS repóba). A
 node-gyp). Nx, mert az a repók alapértelmezése (axiom, hub) — három csomaghoz nem
 szükséges, de a belépési költség egy config fájl.
 
+Verziók (2026-10-30, a review 7. hulláma): Electron 45 (Node 24), electron-vite 6, Vite 7
+(egy főverzió a buildben és a vitestben), `@vitejs/plugin-react` 5, React 19. A pontos
+verziókat a `package.json`-ok és a `pnpm-lock.yaml` rögzítik.
+
 **A daemon az Electron main processzében fut**, nem külön processzként: egy
 tulajdonosa van a WS hubnak, egyszerűbb az életciklus. A modulhatár viszont
 megvan, ha később ki kell emelni.

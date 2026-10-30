@@ -19,6 +19,14 @@ pnpm install
 
 A `prepare` szkript a `simple-git-hooks`-szal telepíti a pre-commit hookot, ami minden commit előtt a `pnpm verify`-t futtatja.
 
+Az Electron binárisa nem jön le a `pnpm install`-lal: a 42-es főverzió óta az `electron` csomag telepítéskor nem tölti le (Electron breaking changes, 42.0). Egyszer, az app első indítása előtt:
+
+```sh
+pnpm --filter @claudeswitcher/desktop exec install-electron
+```
+
+Enélkül a `dev` és a `start` „Electron uninstall” hibával áll meg. A buildhez és a `pnpm verify`-hoz nem kell.
+
 ```sh
 pnpm verify
 ```

@@ -89,6 +89,7 @@ Az M1 implementálásakor és átnézésekor „minor (deferred)” jelzéssel f
 
 **Desktop**
 - `electron.vite.config.ts` `BUNDLED_WORKSPACE_PACKAGES`: kézzel vezetett lista. Egy új ESM workspace-csomag, ami kimarad belőle, `ERR_REQUIRE_ESM`-et ad indításkor. Hangosan bukik, de csak egy kézi indítás veszi észre.
+- `electron.vite.config.ts`: a CJS főprocesszt és a `BUNDLED_WORKSPACE_PACKAGES`-t az Electron 33 Node 20-a tette szükségessé. Az Electron 45 Node 24-et hoz, ahol a `require(esm)` flag nélkül működik. Újra kell mérni, élő indítással, hogy az externalizált workspace csomagok így is betöltődnek-e, és ha igen, a lista elhagyható. A 7. hullám szándékosan nem változtatott rajta: egyszerre egy változó.
 - `focus-window.ts`: a user32 deklarációkon nincs `__stdcall`. A koffi x64-en figyelmen kívül hagyja, csak 32 biten számítana.
 - `index.ts` `syncTray`: a tálca másodpercenként lekérdezi az állapotot (`setInterval(syncTray, 1000)`), ahelyett hogy feliratkozna a változásra.
 - `tray.ts`: az ikonok útja `../../resources`. Dev és preview módban jó, egy csomagolt appban nem (a telepítő a fenti ütemezésben a 8-as tétel).
