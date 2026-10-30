@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin, type swcPlugin } from 'electron-vite'
 import { injectCsp, rendererCsp } from './src/csp/renderer-csp.js'
@@ -49,11 +51,19 @@ function rendererCspPlugin(): Plugin {
   }
 }
 
+/**
+ * A renderer gyökere a valódi (feloldott) útvonalon. Egy `subst`-tal leképezett meghajtón (pl. `P:` → `D:\P`)
+ * a Vite az `index.html`-t a valódi útvonalra oldja fel, a gyökeret viszont a leképezettre hagyná: a
+ * kettő közti relatív út abszolút lesz, és a build elbukik. Mérve 2026-10-30, egy `subst` P: meghajtón.
+ * Az útvonal a config fájlhoz képest számít, nem a munkakönyvtárhoz: a knip a repó gyökeréből tölti be.
+ */
+const RENDERER_ROOT = realpathSync.native(fileURLToPath(new URL('./src/renderer', import.meta.url)))
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: BUNDLED_WORKSPACE_PACKAGES })],
     build: { rollupOptions: { external: WS_OPTIONAL_NATIVE_DEPS } },
   },
   preload: { plugins: [externalizeDepsPlugin()] },
-  renderer: { plugins: [react(), rendererCspPlugin()] },
+  renderer: { root: RENDERER_ROOT, plugins: [react(), rendererCspPlugin()] },
 })
