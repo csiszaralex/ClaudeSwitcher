@@ -563,9 +563,7 @@ emiatt elmaradt; a VSCode-on belüli döntési felület már korábban kikerült
 következik: `docs/reviews/2026-10-25-repo-review.md`, „Eredmény”. Az utána jövő funkciók
 ütemezése: `docs/backlog.md`.
 
-Az M1 halasztott tételei (a daemon blokkoló PowerShell-hívása, CSP-szűkítés stb.) a
-`.superpowers/sdd/…/progress.md` naplóban vannak; az M2 tervezésekor kell eldönteni, mi
-kerül bele.
+Az M1 még nyitott halasztott tételei a `docs/backlog.md` „Halasztott tételek” részében vannak.
 
 ## 12. Kockázatok
 

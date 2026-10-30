@@ -79,3 +79,35 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
 **+1. Mobil felület** (PWA vagy APK, WireGuardon át). Csak megjegyzés, a teljes app után kerül sorra.
 - Ehhez a daemont ki kellene nyitni a hálózatra, ami hitelesítést, TLS-t és interfész-korlátozást igényel.
 - Előtte tisztázni kell, mi hiányzik a Claude saját Remote Control-jából.
+
+## Halasztott tételek
+
+Az M1 implementálásakor és átnézésekor „minor (deferred)” jelzéssel félretett tételek, amelyek 2026-10-30-án a kód szerint még nyitottak. Korábban csak a gitignorált `.superpowers/sdd/2026-09-04-claudeswitcher-m1-monitor/progress.md` naplóban éltek. Ami azóta javult (például az állandó idejű tokenösszevetés, a CSP-szűkítés, az aszinkron probe, a `before-quit` sorrend), vagy a rate limittel együtt kikerült, az nincs itt. Mind kicsi, és egyik sem hiba, amibe ma bele lehet futni, hacsak a sor külön nem mondja.
+
+**Core**
+- `transcript.ts` `tailLines`: nem nézi a `handle.read` `bytesRead` értékét, egyetlen teljes olvasást feltételez. Helyi lemezen ez igaz, hálózati megosztáson nem garantált: egy rövid olvasás NUL bájtokkal zárná az utolsó sort.
+- `types.ts` `SessionActivity.runningTool` egyetlen szöveg: egy üzenet több párhuzamos `tool_use` blokkjából csak az utolsó látszik.
+- `liveness.ts` `bestWindow`: két azonos hosszú illeszkedő munkaterület-mappánál az első lock nyer (szigorú `>`). Determinisztikus, de nincs dokumentálva és tesztelve.
+- `liveness.ts` `normalize`: a puszta meghajtógyökérről (`C:\`) leveszi az elválasztót (`c:`). Az `isWithin` így is helyesen dönt, de az alak meglepő.
+- `settings-writer.ts` `writeQueues`: a kulcs a `path.resolve`, kis- és nagybetű-normalizálás nélkül. Ugyanannak a Windows-útnak két eltérő írásmódja két külön sort kapna. Ma minden hívó ugyanúgy képzi az utat.
+- `settings-writer.ts` `writeFileAtomic`: a `rename` nem próbálkozik újra, ha egy víruskereső vagy szerkesztő épp fogja a `settings.json`-t (EBUSY, EPERM). A telepítés ilyenkor hibával áll meg, a fájl érintetlen.
+
+**Daemon**
+- `scanner.ts` `readLocks`: a `Number.parseInt` a lock nevének végén lévő szemetet elfogadja (`50269abc.lock` → 50269).
+- `hub.ts`: a WebSocket a tokent az URL query-ben kapja (`?token=`), mert a böngésző WebSocket API-ja nem tud fejlécet küldeni. A loopback korlátozza a kitettséget; egy sikertelen kézfogás URL-jét a Chromium a renderer konzoljára írja. Ezt a review 4. részének 4. pontja (állapot IPC-n) szüntetné meg.
+- Teszthiányok: nincs teszt arra, hogy a hitelesítés egy route nélküli úton is előbb fut (`hook-server.test.ts`); arra, hogy egy dobó `onChange` figyelő után a többi is lefut (`session-store.ts`); a `scanner.test.ts` `aliveProbe` `'Code'` image neve hatástalan, mert a fixture lockjában nincs `ideName`; és a `100.abc123` testvérfájlos eset a `.json` szűrő nélkül is átmenne.
+
+**Desktop**
+- `electron.vite.config.ts` `BUNDLED_WORKSPACE_PACKAGES`: kézzel vezetett lista. Egy új ESM workspace-csomag, ami kimarad belőle, `ERR_REQUIRE_ESM`-et ad indításkor. Hangosan bukik, de csak egy kézi indítás veszi észre.
+- `focus-window.ts`: a user32 deklarációkon nincs `__stdcall`. A koffi x64-en figyelmen kívül hagyja, csak 32 biten számítana.
+- `index.ts` `syncTray`: a tálca másodpercenként lekérdezi az állapotot (`setInterval(syncTray, 1000)`), ahelyett hogy feliratkozna a változásra.
+- `tray.ts`: az ikonok útja `../../resources`. Dev és preview módban jó, egy csomagolt appban nem (a telepítő a fenti ütemezésben a 8-as tétel).
+- `setup.ts` `removeIntegration`: egy már meglévő, de üres `hooks: {}` vagy `env: {}` eltávolításkor törlődik, így az oda-vissza út erre az alakra nem bájtazonos. Szándékos: a tiszta függvény nem tudja, hogy a tároló korábban is létezett, és a fordított döntés minden hook nélküli felhasználónál `hooks: {}`-t hagyna maga után.
+- `setup.ts` `applyIntegration`: a megtartott idegen bejegyzéseket referenciaként osztja meg a bemenettel. Ma semmi nem dolgozza utólag fel az eredményt; ha valami egyszer fogja, a hívó objektumát mutálná.
+- `setup.ts` `isOurStatusLine`: egy saját status line-wrapper, amelynek a parancsa tartalmazza a `--claudeswitcher` jelölőt, a mienknek számít, és a telepítés vagy az eltávolítás kiveszi.
+
+**Eszközlánc**
+- `pnpm-workspace.yaml` `allowBuilds`: az `electron`, `esbuild`, `koffi` és `nx` engedélyének nincs indoklása (csak a `simple-git-hooks: false`-nak van).
+- `@types/node` a gyökér mellett a `packages/core` és az `apps/desktop` `package.json`-jában is szerepel.
+
+Az M1 elfogadási tesztjéből egy pont maradt el, az alvás/ébredés mérése. Ez a review 4. részének 7. pontjában van.
