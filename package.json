@@ -21,7 +21,7 @@
   "devDependencies": {
     "@types/node": "^24.19.2",
     "eslint": "^10.13.0",
-    "knip": "^6.43.0",
+    "knip": "^6.44.0",
     "nx": "^24.0.2",
     "simple-git-hooks": "^2.14.0",
     "typescript": "^6.0.3",
