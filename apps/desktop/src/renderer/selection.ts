@@ -35,26 +35,43 @@ interface SessionLike {
 interface DecisionLike {
   id: string
   sessionId: string
+  /** Az app már elengedte (`PERMISSION_RELEASE_AFTER_MS`): innen csak a VSCode dönthet. */
+  released: boolean
 }
 
 /**
- * Az első várakozó session azonosítója a lista sorrendjében. A daemon a várakozókat előre, a
- * legrégebben várót legelőre rendezi, tehát ez a legrégebben váró. Egy tartott döntés is
- * várakozásnak számít, akkor is, ha a session `status`-a még nem követte.
+ * Az első várakozó session azonosítója a lista sorrendjében, két szinten. A daemon a várakozókat
+ * előre, a legrégebben várót legelőre rendezi, tehát szinten belül az első a legrégebben váró.
+ *
+ * 1. szint: az app még eldönthet valamit. Van nem elengedett döntése, vagy nincs tartott döntése,
+ *    de a `status`-a `waiting` (Notification-várakozás, pl. kérdés a terminálban). Egy tartott
+ *    döntés akkor is várakozás, ha a `status` még nem követte.
+ * 2. szint: minden tartott döntése elengedett. A daemon az ilyet is `waiting`-nek mutatja (a
+ *    `#pending` az elengedett döntést is tartja), ezért a `status` itt nem számít: ide csak akkor
+ *    esünk vissza, ha az 1. szinten senki nincs.
  */
 function firstWaiting(
   sessions: readonly SessionLike[],
   decisions: readonly DecisionLike[],
   skip?: string,
 ): string | undefined {
-  const held = new Set(decisions.map((d) => d.sessionId))
-  return sessions.find((s) => s.sessionId !== skip && (s.status === 'waiting' || held.has(s.sessionId)))
-    ?.sessionId
+  const held = new Set<string>()
+  const decidable = new Set<string>()
+  for (const d of decisions) {
+    held.add(d.sessionId)
+    if (!d.released) decidable.add(d.sessionId)
+  }
+  const candidates = sessions.filter((s) => s.sessionId !== skip)
+  const first = candidates.find(
+    (s) => decidable.has(s.sessionId) || (!held.has(s.sessionId) && s.status === 'waiting'),
+  )
+  return (first ?? candidates.find((s) => held.has(s.sessionId)))?.sessionId
 }
 
 /**
- * Kijelölés az overlay megjelenésekor: a legrégebben várakozó session — a felhasználó
- * munkamenete „megnyitom, eldöntöm a legrégebbit". Ha senki nem vár, marad a mostani.
+ * Kijelölés az overlay megjelenésekor: a legrégebben várakozó session, a felhasználó
+ * munkamenete „megnyitom, eldöntöm a legrégebbit". Elengedett kérésre csak akkor ugrik, ha más nem
+ * vár (lásd `firstWaiting`). Ha senki nem vár, marad a mostani.
  */
 export function selectOnShow(
   sessions: readonly SessionLike[],
@@ -76,9 +93,10 @@ export interface AfterDecision {
  *
  * A `sessions` és a `decisions` lehet egy lépéssel lemaradva: a döntés válasza és a daemon
  * következő állapota külön utazik. Ezért az eldöntött kérést azonosító szerint kizárjuk, és az
- * eldöntött sessiont sem tekintjük várakozónak — a daemon úgyis a nem-várók tetejére teszi.
- * Kivétel, ha ugyanannak a sessionnek van MÁSIK függő kérése (párhuzamos tool-hívások): akkor
- * ott maradunk, és el sem rejtőzünk, mert van még mit eldönteni.
+ * eldöntött sessiont sem tekintjük várakozónak, a daemon úgyis a nem-várók tetejére teszi.
+ * Kivétel, ha ugyanannak a sessionnek van MÁSIK, még eldönthető kérése (párhuzamos tool-hívások): akkor
+ * ott maradunk, és el sem rejtőzünk, mert van még mit eldönteni. Egy elengedett testvér nem ok a
+ * maradásra.
  */
 export function nextAfterDecision(
   sessions: readonly SessionLike[],
@@ -87,7 +105,8 @@ export function nextAfterDecision(
   hideEnabled: boolean,
 ): AfterDecision {
   const rest = decisions.filter((d) => d.id !== decided.id)
-  if (rest.some((d) => d.sessionId === decided.sessionId)) return { select: decided.sessionId, hide: false }
+  // Csak a még eldönthető testvér tart helyben: egy elengedettet az app már nem dönthet el.
+  if (rest.some((d) => d.sessionId === decided.sessionId && !d.released)) return { select: decided.sessionId, hide: false }
   const next = firstWaiting(sessions, rest, decided.sessionId)
   if (next !== undefined) return { select: next, hide: false }
   return { hide: hideEnabled }

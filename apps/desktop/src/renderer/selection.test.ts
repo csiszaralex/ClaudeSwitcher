@@ -3,7 +3,11 @@ import type { SessionStatus as Status } from '@claudeswitcher/core'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
 
 const view = (sessionId: string, status: Status): { sessionId: string; status: Status } => ({ sessionId, status })
-const pending = (id: string, sessionId: string): { id: string; sessionId: string } => ({ id, sessionId })
+const pending = (
+  id: string,
+  sessionId: string,
+  released = false,
+): { id: string; sessionId: string; released: boolean } => ({ id, sessionId, released })
 
 describe('resolveSelectedIndex', () => {
   it('returns -1 for an empty list', () => {
@@ -53,6 +57,29 @@ describe('selectOnShow', () => {
     expect(selectOnShow([view('a', 'idle'), view('b', 'working')], [pending('d1', 'b')], 'a')).toBe('b')
   })
 
+  it('does not jump to a session whose decisions are all released while another one waits', () => {
+    // A daemon a `#pending` miatt az elengedett kérésű sessiont is `waiting`-nek mutatja, és előre
+    // rendezi: a status tehát nem emelheti vissza az első szintre.
+    const sessions = [view('r', 'waiting'), view('w', 'waiting')]
+    expect(selectOnShow(sessions, [pending('d1', 'r', true), pending('d2', 'w')], 'w')).toBe('w')
+  })
+
+  it('counts a waiting session without any held decision (Notification wait)', () => {
+    const sessions = [view('r', 'waiting'), view('n', 'waiting')]
+    expect(selectOnShow(sessions, [pending('d1', 'r', true)], undefined)).toBe('n')
+  })
+
+  it('counts a session with a released and a still held decision as waiting', () => {
+    const sessions = [view('x', 'idle'), view('m', 'waiting')]
+    expect(selectOnShow(sessions, [pending('d1', 'm', true), pending('d2', 'm')], undefined)).toBe('m')
+  })
+
+  it('falls back to a released session only when nothing else waits, in list order', () => {
+    const sessions = [view('r1', 'waiting'), view('r2', 'waiting'), view('i', 'idle')]
+    const decisions = [pending('d1', 'r1', true), pending('d2', 'r2', true)]
+    expect(selectOnShow(sessions, decisions, 'i')).toBe('r1')
+  })
+
   it('keeps the current selection when nothing is waiting', () => {
     expect(selectOnShow([view('a', 'idle'), view('b', 'working')], [], 'b')).toBe('b')
     expect(selectOnShow([view('a', 'idle')], [], undefined)).toBeUndefined()
@@ -89,5 +116,23 @@ describe('nextAfterDecision', () => {
   it('stays open after the last waiting session when auto-hide is off', () => {
     const sessions = [view('a', 'waiting'), view('b', 'idle')]
     expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), false)).toEqual({ hide: false })
+  })
+
+  it('does not stay for a released sibling of the decided session', () => {
+    const sessions = [view('a', 'waiting'), view('b', 'waiting')]
+    const decisions = [pending('d1', 'a'), pending('d2', 'a', true), pending('d3', 'b')]
+    expect(nextAfterDecision(sessions, decisions, pending('d1', 'a'), true)).toEqual({ select: 'b', hide: false })
+  })
+
+  it('skips a released-only session in favour of one that can be decided', () => {
+    const sessions = [view('r', 'waiting'), view('a', 'waiting'), view('w', 'waiting')]
+    const decisions = [pending('dr', 'r', true), pending('da', 'a'), pending('dw', 'w')]
+    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'w', hide: false })
+  })
+
+  it('moves to a released-only session when nothing else waits, without hiding', () => {
+    const sessions = [view('a', 'waiting'), view('r', 'waiting')]
+    const decisions = [pending('da', 'a'), pending('dr', 'r', true)]
+    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'r', hide: false })
   })
 })
