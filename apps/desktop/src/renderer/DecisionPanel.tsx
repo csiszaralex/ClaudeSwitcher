@@ -14,7 +14,7 @@ import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
 import { LINE_MARK, panelContent } from './edit-preview.js'
-import { ruleEditorSeed } from './rule-editor.js'
+import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
 import { releasedMessage } from './session-marker.js'
 import { summaryView } from './summary-view.js'
 import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
@@ -224,7 +224,11 @@ export function DecisionPanel({
     }
 
     switch (decision.kind) {
-      case 'tool':
+      case 'tool': {
+        // A Claude Code javaslata mindkét szabálygomb szerkesztőjét kitölti, ezért mindkettő jelet
+        // kap: a billentyűjel inverz (narancs háttér), így a gombsor egy sorban marad. A szabály a tooltipben.
+        const suggestion = suggestionTooltip(decision.suggestedRules)
+        const ruleKey = suggestion === undefined ? undefined : 'suggested'
         return (
           <div className="decision-row">
             <button type="button" disabled={busy || !armed} onClick={() => { run('allow') }}>
@@ -233,14 +237,15 @@ export function DecisionPanel({
             <button type="button" disabled={busy} onClick={() => { run('deny') }}>
               <kbd>D</kbd> Tilt…
             </button>
-            <button type="button" disabled={busy || !armed} onClick={() => { run('rule-project') }}>
-              <kbd>P</kbd> Projekt-szabály…
+            <button type="button" disabled={busy || !armed} title={suggestion} onClick={() => { run('rule-project') }}>
+              <kbd className={ruleKey}>P</kbd> Projekt-szabály…
             </button>
-            <button type="button" disabled={busy || !armed} onClick={() => { run('rule-machine') }}>
-              <kbd>G</kbd> Gépszintű szabály…
+            <button type="button" disabled={busy || !armed} title={suggestion} onClick={() => { run('rule-machine') }}>
+              <kbd className={ruleKey}>G</kbd> Gépszintű szabály…
             </button>
           </div>
         )
+      }
       case 'edit':
         return (
           <div className="decision-row">

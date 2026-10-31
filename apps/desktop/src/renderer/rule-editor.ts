@@ -34,6 +34,25 @@ export function ruleEditorSeed(rules: readonly PermissionRule[]): RuleSeed {
   return { text: kept.map(formatRule).join('\n'), multiline: rules.length - kept.length }
 }
 
+/**
+ * A szabálygombok tooltipje, ha a Claude Code szabályt javasol (`permission_suggestions`): a
+ * javaslat pontosan úgy, ahogy a szerkesztő kezdőszövege lesz (`ruleEditorSeed`), és hogy hány
+ * többsoros javaslat marad ki belőle. `undefined`, ha nincs javaslat: ilyenkor a gombok nem változnak.
+ */
+export function suggestionTooltip(rules: readonly PermissionRule[]): string | undefined {
+  if (rules.length === 0) return undefined
+  const seed = ruleEditorSeed(rules)
+  const lines = ['A Claude Code szabályt javasol:']
+  if (seed.text !== '') lines.push(seed.text)
+  if (seed.multiline > 0) lines.push(`${suggestionCount(seed.multiline)} többsoros, a szerkesztő kihagyja.`)
+  return lines.join('\n')
+}
+
+/** „Egy javasolt szabály" vagy „N javasolt szabály": a tooltip és a szerkesztő közös szava. */
+export function suggestionCount(count: number): string {
+  return count === 1 ? 'Egy javasolt szabály' : `${String(count)} javasolt szabály`
+}
+
 export interface BroadRule {
   /** A szabály a szerkesztő írásmódjával. */
   rule: string

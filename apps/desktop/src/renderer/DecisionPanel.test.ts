@@ -98,3 +98,31 @@ describe('Ctrl+Enter label', () => {
     expect(html).not.toContain(SUBMIT_CHORD_LABEL)
   })
 })
+
+describe('rule suggestion mark', () => {
+  /** A P és a G gomb teljes markupja, a nyitótagtól a `</button>`-ig. */
+  function ruleButtons(html: string): string[] {
+    return [...html.matchAll(/<button[^>]*>(?:(?!<\/button>).)*?<kbd[^>]*>[PG]<\/kbd>(?:(?!<\/button>).)*<\/button>/g)].map(
+      (match) => match[0],
+    )
+  }
+
+  it('marks both rule buttons and names the suggested rule in their tooltip', () => {
+    const html = render(bashDecision({ suggestedRules: [{ toolName: 'Bash', ruleContent: 'node -e *' }] }))
+    const buttons = ruleButtons(html)
+    expect(buttons).toHaveLength(2)
+    for (const button of buttons) {
+      expect(button).toContain('title="A Claude Code szabályt javasol:\nBash(node -e *)"')
+      expect(button).toMatch(/<kbd class="suggested">[PG]<\/kbd>/)
+    }
+  })
+
+  it('changes nothing without a suggestion', () => {
+    const buttons = ruleButtons(render(bashDecision()))
+    expect(buttons).toHaveLength(2)
+    for (const button of buttons) {
+      expect(button).not.toContain('title=')
+      expect(button).not.toContain('class="suggested"')
+    }
+  })
+})

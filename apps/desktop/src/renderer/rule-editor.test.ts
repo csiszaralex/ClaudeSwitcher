@@ -1,11 +1,37 @@
 import { describe, expect, it } from 'vitest'
-import { broadRules, editorRows, RULE_EDITOR_MAX_ROWS, RULE_EDITOR_MIN_ROWS, ruleEditorSeed } from './rule-editor.js'
+import { broadRules, editorRows, RULE_EDITOR_MAX_ROWS, RULE_EDITOR_MIN_ROWS, ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
 
 describe('editorRows', () => {
   it('grows with the line count between the minimum and the cap', () => {
     expect(editorRows('Bash(ls *)')).toBe(RULE_EDITOR_MIN_ROWS)
     expect(editorRows('a\nb\nc\nd\ne')).toBe(5)
     expect(editorRows(Array.from({ length: 50 }, () => 'Bash(x)').join('\n'))).toBe(RULE_EDITOR_MAX_ROWS)
+  })
+})
+
+describe('suggestionTooltip', () => {
+  it('is undefined without a suggestion, so nothing changes on the buttons', () => {
+    expect(suggestionTooltip([])).toBeUndefined()
+  })
+
+  it('lists the suggested rules exactly as the editor will start with them', () => {
+    const rules = [{ toolName: 'Bash', ruleContent: 'node -e *' }, { toolName: 'mcp__x__y' }]
+    expect(suggestionTooltip(rules)).toBe(`A Claude Code szabályt javasol:\n${ruleEditorSeed(rules).text}`)
+  })
+
+  it('says how many multi-line suggestions the editor leaves out', () => {
+    expect(
+      suggestionTooltip([
+        { toolName: 'Bash', ruleContent: 'cat <<END\nx\nEND' },
+        { toolName: 'Bash', ruleContent: 'ls *' },
+      ]),
+    ).toBe('A Claude Code szabályt javasol:\nBash(ls *)\nEgy javasolt szabály többsoros, a szerkesztő kihagyja.')
+    expect(
+      suggestionTooltip([
+        { toolName: 'Bash', ruleContent: 'a\nb' },
+        { toolName: 'Bash', ruleContent: 'c\nd' },
+      ]),
+    ).toBe('A Claude Code szabályt javasol:\n2 javasolt szabály többsoros, a szerkesztő kihagyja.')
   })
 })
 

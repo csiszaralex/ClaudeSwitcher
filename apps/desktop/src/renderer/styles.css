@@ -150,6 +150,8 @@ body {
   font: 11px Consolas, monospace;
   color: #d97757;
 }
+/* A szabálygomb billentyűjele inverzben, ha a Claude Code szabályt javasol (rule-editor.ts `suggestionTooltip`). */
+.decision kbd.suggested { border-color: #d97757; background: #d97757; color: #1c1b1a; }
 .decision input, .decision textarea {
   box-sizing: border-box;
   padding: 5px 7px;

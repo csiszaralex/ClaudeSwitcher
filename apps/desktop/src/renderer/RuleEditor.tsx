@@ -2,7 +2,7 @@ import type { PermissionRule } from '@claudeswitcher/core'
 import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
 import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
-import { broadRules, editorRows } from './rule-editor.js'
+import { broadRules, editorRows, suggestionCount } from './rule-editor.js'
 
 interface Props {
   /** A Claude Code javaslata, soronként egy szabály — a felhasználó átírhatja. */
@@ -58,7 +58,7 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, onSub
       </p>
       {multilineSuggestions > 0 && (
         <p className="decision-error">
-          {multilineSuggestions === 1 ? 'Egy javasolt szabály' : `${String(multilineSuggestions)} javasolt szabály`}{' '}
+          {suggestionCount(multilineSuggestions)}{' '}
           többsoros, ezért kimaradt: soronként egy szabályt olvasunk, így több, mást engedélyező
           szabállyá esne szét. Írj egysoros szabályt, vagy dönts a VSCode-ban.
         </p>
