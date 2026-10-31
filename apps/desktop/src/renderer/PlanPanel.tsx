@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react'
-import { isSubmitChord } from './decision-actions.js'
+import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
 
 interface Props {
   plan: string | undefined
@@ -43,7 +43,7 @@ export function PlanPanel({ plan, busy, onReject, onJump }: Props): JSX.Element 
         />
         <div className="decision-row">
           <button type="submit" disabled={!canReject}>
-            Elutasítás visszajelzéssel
+            <kbd>{SUBMIT_CHORD_LABEL}</kbd> Elutasítás visszajelzéssel
           </button>
           <button type="button" onClick={onJump}>
             Jóváhagyás a VSCode-ban →

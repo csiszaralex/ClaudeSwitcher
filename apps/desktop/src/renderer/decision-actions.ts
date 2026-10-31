@@ -66,6 +66,12 @@ export function isSubmitChord(event: { key: string; ctrlKey: boolean }): boolean
   return event.key === 'Enter' && event.ctrlKey
 }
 
+/**
+ * Az `isSubmitChord` felirata a többsoros mezők küldő gombján. Ahol a mező egysoros és az Enter
+ * küld (a tiltás indoklása, a kérdések szabad szövege), ott nincs felirat.
+ */
+export const SUBMIT_CHORD_LABEL = 'Ctrl+Enter'
+
 export type DecideOutcome = { ok: true } | { ok: false; reason: string }
 
 /** A main processz `DecideResult`-ja, ellenőrizve — az IPC-n át bármi jöhet. */

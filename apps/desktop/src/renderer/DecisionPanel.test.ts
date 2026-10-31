@@ -2,7 +2,9 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { SUBMIT_CHORD_LABEL } from './decision-actions.js'
 import { DecisionPanel } from './DecisionPanel.js'
+import { RuleEditor } from './RuleEditor.js'
 
 function bashDecision(overrides: Partial<PendingDecisionView> = {}): PendingDecisionView {
   return {
@@ -56,5 +58,43 @@ describe('DecisionPanel layout', () => {
 
   it('shows no description paragraph when the tool gives none', () => {
     expect(render(bashDecision({ description: undefined }))).not.toContain('decision-description')
+  })
+})
+
+describe('Ctrl+Enter label', () => {
+  const chordKbd = `<kbd>${SUBMIT_CHORD_LABEL}</kbd>`
+
+  it('names Ctrl+Enter on the submit button of the plan feedback, where Enter starts a new line', () => {
+    const html = render(bashDecision({ kind: 'plan', toolName: 'ExitPlanMode', plan: '# Plan', summary: 'Plan' }))
+    expect(html).toContain('<textarea')
+    expect(html).toContain(chordKbd)
+  })
+
+  it('names Ctrl+Enter on the submit button of the rule editor', () => {
+    const html = renderToStaticMarkup(
+      createElement(RuleEditor, {
+        initial: 'Bash(node -e *)',
+        multilineSuggestions: 0,
+        machine: false,
+        busy: false,
+        onSubmit: () => undefined,
+        onCancel: () => undefined,
+      }),
+    )
+    expect(html).toContain('<textarea')
+    expect(html).toContain(chordKbd)
+  })
+
+  it('has no label in the question form, whose fields are single-line and submit on Enter', () => {
+    const html = render(
+      bashDecision({
+        kind: 'question',
+        toolName: 'AskUserQuestion',
+        summary: 'Which one?',
+        questions: [{ question: 'Which one?', multiSelect: false, options: [{ label: 'A' }, { label: 'B' }] }],
+      }),
+    )
+    expect(html).not.toContain('<textarea')
+    expect(html).not.toContain(SUBMIT_CHORD_LABEL)
   })
 })

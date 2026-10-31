@@ -1,7 +1,7 @@
 import type { PermissionRule } from '@claudeswitcher/core'
 import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
-import { isSubmitChord } from './decision-actions.js'
+import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
 import { broadRules, editorRows } from './rule-editor.js'
 
 interface Props {
@@ -114,7 +114,7 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, onSub
       )}
       <div className="decision-row">
         <button type="submit" disabled={!canSubmit}>
-          Engedélyez és felveszi a szabályt
+          <kbd>{SUBMIT_CHORD_LABEL}</kbd> Engedélyez és felveszi a szabályt
         </button>
         <span className="muted">{rules.length.toLocaleString('hu-HU')} szabály</span>
         <button type="button" onClick={onCancel}>

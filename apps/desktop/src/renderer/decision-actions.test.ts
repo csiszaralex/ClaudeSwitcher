@@ -7,6 +7,7 @@ import {
   readDecideResult,
   readOverlaySettings,
   shortcutFor,
+  SUBMIT_CHORD_LABEL,
 } from './decision-actions.js'
 
 describe('shortcutFor', () => {
@@ -86,6 +87,10 @@ describe('isSubmitChord', () => {
   it('leaves a plain Enter to the textarea (a new line) and ignores other Ctrl keys', () => {
     expect(isSubmitChord({ key: 'Enter', ctrlKey: false })).toBe(false)
     expect(isSubmitChord({ key: 'a', ctrlKey: true })).toBe(false)
+  })
+
+  it('has a label that names the same chord', () => {
+    expect(SUBMIT_CHORD_LABEL).toBe('Ctrl+Enter')
   })
 })
 
