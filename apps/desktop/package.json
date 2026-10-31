@@ -10,7 +10,9 @@
     "build": "electron-vite build",
     "check-types": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.web.test.json --noEmit",
     "test": "vitest run",
-    "lint": "eslint src electron.vite.config.ts vitest.config.ts"
+    "lint": "eslint src electron.vite.config.ts vitest.config.ts",
+    "predev": "install-electron",
+    "prestart": "install-electron"
   },
   "dependencies": {
     "@claudeswitcher/core": "workspace:*",
