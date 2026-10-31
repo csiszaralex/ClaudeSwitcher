@@ -20,7 +20,7 @@ export class Hub {
         else callback(false, 401, 'Unauthorized')
       },
     })
-    // A ws a HTTP szerver `error` eseményét a WebSocketServeren újra kibocsátja (ws 8.21.3,
+    // A ws a HTTP szerver `error` eseményét a WebSocketServeren újra kibocsátja (ws 8.22.0,
     // `addListeners(this._server, { error: ... })`). Figyelő nélkül egy EventEmitter `error`
     // dob, ami a main processzben elkapatlan kivétel lenne. Itt csak naplózzuk; a szerver
     // `error` figyelője a `startDaemon`-ban a listen után már nem tesz semmit.
