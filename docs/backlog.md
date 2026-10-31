@@ -97,7 +97,10 @@ Az M1 implementálásakor és átnézésekor „minor (deferred)” jelzéssel f
 - `setup.ts` `isOurStatusLine`: egy saját status line-wrapper, amelynek a parancsa tartalmazza a `--claudeswitcher` jelölőt, a mienknek számít, és a telepítés vagy az eltávolítás kiveszi.
 
 **Eszközlánc**
-- `pnpm-workspace.yaml` `allowBuilds`: az `electron`, `esbuild`, `koffi` és `nx` engedélyének nincs indoklása (csak a `simple-git-hooks: false`-nak van).
-- `@types/node` a gyökér mellett a `packages/core` és az `apps/desktop` `package.json`-jában is szerepel.
+- ~~`pnpm-workspace.yaml` `allowBuilds`: az `electron`, `esbuild`, `koffi` és `nx` engedélyének nincs indoklása.~~ Kész (7/3. hullám): minden kulcs mellett ott az ok, a `pnpm-workspace.yaml`-ban.
+- ~~`@types/node` a gyökér mellett a `packages/core` és az `apps/desktop` `package.json`-jában is szerepel.~~ Kész (7/3. hullám): csak a gyökérben van. A csomagok a `node_modules` feloldással a gyökérét kapják, ahogy a daemon eddig is.
+- TypeScript 7 (a `latest` 7.0.2): a `typescript-eslint` 8.72.1 peerje `typescript >=4.8.4 <6.1.0` (`pnpm view typescript-eslint@8.72.1 peerDependencies`), ezért a 6.0.3-on állunk. Ha a `typescript-eslint` stabil kiadása támogatja a 7-et, akkor frissíthető.
+- knip 6.44.0 (a `latest`, kiadva 2026-10-29 19:44:31 UTC): a pnpm 12 `minimumReleaseAge` alapértéke 1440 perc, ezért a pnpm csak 2026-10-30 19:44:31 UTC (20:44:31 budapesti idő) után telepíti kivétel nélkül. A `pnpm add knip@^6.44.0` addig magától `minimumReleaseAgeExclude` bejegyzést írna a `pnpm-workspace.yaml`-ba; kivételt nem akarunk, ezért a knip a 6.43.0-n van. Az időpont után: `pnpm add -w -D knip@^6.44.0`, majd `pnpm verify`.
+- Node 26 (a legújabb LTS, 26.13.0, „Lithium”, 2026-10-28; `https://nodejs.org/dist/index.json`): a gépen 24.22.1 fut, ezért az `engines` `>=24`. Alex lépése: a Node 26 LTS telepítése, utána az `engines` emelése és egy `pnpm verify`. A `@types/node` az Electron Node-ján (24) marad, mert az app azon fut.
 
 Az M1 elfogadási tesztjéből egy pont maradt el, az alvás/ébredés mérése. Ez a review 4. részének 7. pontjában van.

@@ -2,9 +2,15 @@ packages:
   - "packages/*"
   - "apps/*"
 allowBuilds:
+  # Nincs install szkriptje (Electron 42 óta), a pnpm mégis kéri a kulcsot: nélküle
+  # `ERR_PNPM_IGNORED_BUILDS: electron@45.1.0` (mérve a 7/1. hullámban). A binárist az
+  # `install-electron` tölti le (README).
   electron: true
+  # `postinstall: node install.js`: ellenőrzi (hiány esetén letölti) a platform bináris csomagját.
   esbuild: true
+  # `install: node ./cnoke.cjs ... --prebuild`: a natív addont készíti elő.
   koffi: true
+  # `postinstall`: az nx saját telepítés utáni lépése (`dist/bin/post-install`).
   nx: true
   # A hookot a gyökér `prepare` szkriptje telepíti; a csomag saját postinstallja ugyanezt tenné még egyszer.
   simple-git-hooks: false

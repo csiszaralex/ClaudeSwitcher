@@ -50,4 +50,5 @@ Nem dokumentált belsők, és hol olvassuk őket. Ha a Claude Code változik, it
 ## Környezet
 - Ezen a gépen a `P:` egy `subst` meghajtó (`D:\P`), és a processzindítás lassú (egy PowerShell-pillanatkép ~6 s). A `pnpm verify` itt több percig tart: előtérben, hosszú timeouttal fusson, soha nem háttérben.
 - A `subst` meghajtó miatt a renderer gyökere az `electron.vite.config.ts`-ben valódi útvonal (`RENDERER_ROOT`, `realpathSync.native`). Enélkül a build elbukik.
+- A `@types/node` főverziója az Electron Node-jáé (most 24), nem a gépen futó Node-é: az app azon fut. Csak a gyökér `package.json`-ban van deklarálva.
 - Az élő Windows-tesztek bő időkorlátot kapnak lassú gépre (`focus-window.test.ts`), és a PowerShell probe-tartalék időkorlátja 30 s (`liveness.ts` `POWERSHELL_SNAPSHOT_TIMEOUT_MS`).

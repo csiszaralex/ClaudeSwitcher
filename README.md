@@ -7,7 +7,7 @@ A részletes terv és a mért Claude Code viselkedés: [`docs/superpowers/specs/
 ## Követelmények
 
 - Windows 11 (az ablakfókusz Win32 hívásokat használ, a többi platform nem cél).
-- Node.js 22 vagy újabb (`package.json` `engines`).
+- Node.js 24 vagy újabb (`package.json` `engines`). Ugyanez a főverzió fut az Electron 45-ben is.
 - pnpm a corepackon át: a pontos verziót a `package.json` `packageManager` mezője rögzíti. Egyszer: `corepack enable`.
 - VS Code a Claude Code bővítménnyel.
 
