@@ -14,14 +14,26 @@ export interface StatusMarker {
 // Az alak is különbözik, nem csak a szín: színtévesztő szemmel is olvasható maradjon.
 const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
   waiting: { tone: 'waiting', glyph: '●', title: 'Válaszra vár' },
-  released: {
-    tone: 'released',
-    glyph: '◆',
-    title: `Az app elengedte (${PERMISSION_RELEASE_AFTER_MS / 1000} mp) — a VSCode-ban vagy a telefonon még dönthetsz`,
-  },
+  // A tooltipje a Remote Controltól függ, ezért a `statusMarker` állítja össze (`releasedMarker`).
+  released: { tone: 'released', glyph: '◆', title: '' },
   working: { tone: 'working', glyph: '◐', title: 'Dolgozik' },
   done: { tone: 'done', glyph: '✓', title: 'Épp végzett' },
   idle: { tone: 'idle', glyph: '○', title: 'Tétlen' },
+}
+
+/**
+ * Hol dönthető el egy elengedett kérés. Az egyetlen hely, ahonnan a tooltip és a döntési panel
+ * szövege jön: a telefon csak Remote Control mellett opció (`hasRemoteControl`).
+ */
+export function releasedMessage(remoteControl: boolean): string {
+  return remoteControl ? 'A VSCode-ban vagy a telefonon még dönthetsz.' : 'A VSCode-ban még dönthetsz.'
+}
+
+function releasedMarker(remoteControl: boolean): StatusMarker {
+  return {
+    ...MARKERS.released,
+    title: `Az app elengedte (${String(PERMISSION_RELEASE_AFTER_MS / 1000)} mp). ${releasedMessage(remoteControl)}`,
+  }
 }
 
 /**
@@ -29,15 +41,15 @@ const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
  *
  * Sorrend: egy appból még eldönthető (nem elengedett) kérés a legerősebb jel; ha csak elengedett
  * van, az külön állapot, mert onnan az app már nem dönthet. Utána jön a Notification-várakozás,
- * a futás, és az „épp végzett" — ez csak akkor, ha a session se nem fut, se nem vár: egy régi
+ * a futás, és az „épp végzett", ez csak akkor, ha a session se nem fut, se nem vár: egy régi
  * `stoppedAt` mellett újra dolgozó session nem „végzett".
  */
 export function statusMarker(
-  view: { status: SessionStatus; stoppedAt?: number | undefined },
+  view: { status: SessionStatus; stoppedAt?: number | undefined; bridgeSessionId?: unknown },
   decisions: readonly { released: boolean }[],
 ): StatusMarker {
   if (decisions.some((d) => !d.released)) return MARKERS.waiting
-  if (decisions.length > 0) return MARKERS.released
+  if (decisions.length > 0) return releasedMarker(hasRemoteControl(view))
   if (view.status === 'waiting') return MARKERS.waiting
   if (view.status === 'working') return MARKERS.working
   if (view.stoppedAt !== undefined) return MARKERS.done

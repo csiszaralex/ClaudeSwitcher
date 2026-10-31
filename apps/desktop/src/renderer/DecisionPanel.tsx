@@ -15,6 +15,7 @@ import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
 import { LINE_MARK, panelContent } from './edit-preview.js'
 import { ruleEditorSeed } from './rule-editor.js'
+import { releasedMessage } from './session-marker.js'
 import { summaryView } from './summary-view.js'
 import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
 
@@ -31,6 +32,8 @@ interface Props {
   decision: PendingDecisionView
   /** A kérő subagent felirata a fejlécben (format.ts `subagentLabel`); a fő sessionnél nincs. */
   agentLabel: string | undefined
+  /** Van-e a sessionnek Remote Control kapcsolata (session-marker.ts `hasRemoteControl`): az elengedett kérés szövegét adja. */
+  remoteControl: boolean
   /** Az App billentyű-előzménye: az overlay megjelenése és az utolsó szövegmezős leütés (key-guard.ts). */
   keyHistory: RefObject<KeyHistory>
   /** A daemon elfogadta a döntést — az App ebből lépteti a kijelölést, vagy rejti el az overlayt. */
@@ -43,7 +46,14 @@ interface Props {
  * Egy függő kérés döntési panelje. A döntést a main processzen át a daemon ellenőrzi és
  * továbbítja; siker esetén a következő állapot leveszi a kérést, és a panel eltűnik.
  */
-export function DecisionPanel({ decision, agentLabel, keyHistory, onDecided, onJump }: Props): JSX.Element {
+export function DecisionPanel({
+  decision,
+  agentLabel,
+  remoteControl,
+  keyHistory,
+  onDecided,
+  onJump,
+}: Props): JSX.Element {
   const [mode, setMode] = useState<Mode>('buttons')
   const [denyText, setDenyText] = useState('')
   const [error, setError] = useState<string | undefined>()
@@ -137,7 +147,7 @@ export function DecisionPanel({ decision, agentLabel, keyHistory, onDecided, onJ
   }
 
   function body(): JSX.Element {
-    if (decision.released) return jumpRow('Az app elengedte — a VSCode-ban vagy a telefonon dönthetsz.')
+    if (decision.released) return jumpRow(`Az app elengedte. ${releasedMessage(remoteControl)}`)
 
     if (mode === 'deny') {
       return (

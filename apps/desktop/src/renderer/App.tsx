@@ -231,6 +231,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
           <DecisionPanel
             decision={decision}
             agentLabel={subagentLabel(decision, selectedRowView.session?.subagents)}
+            remoteControl={selectedRowView.session !== undefined && hasRemoteControl(selectedRowView.session)}
             keyHistory={keyHistory}
             onDecided={() => {
               afterDecision(decision).catch((error: unknown) => {

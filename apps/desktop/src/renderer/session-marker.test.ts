@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionStatus as Status } from '@claudeswitcher/core'
-import { hasRemoteControl, statusMarker } from './session-marker.js'
+import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
+import { hasRemoteControl, releasedMessage, statusMarker } from './session-marker.js'
 
 const session = (status: Status, stoppedAt?: number): { status: Status; stoppedAt?: number | undefined } => ({
   status,
@@ -69,5 +70,37 @@ describe('hasRemoteControl', () => {
 
   it('is false for a non-string at runtime — the daemon message can be anything', () => {
     expect(hasRemoteControl({ bridgeSessionId: 42 })).toBe(false)
+  })
+})
+
+describe('releasedMessage', () => {
+  it('names only VS Code without Remote Control', () => {
+    const text = releasedMessage(false)
+    expect(text).toContain('VSCode')
+    expect(text).not.toContain('telefon')
+  })
+
+  it('names VS Code and the phone with Remote Control', () => {
+    expect(releasedMessage(true)).toContain('VSCode-ban vagy a telefonon')
+  })
+
+  it('has no dash inside the sentence', () => {
+    for (const remote of [false, true]) expect(releasedMessage(remote)).not.toMatch(/[–—]/)
+  })
+})
+
+describe('statusMarker released tooltip', () => {
+  const released = [{ released: true }]
+
+  it('mentions the phone only for a session with Remote Control', () => {
+    const plain = statusMarker({ status: 'waiting' }, released)
+    const remote = statusMarker({ status: 'waiting', bridgeSessionId: 'session_01Uj' }, released)
+    expect(plain.title).not.toContain('telefon')
+    expect(plain.title).toContain('VSCode')
+    expect(remote.title).toContain('telefonon')
+  })
+
+  it('keeps the release time in the tooltip', () => {
+    expect(statusMarker({ status: 'waiting' }, released).title).toContain(`${String(PERMISSION_RELEASE_AFTER_MS / 1000)} mp`)
   })
 })
