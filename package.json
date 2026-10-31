@@ -26,6 +26,6 @@
     "simple-git-hooks": "^2.14.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.71.1",
-    "vitest": "^3.0.0"
+    "vitest": "^5.0.5"
   }
 }

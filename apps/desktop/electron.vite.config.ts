@@ -1,4 +1,5 @@
 import { readFileSync, realpathSync } from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'electron-vite'
@@ -42,19 +43,6 @@ if (BUNDLED_WORKSPACE_PACKAGES.length === 0) {
 }
 
 /**
- * A `ws` opcionális natív gyorsítói. Nincsenek telepítve, és a `ws` egy try/catch-en belül
- * `require`-eli őket, hiány esetén a saját JS változatára vált. Ha a bundler maga oldja fel őket, a
- * Vite helyettesítő modult tesz a helyükre: devben egy modulbetöltéskor dobó modult (ettől nem indult
- * el az `electron-vite dev`), buildben egy üres objektumot. Az utóbbit a `ws` try/catch-e elfogadja,
- * aztán egy kliens legalább 32 bájtos maszkolt keretének kibontásakor `unmask is not a function`
- * hibával elhasal (lemérve a buildelt bundle-ön). Külsőként a `require` a try/catch-en belül marad,
- * így a `ws` mindkét módban a saját JS változatát használja. Az ES modul főprocesszben a `require`-t
- * az electron-vite shimje adja (`createRequire(import.meta.url)` a bundle elején), nem egy
- * felemelt `import`: a hiányzó csomag így is a `ws` try/catch-ében bukik el.
- */
-const WS_OPTIONAL_NATIVE_DEPS = ['bufferutil', 'utf-8-validate']
-
-/**
  * A renderer CSP-je az `index.html` helyőrzőjébe (lásd `rendererCsp`). A dev szerveren (`ctx.server`)
  * a lazább, csak fejlesztői változat megy ki, a buildben a szigorú.
  */
@@ -73,19 +61,27 @@ function rendererCspPlugin(): Plugin {
  * a Vite az `index.html`-t a valódi útvonalra oldja fel, a gyökeret viszont a leképezettre hagyná: a
  * kettő közti relatív út abszolút lesz, és a build elbukik. Mérve 2026-10-30, egy `subst` P: meghajtón.
  * Az útvonal a config fájlhoz képest számít, nem a munkakönyvtárhoz: a knip a repó gyökeréből tölti be.
+ *
+ * A belépő HTML-t (`RENDERER_INPUT`) is a valódi útvonalon adjuk meg. Az electron-vite 6 a munkakönyvtárból
+ * számolja (`electronRendererConfigPresetPlugin`, `findInput`), és a Vite 8 Rolldownja egy `P:` alatti
+ * munkakönyvtárból indítva (`pnpm run build` az `apps/desktop`-ban) a `D:` alatti gyökérhez képest abszolút
+ * nevet kapna, amit „neither absolute nor relative paths” hibával elutasít. Mérve 2026-10-30, Vite 8.3.5-tel;
+ * a Vite 7 ezt még elfogadta.
  */
 const RENDERER_ROOT = realpathSync.native(fileURLToPath(new URL('./src/renderer', import.meta.url)))
+const RENDERER_INPUT = path.join(RENDERER_ROOT, 'index.html')
 
 export default defineConfig({
   main: {
-    build: {
-      externalizeDeps: { exclude: BUNDLED_WORKSPACE_PACKAGES },
-      rollupOptions: { external: WS_OPTIONAL_NATIVE_DEPS },
-    },
+    build: { externalizeDeps: { exclude: BUNDLED_WORKSPACE_PACKAGES } },
   },
   // A preload CommonJS marad: sandboxolt preload nem lehet ES modul (Electron `docs/tutorial/esm.md`).
   // A `"type": "module"` miatt az electron-vite ESM-et adna, ezért a formátum ki van írva; a kimenet
   // így `out/preload/index.cjs`. A függőségeket alapból (`build.externalizeDeps`) externalizálja.
-  preload: { build: { rollupOptions: { output: { format: 'cjs' } } } },
-  renderer: { root: RENDERER_ROOT, plugins: [react(), rendererCspPlugin()] },
+  preload: { build: { rolldownOptions: { output: { format: 'cjs' } } } },
+  renderer: {
+    root: RENDERER_ROOT,
+    build: { rolldownOptions: { input: RENDERER_INPUT } },
+    plugins: [react(), rendererCspPlugin()],
+  },
 })
