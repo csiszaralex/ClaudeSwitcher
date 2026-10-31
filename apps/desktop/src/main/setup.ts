@@ -41,7 +41,7 @@ const TOKEN_ENV = 'CLAUDESWITCHER_TOKEN'
  */
 const LEGACY_PORT_ENV = 'CLAUDESWITCHER_PORT'
 
-/** Új objektum a megadott kulcsok nélkül — `delete` helyett, ami mutálna. */
+/** Új objektum a megadott kulcsok nélkül, `delete` helyett, ami mutálna. */
 function without(source: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))
 }
@@ -55,7 +55,7 @@ function without(source: Record<string, unknown>, keys: readonly string[]): Reco
  * Tartalék jel: a saját loopback-végpontunkra mutat, a `DAEMON_PORT` porton. A port is
  * feltétel: egy másik helyi eszköz ugyanilyen útvonalat használhat egy másik porton, és annak
  * a hookját a telepítés különben némán törölné. Azért kell, mert az `allowedEnvVars`
- * nem feltétele annak, hogy a hook lefusson — csak az env-változó behelyettesítését
+ * nem feltétele annak, hogy a hook lefusson: csak az env-változó behelyettesítését
  * engedélyezi. Ha valaki kiveszi, a bejegyzés felismerhetetlen árvává válna: minden újabb
  * telepítés egy újabb duplikátumot tenne mellé, az eltávolítás pedig soha nem vinné el.
  */
@@ -69,7 +69,7 @@ function isOurHook(hook: unknown): boolean {
     const parsed = new URL(url)
     // A protokollt is nézni kell. A `new URL` a hostot és az útvonalat bármilyen sémára
     // kitölti, így e nélkül egy `file://127.0.0.1/hooks/notification` is a mienknek
-    // számítana — túl tág azonosítás.
+    // számítana, ez túl tág azonosítás.
     const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:'
     return (
       isHttp &&

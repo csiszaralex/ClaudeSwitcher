@@ -17,7 +17,7 @@ const UNMATCHED_WAIT_GRACE_MS = 10_000
 /**
  * Az app döntése után ennyi ideig nem veszünk várakozásnak egy `permission_prompt`
  * Notificationt. A Claude Code ezt ~6 mp-cel a PermissionRequest UTÁN küldi (mérve, Task 10 A),
- * akkor is, ha az appban addigra már döntöttek — enélkül a gyorsan eldöntött session a
+ * akkor is, ha az appban addigra már döntöttek. Enélkül a gyorsan eldöntött session a
  * Notification megérkezésekor újra „waiting" lenne, és a Stop-ig az is maradna. 10 mp: a mért
  * 6 mp fölött van tartalék, de egy valóban új prompt nem vész el, mert annak saját
  * PermissionRequest-je a függő döntésen át úgyis várakozónak mutatja a sessiont.
@@ -48,7 +48,7 @@ function displayName(record: LiveSession['record']): string {
  *
  * A registry-forrás az app-újraindulás esetére kell: a régi daemonhoz ment PermissionRequest és
  * az egyszeri Notification nem ismétlődik, a várakozást csak a registry tudja. Csak megjelenítés:
- * döntést soha nem hoz létre, nem válaszol meg és nem zár le. Ütközésnél a hook nyer — lásd
+ * döntést soha nem hoz létre, nem válaszol meg és nem zár le. Ütközésnél a hook nyer, lásd
  * `#clearedAt`.
  */
 export class SessionStore {
@@ -61,16 +61,16 @@ export class SessionStore {
   #pending: ReadonlyMap<string, number> = new Map()
   /** Mikor szűnt meg utoljára a session várakozása. Csak a rendezéshez. */
   readonly #waitEndedAt = new Map<string, number>()
-  /** Mikor döntött utoljára az app a session egy kéréséről — a késő Notificationhöz. */
+  /** Mikor döntött utoljára az app a session egy kéréséről, a késő Notificationhöz. */
   readonly #resolvedAt = new Map<string, number>()
-  /** Az utolsó Stop ideje, amíg a session újra nem mozdul — a „épp végzett" jelzéshez. */
+  /** Az utolsó Stop ideje, amíg a session újra nem mozdul, a „épp végzett" jelzéshez. */
   readonly #stoppedAt = new Map<string, number>()
   /**
    * Mikor zárta le utoljára egy hook (PostToolUse, Stop, SessionEnd, nem-várakozó Notification)
    * vagy az app döntése a session várakozását. A registry ennél NEM újabb `waiting`-je elavult.
    *
    * Miért nem a `#resolvedAt` 10 mp-es ablaka: a registry lemaradása nem egy mért, rögzített
-   * késés (mint a Notificationé), hanem a poll üteme plusz a Claude Code írása — egy ablak vagy
+   * késés (mint a Notificationé), hanem a poll üteme plusz a Claude Code írása. Egy ablak vagy
    * elnyelne egy valóban új várakozást, vagy a lejárta után feltámasztaná a régit, ha a registry
    * addig nem írt újat. A `statusUpdatedAt` viszont pontosan megmondja, a lezárás előtt vagy után
    * kezdődött-e a várakozás: ugyanaz a gép, ugyanaz az óra, és a hook nálunk mindig az esemény
@@ -112,7 +112,7 @@ export class SessionStore {
   }
 
   /**
-   * Dolgozik-e a session a registry szerint — akkor is, ha épp nem fut tool (gondolkodik, szöveget
+   * Dolgozik-e a session a registry szerint, akkor is, ha épp nem fut tool (gondolkodik, szöveget
    * ír). A Stop előtti `busy` a lemaradt pillanatkép maradéka: a session épp végzett.
    */
   #registryBusy(sessionId: string): boolean {
@@ -142,7 +142,7 @@ export class SessionStore {
   }
 
   /**
-   * @param subagents — sessionönként az aktív subagentek, a legutóbb írt elöl (a scanner adja).
+   * @param subagents Sessionönként az aktív subagentek, a legutóbb írt elöl (a scanner adja).
    * Egy hiányzó bejegyzés: a sessionnek nincs aktív subagentje.
    */
   applySnapshot(
@@ -200,7 +200,7 @@ export class SessionStore {
   /**
    * Akkor is eltárolja a várakozást, ha a session még ismeretlen.
    *
-   * A `views()` a sessionökön iterál, tehát egy párját nem talált bejegyzés láthatatlan —
+   * A `views()` a sessionökön iterál, tehát egy párját nem talált bejegyzés láthatatlan,
    * viszont amint a következő pillanatkép felveszi a sessiont, azonnal `waiting`-ként
    * jelenik meg. Korábban az ilyen értesítés VÉGLEGESEN elveszett, és a felhasználó egy rá
    * várakozó sessiont látott idle-ként.
@@ -210,7 +210,7 @@ export class SessionStore {
     const late =
       event.type === 'permission_prompt' && resolvedAt !== undefined && now - resolvedAt < LATE_PROMPT_WINDOW_MS
     this.#tracking([event.sessionId], now, () => {
-      // A már eldöntött kérés késve érkező promptja — lásd LATE_PROMPT_WINDOW_MS.
+      // A már eldöntött kérés késve érkező promptja, lásd LATE_PROMPT_WINDOW_MS.
       if (late) return
       if (WAITING_TYPES.has(event.type)) {
         this.#waiting.set(event.sessionId, { since: now, text: event.text })
@@ -245,8 +245,8 @@ export class SessionStore {
   }
 
   /**
-   * A session egy tool-ja lefutott (PostToolUse). A prompt tehát megválaszolódott — az appban,
-   * a VSCode-ban vagy a telefonon —, a Notification-várakozás így elavult. Egy MÁSIK, még függő
+   * A session egy tool-ja lefutott (PostToolUse). A prompt tehát megválaszolódott (az appban,
+   * a VSCode-ban vagy a telefonon), a Notification-várakozás így elavult. Egy MÁSIK, még függő
    * vagy elengedett döntés a `#pending`-en át továbbra is várakozónak mutatja a sessiont.
    */
   applyToolFinished(sessionId: string, now: number = Date.now()): void {
@@ -259,11 +259,11 @@ export class SessionStore {
   /**
    * A függő döntések aktuális állapota a brokertől, minden változásakor.
    *
-   * @param pendingSince — sessionönként a legrégebbi függő döntés kezdete. Egy ilyen session
+   * @param pendingSince Sessionönként a legrégebbi függő döntés kezdete. Egy ilyen session
    * akkor is várakozó, ha a Notification még nem jött meg: az csak ~6 mp függés után érkezik
    * (mérve), a PermissionRequest viszont azonnal. Az elengedett (`PERMISSION_RELEASE_AFTER_MS`) döntés is benne van:
    * a natív prompt ilyenkor még nyitva van.
-   * @param resolvedByApp — a session, amelynek a döntését ez a változás az appban zárta le. Az ő
+   * @param resolvedByApp A session, amelynek a döntését ez a változás az appban zárta le. Az ő
    * Notification-várakozását EGY lépésben töröljük a függéssel: két külön frissítés között a
    * renderer egy pillanatra egy már eldöntött, de még „waiting" sessiont látna.
    * @param abortedByClient A session, amelynek az utolsó tartott kérését a hook-kliens bontása
@@ -327,7 +327,7 @@ export class SessionStore {
         waitingSince: wait?.since ?? pending ?? registryWait,
         notificationText: wait?.text,
         // Aktív subagent mellett nincs „épp végzett": a háttérmunka a fő kör Stop-ja után is tart.
-        // Csak elfedjük, nem töröljük — a két tool közt gondolkodó subagent nem új tevékenység, és
+        // Csak elfedjük, nem töröljük: a két tool közt gondolkodó subagent nem új tevékenység, és
         // ha eltűnik, a régi Stop újra látszik.
         stoppedAt: subagents.length > 0 ? undefined : this.#stoppedAt.get(sessionId),
         ...(subagents.length > 0 ? { subagents: [...subagents] } : {}),

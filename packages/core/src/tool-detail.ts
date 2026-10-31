@@ -8,11 +8,11 @@ export const TOOL_DETAIL_MAX = 60
 
 /**
  * Röviden, min dolgozik egy tool: a parancs, a keresett minta, a fájl neve, az URL, a keresés, a
- * subagent leírása vagy a skill neve — az első, ami van. Egysoros és `TOOL_DETAIL_MAX`-ra vágott.
+ * subagent leírása vagy a skill neve: az első, ami van. Egysoros és `TOOL_DETAIL_MAX`-ra vágott.
  *
  * A tool_input nem dokumentált és toolonként más, ezért a mezők szerint megy, nem a tool neve
  * szerint: egy új tool, amelynek ugyanilyen mezője van, magától is kap részletet. Ha semmi nem
- * illik, nincs részlet — soha nem dob.
+ * illik, nincs részlet, és soha nem dob.
  */
 export function toolDetail(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined

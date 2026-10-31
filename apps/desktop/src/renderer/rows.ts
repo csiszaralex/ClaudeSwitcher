@@ -59,12 +59,12 @@ export function pendingBadge(decisions: readonly { released: boolean }[]): strin
  * A sessionök és a függő kérések egy listában.
  *
  * Egy kérés, aminek a sessionje nincs a pillanatképben, saját sort kap (spec §8: a jóváhagyás a
- * felderítés nélkül is működik). Ez egy új session első másodperceiben természetes — a hook
- * azonnal jön, a registry-t csak pár másodpercenként olvassuk —, de egy megváltozott registry-
+ * felderítés nélkül is működik). Ez egy új session első másodperceiben természetes (a hook
+ * azonnal jön, a registry-t csak pár másodpercenként olvassuk), de egy megváltozott registry-
  * formátumnál is. A neve a kérés `cwd`-jének utolsó tagja, és várakozónak számít.
  *
  * A daemon a várakozókat a várakozás kezdete szerint előre rendezi; az ilyen sor ugyanebbe a
- * sorrendbe kerül, a legrégebbi kérése szerint — a nem-várók elé.
+ * sorrendbe kerül, a legrégebbi kérése szerint, a nem-várók elé.
  */
 export function buildRows<S extends SessionLike, D extends DecisionLike>(
   sessions: readonly S[],

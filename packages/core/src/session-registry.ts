@@ -3,7 +3,7 @@ import { isRecord } from './guards.js'
 
 /**
  * Toleráns parse: ismeretlen mezőket figyelmen kívül hagy, hiányzó kötelező
- * mezőnél null-t ad. Soha nem dob — a formátum nem dokumentált, verzióváltásnál
+ * mezőnél null-t ad. Soha nem dob: a formátum nem dokumentált, verzióváltásnál
  * változhat, és egy rossz fájl nem viheti magával a többi sessiont.
  */
 export function parseSessionRecord(raw: unknown): SessionRecord | null {

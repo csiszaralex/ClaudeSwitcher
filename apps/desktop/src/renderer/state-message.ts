@@ -65,12 +65,12 @@ function isSubagent(value: unknown): value is SubagentView {
 /**
  * Megtisztít egy állapot-payloadot, vagy `undefined`-ot ad. Soha nem dob.
  *
- * MINDKÉT szállítási út ezen megy át — a WebSocket üzenet és az IPC-n kért kezdőállapot is.
+ * MINDKÉT szállítási út ezen megy át: a WebSocket üzenet és az IPC-n kért kezdőállapot is.
  * Ez a lényeg: a kezdőállapot nem a WebSocketen jön, tehát ha csak a `parseStateMessage`
  * szűrne, az IPC-s út továbbra is beengedne hibás alakot.
  *
  * Az ELEMEKET is szűri, nem csak a konténereket. Egy `sessions: [null]` egy puszta
- * `Array.isArray` ellenőrzésen túljutna, az App pedig a `view.sessionId`-n dobna — és mivel
+ * `Array.isArray` ellenőrzésen túljutna, az App pedig a `view.sessionId`-n dobna, és mivel
  * az ErrorBoundary nem áll vissza magától, az overlay onnantól véglegesen hibaszöveget
  * mutatna. Egy rossz alakú elemet inkább eldobunk, mint hogy az egész listát elveszítsük.
  */

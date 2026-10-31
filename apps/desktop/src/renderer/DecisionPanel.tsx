@@ -36,9 +36,9 @@ interface Props {
   remoteControl: boolean
   /** Az App billentyű-előzménye: az overlay megjelenése és az utolsó szövegmezős leütés (key-guard.ts). */
   keyHistory: RefObject<KeyHistory>
-  /** A daemon elfogadta a döntést — az App ebből lépteti a kijelölést, vagy rejti el az overlayt. */
+  /** A daemon elfogadta a döntést: az App ebből lépteti a kijelölést, vagy rejti el az overlayt. */
   onDecided: () => void
-  /** Ugrás a session VSCode ablakára — ott a natív prompt végig megvan. */
+  /** Ugrás a session VSCode ablakára: ott a natív prompt végig megvan. */
   onJump: () => void
 }
 
@@ -266,7 +266,7 @@ export function DecisionPanel({
         if (isUnreadableQuestion(decision)) {
           return (
             <div className="decision-row">
-              <span className="muted">A kérdés formátuma ismeretlen — itt nem válaszolható.</span>
+              <span className="muted">A kérdés formátuma ismeretlen, itt nem válaszolható.</span>
               <button type="button" disabled={busy} onClick={() => { setMode('deny') }}>
                 Tilt…
               </button>
@@ -305,7 +305,7 @@ export function DecisionPanel({
   const summary = useMemo(() => summaryView(decision.summary), [decision])
   const limitNote = (
     <p className="muted">
-      Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik — a teljes
+      Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik. A teljes
       szöveg a VSCode-ban.
     </p>
   )

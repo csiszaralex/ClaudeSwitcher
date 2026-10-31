@@ -21,13 +21,13 @@ interface PreviewBlock {
   /** Rövid megjegyzések a blokk fejlécében (pl. „minden előfordulás", a cella módja). */
   notes: string[]
   lines: PreviewLine[]
-  /** Ennyi sor nem látszik a blokkból — a sor- vagy a karakterkorlát miatt. */
+  /** Ennyi sor nem látszik a blokkból, a sor- vagy a karakterkorlát miatt. */
   hiddenLines: number
 }
 
 export interface EditPreview {
   blocks: PreviewBlock[]
-  /** Igaz, ha a karakterkorlát miatt valami lemaradt — a panel ezt ki is írja. */
+  /** Igaz, ha a karakterkorlát miatt valami lemaradt. A panel ezt ki is írja. */
   truncated: boolean
 }
 
@@ -50,7 +50,7 @@ function splitLines(text: string): string[] {
 /**
  * Egyszerű soros összevetés, diff-könyvtár nélkül: a közös első és utolsó sorok környezetként
  * maradnak, a köztük lévő régi sorok `-`, az újak `+`. Az Edit `old_string`-je jellemzően pár
- * változatlan sort is tartalmaz a változás körül — ezek így nem pirosak-zöldek.
+ * változatlan sort is tartalmaz a változás körül, ezek így nem pirosak-zöldek.
  */
 function diffLines(oldText: string, newText: string): PreviewLine[] {
   const before = splitLines(oldText)
@@ -117,7 +117,7 @@ function cellSource(source: unknown): string | undefined {
 }
 
 /**
- * Egy `.ipynb`-be írt tartalom cellánként, ahogy a VSCode is mutatja — vagy `undefined`, ha a
+ * Egy `.ipynb`-be írt tartalom cellánként, ahogy a VSCode is mutatja, vagy `undefined`, ha a
  * tartalom nem nbformat (nem JSON, nincs `cells` tömbje, vagy egy cellája olvashatatlan). A
  * kimenetek és a metaadatok nem látszanak: a jóváhagyandó tartalom a cellák forrása.
  */
@@ -152,7 +152,7 @@ function rawBlocks(toolName: string, input: Record<string, unknown>): PreviewBlo
   if (!isEditTool(toolName)) return undefined
   switch (toolName) {
     case 'Write': {
-      // A hook nem mondja meg, új-e a fájl vagy felülíródik — ezért „új tartalom", nem „új fájl".
+      // A hook nem mondja meg, új-e a fájl vagy felülíródik, ezért „új tartalom", nem „új fájl".
       const { content, file_path: path } = input
       if (typeof content !== 'string') return undefined
       // Egy jegyzetfüzet nyers nbformat JSON-ja olvashatatlan; ami nem az, a nyers szövegnézetbe kerül.
@@ -187,7 +187,7 @@ function rawBlocks(toolName: string, input: Record<string, unknown>): PreviewBlo
 
 /**
  * Egy fájlíró kérés (`edit` fajta) előnézete: mit írna a fájlba. Soha nem dob; ismeretlen
- * eszköznél vagy alaknál `undefined` — a panel ilyenkor a nyers részleteket mutatja.
+ * eszköznél vagy alaknál `undefined`, a panel ilyenkor a nyers részleteket mutatja.
  *
  * Két korlát van: blokkonként `maxLines` sor, és az összes blokkra együtt `limit` karakter
  * (ugyanaz, mint a részleteknél). Ahol a karakterkeret elfogy, ott a sor is elvágódik, a blokk

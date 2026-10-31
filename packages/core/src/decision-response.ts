@@ -1,7 +1,7 @@
 import type { PermissionRequestInfo, PermissionRule, RuleDestination } from './decision.js'
 import { isRecord } from './guards.js'
 
-/** A felhasználó döntése egy függő kérésről — az overlayből, IPC-n át érkezik. */
+/** A felhasználó döntése egy függő kérésről: az overlayből, IPC-n át érkezik. */
 export type UserDecision =
   | { type: 'allow' }
   | { type: 'deny'; message?: string | undefined }
@@ -18,7 +18,7 @@ export type DecisionResult = { ok: true; body: HookDecisionBody } | { ok: false;
 
 /** Három független mérés szerint a Claude Code a hookból adott terv-jóváhagyást figyelmen kívül hagyja. */
 export const PLAN_APPROVAL_UNSUPPORTED =
-  'Tervet a hookból nem lehet jóváhagyni (Claude Code korlát) — hagyd jóvá a VSCode-ban.'
+  'Tervet a hookból nem lehet jóváhagyni (Claude Code korlát). Hagyd jóvá a VSCode-ban.'
 
 /**
  * Olvashatatlan kérésre (`PermissionRequestInfo.readable`) a panel csak az eszköz nevét látja:
@@ -35,7 +35,7 @@ function refuse(reason: string): DecisionResult {
   return { ok: false, reason }
 }
 
-/** `ruleContent` nélküli szabálynál a kulcs kimarad — `undefined`-ként nem utazhat a dróton. */
+/** `ruleContent` nélküli szabálynál a kulcs kimarad: `undefined`-ként nem utazhat a dróton. */
 function toWire(rule: PermissionRule): Record<string, string> {
   return rule.ruleContent === undefined
     ? { toolName: rule.toolName }
@@ -43,7 +43,7 @@ function toWire(rule: PermissionRule): Record<string, string> {
 }
 
 /**
- * A felhasználó döntéséből a hook válasza — vagy annak megtagadása, ha a döntés az adott
+ * A felhasználó döntéséből a hook válasza, vagy annak megtagadása, ha a döntés az adott
  * kérésre nem érvényes. Ez az egyetlen hely, ahol a spec tiltásai érvényesülnek: kérdést csak
  * válasszal, tervet soha nem enged tovább, olvashatatlan kérést pedig csak tilthat.
  */
@@ -58,7 +58,7 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
     case 'deny': {
       const message = decision.message?.trim() ?? ''
       if (request.kind === 'plan' && message === '') {
-        return refuse('A terv elutasításához visszajelzés kell — abból tervez újra a session.')
+        return refuse('A terv elutasításához visszajelzés kell, abból tervez újra a session.')
       }
       return accept(message === '' ? { behavior: 'deny' } : { behavior: 'deny', message })
     }
@@ -84,9 +84,9 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
       if (request.kind !== 'question') return refuse('Válasz csak kérdésre adható.')
       // Üres lista = a kérdéseket nem tudtuk kiolvasni (megváltozott `tool_input` alak). A
       // kérdésenkénti ellenőrzés ilyenkor semmit nem utasítana el, és egy válasz nélküli `allow`
-      // menne ki — épp az, amit a spec tilt. Innen csak a VSCode vagy egy tiltás vezet tovább.
+      // menne ki, épp az, amit a spec tilt. Innen csak a VSCode vagy egy tiltás vezet tovább.
       if (request.questions.length === 0) {
-        return refuse('A kérdéseket nem sikerült kiolvasni — válaszolj a VSCode-ban.')
+        return refuse('A kérdéseket nem sikerült kiolvasni. Válaszolj a VSCode-ban.')
       }
       // A válasz kulcsai pontosan a kérdések szövegei: egy idegen kulcs olyan választ jelentene,
       // amit a felhasználó nem az itt látott kérdésre adott.
@@ -104,7 +104,7 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
   }
 }
 
-/** Többválasztós válasz a dokumentált formában (a tömb „Other"-ként jelent meg — spike R1a). */
+/** Többválasztós válasz a dokumentált formában (a tömb „Other"-ként jelent meg, spike R1a). */
 export function joinAnswerLabels(labels: readonly string[]): string {
   return labels.join(', ')
 }

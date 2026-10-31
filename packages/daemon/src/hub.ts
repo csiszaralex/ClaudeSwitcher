@@ -41,7 +41,7 @@ export class Hub {
    * Szándékosan nincs `broadcast(payload: unknown)` kényelmi változat: a daemon
    * maga szerializál, hogy az azonos pillanatképeket ki tudja szűrni, tehát egy
    * ilyen metódusnak nem lenne hívója. Egy hívó nélküli, teszteletlen második
-   * belépési pont rosszabb, mint a hiánya — ha később kell, egy sor visszatenni.
+   * belépési pont rosszabb, mint a hiánya. Ha később kell, egy sor visszatenni.
    */
   broadcastRaw(message: string): void {
     for (const client of this.#clients) {

@@ -3,7 +3,7 @@ import { COMMAND_TOOLS, isRecord } from '@claudeswitcher/core/browser'
 
 /**
  * Ennyi karakter jelenik meg legfeljebb a lenyitható részletekben. Egy több száz kilobájtos
- * Workflow-szkript a `<pre>`-ben másodpercekre megfagyasztaná az overlayt — az a döntéshez
+ * Workflow-szkript a `<pre>`-ben másodpercekre megfagyasztaná az overlayt, az a döntéshez
  * úgysem kell egészében, a teljes szöveg a VSCode-ban megvan.
  */
 export const DETAILS_LIMIT = 20_000
@@ -29,7 +29,7 @@ interface DetailBlock {
 
 export interface ToolDetails {
   blocks: DetailBlock[]
-  /** Igaz, ha a `DETAILS_LIMIT` miatt valami lemaradt — a panel ezt ki is írja. */
+  /** Igaz, ha a `DETAILS_LIMIT` miatt valami lemaradt. A panel ezt ki is írja. */
   truncated: boolean
 }
 
@@ -77,7 +77,7 @@ export function sandboxDisabled(toolInput: unknown): boolean {
  * A `toolInput` olvasható szövegként, méretkorláttal. Soha nem dob.
  *
  * A többsoros vagy hosszú szöveges mezők (a Workflow `script`-je, egy MCP-hívás promptja)
- * külön blokkba kerülnek a saját sortöréseikkel — JSON-ban egyetlen, `\n`-ekkel teli sor
+ * külön blokkba kerülnek a saját sortöréseikkel: JSON-ban egyetlen, `\n`-ekkel teli sor
  * lennének, amit senki nem tud elolvasni. A többi mező szép JSON-ként, elöl.
  */
 export function formatToolInput(input: unknown, limit: number = DETAILS_LIMIT): ToolDetails {

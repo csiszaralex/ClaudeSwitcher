@@ -91,7 +91,7 @@ function reportOnce(filePath: string, what: string, error: unknown): void {
   console.error(`[scan] ${what} failed for ${filePath}`, error)
 }
 
-/** Nincs ilyen fájl vagy könyvtár — subagenteknél ez a normális eset, nem hiba. */
+/** Nincs ilyen fájl vagy könyvtár: subagenteknél ez a normális eset, nem hiba. */
 function isMissing(error: unknown): boolean {
   const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
   return code === 'ENOENT' || code === 'ENOTDIR'
@@ -102,7 +102,7 @@ async function readSubagentMeta(metaPath: string): Promise<SubagentMeta> {
   try {
     raw = await readFile(metaPath, 'utf8')
   } catch (error) {
-    // Hiányzó meta: nincs címke, de a subagent attól még futhat — az elavulási ablak határolja.
+    // Hiányzó meta: nincs címke, de a subagent attól még futhat, az elavulási ablak határolja.
     if (!isMissing(error)) reportOnce(metaPath, 'subagent meta read', error)
     return { finished: false }
   }
@@ -210,7 +210,7 @@ export async function scanSessions(
   /** Csak a legalább egy aktív subagenttel bíró sessionök szerepelnek benne. */
   subagents: Map<string, SubagentView[]>
 }> {
-  // A probe szinkron válaszai a legutóbbi pillanatképből jönnek, ezért előbb frissítünk —
+  // A probe szinkron válaszai a legutóbbi pillanatképből jönnek, ezért előbb frissítünk,
   // a fájlolvasással párhuzamosan. A frissítés nem blokkol, és soha nem utasít el.
   const [records, locks] = await Promise.all([readRecords(claudeDir), readLocks(claudeDir), probe.refresh()])
   const sessions = resolveLiveSessions(records, locks, probe)

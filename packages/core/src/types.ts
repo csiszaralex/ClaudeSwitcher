@@ -10,7 +10,7 @@ export interface SessionRecord {
   bridgeSessionId?: string | null | undefined
   /**
    * A session állapota a Claude Code szerint (2.1.296+, mérve: `idle`, `busy`, `waiting`).
-   * Nem dokumentált, ezért nyers szövegként tartjuk meg — egy ismeretlen új érték se dobjon el
+   * Nem dokumentált, ezért nyers szövegként tartjuk meg: egy ismeretlen új érték se dobjon el
    * semmit; a fogyasztó csak az általa ismert értékekre reagál.
    */
   status?: string | undefined
@@ -39,7 +39,7 @@ export type SessionStatus = 'waiting' | 'working' | 'idle'
 export interface SessionActivity {
   lastAssistantText?: string | undefined
   runningTool?: string | undefined
-  /** Röviden, min dolgozik a futó tool (parancs, minta, fájlnév…) — lásd `toolDetail`. */
+  /** Röviden, min dolgozik a futó tool (parancs, minta, fájlnév…), lásd `toolDetail`. */
   toolDetail?: string | undefined
   lastEventAt?: number | undefined
 }
@@ -81,7 +81,7 @@ export interface SessionView {
   /**
    * A session utolsó `Stop` eseményének ideje (ms), amíg azóta nem mutatott új tevékenységet
    * (PreToolUse, PermissionRequest, várakozó Notification, futó tool a pillanatképben). Ebből
-   * látszik, hogy „épp végzett" — a `status` maga ilyenkor is `idle`. Aktív subagent mellett
+   * látszik, hogy „épp végzett", a `status` maga ilyenkor is `idle`. Aktív subagent mellett
    * nincs: a háttérmunka a fő kör Stop-ja után is tart, és egy subagent futó toolja törli is.
    */
   stoppedAt?: number | undefined

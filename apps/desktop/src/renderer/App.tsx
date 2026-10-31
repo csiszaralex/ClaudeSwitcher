@@ -57,7 +57,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
   const decision = selectedRowView === undefined ? undefined : activeDecision(selectedRowView.decisions)
 
   // A legutóbbi állapot az aszinkron kezelőknek (megjelenés, döntés utáni léptetés). Egy
-  // renderkori closure a döntés válaszáig vagy a megjelenésig elavulhat — a lépést a
+  // renderkori closure a döntés válaszáig vagy a megjelenésig elavulhat: a lépést a
   // legfrissebb listán kell kiszámolni, különben egy közben eltűnt sessionre ugorhatna.
   const latest = useRef({ rows, decisions })
   useEffect(() => {
@@ -136,7 +136,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
 
   // A kijelölt sor legördítése. A lista scrollozható, tehát nélküle a nyilakkal a
   // kijelölés kifuthat a látható területről, és az Enter egy olyan sessiont aktiválna,
-  // amit a felhasználó nem is lát — a legrosszabb fajta hiba ebben az appban, mert
+  // amit a felhasználó nem is lát. Ez a legrosszabb fajta hiba ebben az appban, mert
   // ugyanúgy „működik", csak nem azt teszi, amit vártál.
   const selectedRow = useRef<HTMLLIElement | null>(null)
   useEffect(() => {
@@ -144,7 +144,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
   }, [selected])
 
   // Függőséglista nélkül: a sorlista minden renderben új tömb, a kezelő tehát úgyis minden
-  // renderben cserélődne — így legalább biztosan a legfrissebb sorokat látja.
+  // renderben cserélődne, így legalább biztosan a legfrissebb sorokat látja.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       // Szövegmezőben a gépelés az övé: se a nyilak, se az Enter, se az Esc ne vezérelje a listát.
@@ -157,7 +157,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
         event.preventDefault()
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
-      // Nyitott döntési panelnél a Tab a gombok között lép — ott nem ugrás.
+      // Nyitott döntési panelnél a Tab a gombok között lép, ott nem ugrás.
       if (event.key === 'Enter' || (event.key === 'Tab' && decision === undefined)) {
         event.preventDefault()
         const id = ids[resolveSelectedIndex(ids, selectedId)]
@@ -174,7 +174,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
     <div className="overlay">
       <ul className="sessions">
         {rows.length === 0 && (
-          // „Nincs session" és „nem érjük el a daemont" nem ugyanaz — a felhasználónak
+          // „Nincs session" és „nem érjük el a daemont" nem ugyanaz: a felhasználónak
           // látnia kell, melyikről van szó.
           <li className="empty">
             {connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
@@ -255,7 +255,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
             }}
             onJump={() => {
               // A session-azonosítóval, mint eddig. Ismeretlen sessionnél a main nem talál ablakot,
-              // és nem ugrik — a natív prompt a VSCode-ban attól még ott van.
+              // és nem ugrik. A natív prompt a VSCode-ban attól még ott van.
               void window.claudeswitcher.focusSession(selectedRowView.sessionId)
             }}
           />
@@ -263,10 +263,10 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
       )}
 
       {decision === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
-        // Nincs tartott kérés, tehát nincs mit eldönteni — de a sor ne legyen zsákutca: a natív
+        // Nincs tartott kérés, tehát nincs mit eldönteni, de a sor ne legyen zsákutca: a natív
         // prompt a VSCode-ban ott van.
         <JumpNotice
-          text="A VSCode-ban vár jóváhagyásra — az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett)."
+          text="A VSCode-ban vár jóváhagyásra. Az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett)."
           sessionId={selectedRowView.sessionId}
         />
       )}
@@ -274,7 +274,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
       <div className="status-bar">
         {/*
           Az életjel ideje. Ez az egyetlen jel, amiből látszik, hogy a lista ÉL, csak nincs
-          változás — a daemon az azonos pillanatképet nem küldi újra, tehát egy tétlen gépen
+          változás. A daemon az azonos pillanatképet nem küldi újra, tehát egy tétlen gépen
           a mozdulatlan lista és a megállt poll különben pont ugyanúgy néz ki.
         */}
         <span className="muted">
@@ -282,7 +282,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
             ? 'ellenőrizve: még nem'
             : `ellenőrizve: ${formatDuration(now - checkedAt)}`}
         </span>
-        {!connected && <span className="muted">kapcsolat megszakadt — újracsatlakozás…</span>}
+        {!connected && <span className="muted">kapcsolat megszakadt, újracsatlakozás…</span>}
       </div>
     </div>
   )

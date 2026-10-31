@@ -12,7 +12,7 @@ const RULE = /^([A-Za-z0-9_-]+)(?:\(([\s\S]+)\))?$/
 
 /**
  * Soronként egy szabály a szerkeszthető előnézetből. Az első hibás sort visszaadja, a számával
- * együtt — egy elgépelt szabály csendes „javítása" más engedélyt adna, mint amit a felhasználó lát.
+ * együtt: egy elgépelt szabály csendes „javítása" más engedélyt adna, mint amit a felhasználó lát.
  */
 export function parseRules(text: string): ParsedRules {
   const rules: PermissionRule[] = []

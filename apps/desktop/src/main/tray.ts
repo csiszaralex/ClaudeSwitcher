@@ -18,7 +18,7 @@ export interface TrayHandle {
  *
  * A `nativeImage.createFromPath` hiányzó vagy hibás fájlnál NEM dob, hanem üres képet
  * ad vissza, és egy üres képpel létrehozott tálcaikon Windowson láthatatlan. Az app
- * így futna, a felhasználó pedig nem találná meg — csendes hiba egy olyan appban, aminek
+ * így futna, a felhasználó pedig nem találná meg: csendes hiba egy olyan appban, aminek
  * a tálcaikon az egyetlen belépési pontja. A dobás az `app.whenReady()` hibakezelőjéhez
  * jut, ami hibadialógust mutat.
  */
@@ -80,7 +80,7 @@ export function createTray(options: {
         },
       },
       {
-        // Kikapcsolva csak az ablak jön elő, a tab nem — pontosan az M1-es viselkedés.
+        // Kikapcsolva csak az ablak jön elő, a tab nem, pontosan az M1-es viselkedés.
         label: 'Ugrás a pontos Claude-tabra',
         type: 'checkbox',
         checked: jumpToTab,
@@ -107,7 +107,7 @@ export function createTray(options: {
       lastCount = count
       tray.setImage(count > 0 ? waiting : idle)
       tray.setToolTip(
-        count > 0 ? `ClaudeSwitcher — ${count} session vár rád` : 'ClaudeSwitcher',
+        count > 0 ? `ClaudeSwitcher: ${count} session vár rád` : 'ClaudeSwitcher',
       )
     },
     setNotice(text) {

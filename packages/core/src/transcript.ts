@@ -16,7 +16,7 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
   const content = (message as Record<string, unknown>)['content']
   if (!Array.isArray(content)) return []
   // A nem-objektum elemeket itt dobjuk el, nem a hívóban. Egy `null` blokk
-  // valid JSON, és a `.type` olvasása rajta TypeError-t dobna — pontosan az a
+  // valid JSON, és a `.type` olvasása rajta TypeError-t dobna, pontosan az a
   // fajta összeomlás, amit ennek a modulnak meg kell előznie.
   return content.filter(
     (block): block is ContentBlock => typeof block === 'object' && block !== null,
@@ -25,7 +25,7 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
 
 /**
  * A transcript utolsó soraiból kiolvassa, mit csinál épp a session.
- * Ismeretlen rekordtípus némán kimarad — a formátum bővül, és egy új típus
+ * Ismeretlen rekordtípus némán kimarad: a formátum bővül, és egy új típus
  * nem törheti el a monitort.
  */
 export function readActivityFromLines(lines: string[]): SessionActivity {

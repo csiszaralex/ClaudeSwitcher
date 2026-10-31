@@ -6,7 +6,7 @@ interface QuestionState {
   other: string
 }
 
-/** Kérdésenként a választás — kulcs a kérdés szövege, mint a hook válaszában. */
+/** Kérdésenként a választás: kulcs a kérdés szövege, mint a hook válaszában. */
 export type FormState = Record<string, QuestionState>
 
 const EMPTY: QuestionState = { selected: [], other: '' }
@@ -29,7 +29,7 @@ export function toggleOption(state: FormState, question: AskQuestion, label: str
   return { ...state, [question.question]: { selected, other: current.other } }
 }
 
-/** Egyválasztósnál a szabad szöveg kizárja a választott opciót — a natív „Other" is így viselkedik. */
+/** Egyválasztósnál a szabad szöveg kizárja a választott opciót, a natív „Other" is így viselkedik. */
 export function setOtherText(state: FormState, question: AskQuestion, text: string): FormState {
   const current = stateOf(state, question)
   const selected = question.multiSelect || text.trim() === '' ? current.selected : []
@@ -56,7 +56,7 @@ export function buildAnswers(questions: readonly AskQuestion[], state: FormState
 }
 
 /**
- * Igaz, ha minden kérdésre van nem üres válasz — csak ekkor küldhető el. Üres listánál soha: az
+ * Igaz, ha minden kérdésre van nem üres válasz: csak ekkor küldhető el. Üres listánál soha: az
  * azt jelenti, hogy a kérdéseket nem tudtuk kiolvasni, és egy „üres" válasz nem válasz.
  */
 export function isComplete(questions: readonly AskQuestion[], state: FormState): boolean {

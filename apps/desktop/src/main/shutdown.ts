@@ -3,7 +3,7 @@ const STOP_TIMEOUT_MS = 2000
 
 /**
  * A daemon leállítása legfeljebb `timeoutMs` ideig. Igazat ad, ha a leállás időben lezárult,
- * hamisat, ha az idő lejárt vagy a leállás hibát dobott — a kilépés egyik esetben sem akadhat
+ * hamisat, ha az idő lejárt vagy a leállás hibát dobott. A kilépés egyik esetben sem akadhat
  * meg: a tartott kérések kapcsolatai a processzel úgyis elhalnak, és azt a Claude Code mérten
  * „nincs döntés"-nek veszi (spec §8).
  */

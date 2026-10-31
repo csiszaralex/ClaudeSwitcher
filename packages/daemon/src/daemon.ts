@@ -56,7 +56,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       onLifecycle: (event) => {
         sessions.applyLifecycle(event)
         // Kör vége vagy session vége: ha a VSCode-ban tiltottak, erről csak így értesülünk (a
-        // tiltásnak nincs PostToolUse-a). A Stop csak a fő agent kéréseit zárja — egy háttérben
+        // tiltásnak nincs PostToolUse-a). A Stop csak a fő agent kéréseit zárja, egy háttérben
         // futó subagent kérése a #pending-en át továbbra is várakozónak mutatja a sessiont.
         if (event.kind === 'stop') decisions.sessionStopped(event.sessionId)
         if (event.kind === 'end') decisions.sessionEnded(event.sessionId)
@@ -69,7 +69,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
       onPostToolUse: (event) => {
         // Előbb a Notification-várakozás, aztán a függés: így egyik köztes állapot sem mutat
-        // „waiting" sessiont függő döntés nélkül — a függés még tartja, amíg a broker le nem zárja.
+        // „waiting" sessiont függő döntés nélkül: a függés még tartja, amíg a broker le nem zárja.
         sessions.applyToolFinished(event.sessionId)
         decisions.postToolUse(event)
       },
@@ -78,7 +78,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
     },
     // Diagnosztika, alapból kikapcsolva. A hookok valódi alakja nincs dokumentálva, és egy
-    // rosszul olvasott mezőnév ugyanúgy néz ki, mint egy hiányzó adat — ezzel a nyers
+    // rosszul olvasott mezőnév ugyanúgy néz ki, mint egy hiányzó adat, ezzel a nyers
     // törzs megnézhető anélkül, hogy a kódot kellene átírni hozzá.
     process.env['CLAUDESWITCHER_HOOK_LOG'],
   )
@@ -102,7 +102,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   }
 
   // A SessionStore minden `apply*` híváskor jelez, akkor is, ha az állapot nem
-  // változott — a másodperces poll így percenként hússzor küldene azonos
+  // változott, a másodperces poll így percenként hússzor küldene azonos
   // pillanatképet. A szűrés szándékosan itt van, nem a store-ban: a store dolga
   // annyi, hogy „történt valami", a hubé, hogy mit érdemes elküldeni. A
   // szerializált alak összehasonlítása pontos, ellentétben egy mezőnkénti
@@ -119,14 +119,14 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   /**
    * Annak a sessionnek az azonosítója, amelynek a döntését az app ÉPP most zárja le. A broker
-   * a `decide`-on belül pontosan egyszer jelez, és csak sikeres döntésnél — így a jelzésből
+   * a `decide`-on belül pontosan egyszer jelez, és csak sikeres döntésnél, így a jelzésből
    * tudjuk, hogy ezt a változást az app okozta, és a store a függést meg a Notification-
    * várakozást egy lépésben, egyetlen broadcasttal törölheti.
    */
   let resolvingFor: string | undefined
   decisions.onChange(({ abortedSessionId }) => {
     // Sessionönként a legrégebbi függő döntés: amíg az tart, a session várakozó. A store
-    // emittál, az pedig broadcastol — a döntések listája is ezzel megy ki.
+    // emittál, az pedig broadcastol: a döntések listája is ezzel megy ki.
     const pendingSince = new Map<string, number>()
     for (const view of decisions.views()) {
       const earlier = pendingSince.get(view.sessionId)
@@ -167,7 +167,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         decisions.pruneAbsent(new Set(snapshot.sessions.map((session) => session.record.sessionId)))
         // Életjel MINDEN sikeres szkennelés után, akkor is, ha a pillanatkép nem változott.
         // Enélkül a kliens nem tudja megkülönböztetni azt, hogy „élünk, csak nincs
-        // változás", attól, hogy „megállt a poll" — és épp a monitorozó eszköznél a
+        // változás", attól, hogy „megállt a poll", és épp a monitorozó eszköznél a
         // legrosszabb kimenet, ha egy állott lista élőnek látszik. Egy WebSocket-ping ezt
         // NEM fedné: a socket akkor is egészséges, ha a szkennelés halt meg.
         hub.broadcastRaw(JSON.stringify({ type: 'tick', protocol: DAEMON_PROTOCOL, at: Date.now() }))

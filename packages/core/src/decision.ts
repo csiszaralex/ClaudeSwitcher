@@ -33,10 +33,10 @@ export interface AskQuestion {
 
 /**
  * Mit kínál az overlay a kérésre (spec §5 táblázata):
- * - `tool`: parancs, WebFetch, MCP — engedélyez / tilt / projekt- vagy gépszintű szabály
- * - `edit`: fájlírás — engedélyez / tilt / erre a sessionre automatikus szerkesztés
- * - `question`: AskUserQuestion — csak a felhasználó válaszával engedhető tovább
- * - `plan`: ExitPlanMode — elutasítható visszajelzéssel; jóváhagyni a hookból nem lehet
+ * - `tool` (parancs, WebFetch, MCP): engedélyez / tilt / projekt- vagy gépszintű szabály
+ * - `edit` (fájlírás): engedélyez / tilt / erre a sessionre automatikus szerkesztés
+ * - `question` (AskUserQuestion): csak a felhasználó válaszával engedhető tovább
+ * - `plan` (ExitPlanMode): elutasítható visszajelzéssel; jóváhagyni a hookból nem lehet
  */
 const DECISION_KINDS = ['tool', 'edit', 'question', 'plan'] as const
 
@@ -190,7 +190,7 @@ function metaField(meta: string, field: string): string | undefined {
 
 /**
  * A Workflow szkriptjének `export const meta = { name, description, … }` blokkja. A tool_input
- * csak `{ script, args }`, a javaslat null (mérve, Task 10 D) — a nevet és a leírást csak innen
+ * csak `{ script, args }`, a javaslat null (mérve, Task 10 D), a nevet és a leírást csak innen
  * lehet kiolvasni. Tűrő minta, és ha nem illeszkedik, egyszerűen nincs eredmény: egy furcsa
  * szkript miatt a kérés nem eshet ki, legfeljebb „Workflow" marad a felirata.
  *

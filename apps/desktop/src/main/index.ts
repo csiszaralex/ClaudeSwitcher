@@ -121,7 +121,7 @@ function createOverlay(): BrowserWindow {
   // sessiont. Szándékosan a main `show` eseménye, nem a renderer `focus`-a vagy a
   // `visibilitychange`: a Windows előtérzára a `focus()`-t csendben megtagadhatja (lásd
   // session:focus), a Chromium láthatósági jele pedig az ablakelfedés-követéstől függ. A
-  // `show` mindig lefut, amikor az ablak ténylegesen láthatóvá válik — és csak akkor.
+  // `show` mindig lefut, amikor az ablak ténylegesen láthatóvá válik, és csak akkor.
   window.on('show', () => {
     window.webContents.send('overlay:shown')
   })
@@ -169,7 +169,7 @@ function hideOverlay(): void {
 
 /**
  * Elküldi a tab-fókusz URI-t a VSCode-nak, `TAB_FOCUS_SETTLE_MS` várakozás után. Soha nem dob:
- * egy elbukott megnyitás csak naplózódik — az ablak ilyenkor is elöl van, mint az M1-ben.
+ * egy elbukott megnyitás csak naplózódik: az ablak ilyenkor is elöl van, mint az M1-ben.
  */
 async function openTabFocusUri(uri: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, TAB_FOCUS_SETTLE_MS))
@@ -231,7 +231,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('decision:decide', (event, id: unknown, raw: unknown) => {
     if (!fromOverlay(event, 'decision:decide')) return { ok: false, reason: FOREIGN_SENDER }
     // IPC-bemenet: a renderer bármit küldhet. Csak egy pontosan érvényes döntés jut a
-    // daemonhoz — annak érvényességét az adott kérésre a broker még külön ellenőrzi.
+    // daemonhoz, annak érvényességét az adott kérésre a broker még külön ellenőrzi.
     if (typeof id !== 'string') return { ok: false, reason: 'Érvénytelen azonosító.' }
     const decision = parseUserDecision(raw)
     if (decision === undefined) return { ok: false, reason: 'Érvénytelen döntés.' }
@@ -245,7 +245,7 @@ app.whenReady().then(async () => {
     const view = running.state().sessions.find((s) => s.sessionId === sessionId)
     if (view === undefined) return false
     // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
-    // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van —
+    // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van:
     // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
     // tálcagombot villogtatná. Ha így is elbukik, a `code` CLI tartalék megoldja.
     const outcome = await focusSessionWindow(view)
@@ -303,7 +303,7 @@ app.whenReady().then(async () => {
     },
     hideAfterLastDecision,
     onToggleHideAfterLastDecision: (enabled) => {
-      // Azonnal él, akkor is, ha a mentés elbukik (pl. elrontott config fájl) — akkor csak
+      // Azonnal él, akkor is, ha a mentés elbukik (pl. elrontott config fájl), akkor csak
       // ennek a futásnak a végéig.
       hideAfterLastDecision = enabled
       void updateConfig(userData, { hideAfterLastDecision: enabled })
@@ -425,7 +425,7 @@ app.whenReady().then(async () => {
     tray.destroy()
   }
 }).catch((error: unknown) => {
-  // Tálcaikonos app: ha az indulás elbukik — tipikusan a daemon —, nincs ablak és
+  // Tálcaikonos app: ha az indulás elbukik (tipikusan a daemon), nincs ablak és
   // nincs tálcaikon, a processz csendben halott maradna, a felhasználó pedig csak
   // azt látná, hogy „nem csinál semmit". A showErrorBox szinkron és ablak nélkül
   // is működik, tehát ez az egyetlen hely, ahol a hiba biztosan eljut hozzá.

@@ -11,7 +11,7 @@ import {
 /**
  * Egy ELENGEDETT kérés ennyi ideig marad meg azután, hogy a sessionje kiesett a registry
  * pillanatképéből: tíz poll-kör (`POLL_INTERVAL_MS`), így egy kimaradt vagy félig írt registry-fájl nem
- * zár le egy élő sessiont. Ha a session processze meghalt, SessionEnd nem jön — e nélkül a sor
+ * zár le egy élő sessiont. Ha a session processze meghalt, SessionEnd nem jön, e nélkül a sor
  * örökre megmaradna. A még dönthető kérést ez SOHA nem zárja (spec §8: a jóváhagyás felderítés
  * nélkül is működik); azt a hook-kliens bontása zárja, ami a processz halálával együtt jár.
  */
@@ -110,7 +110,7 @@ function callKey(
 }
 
 /**
- * A tartott PermissionRequest-ek tulajdonosa — a rendszer egyetlen valódi konkurens állapotgépe.
+ * A tartott PermissionRequest-ek tulajdonosa: a rendszer egyetlen valódi konkurens állapotgépe.
  *
  * Három forrásból jöhet döntés, és az első nyer: az app (`decide`), a VSCode vagy a telefon
  * (`postToolUse`, `sessionStopped`, `sessionEnded`, `subagentStopped`), illetve az elengedés.
@@ -139,7 +139,7 @@ export class DecisionBroker {
   /**
    * A kérés tartása. A visszaadott ígéret a hook válaszával teljesül; `undefined` = nincs döntés.
    *
-   * @param signal — a hook-kliens kapcsolata. Ha bomlik (megszakítás a VSCode-ban, a session
+   * @param signal A hook-kliens kapcsolata. Ha bomlik (megszakítás a VSCode-ban, a session
    * processzének halála), nincs kinek válaszolni: a kérés válasz nélkül lezárul, és eltűnik a sorból.
    */
   hold(request: PermissionRequestInfo, signal?: AbortSignal): Promise<HookDecisionBody | undefined> {
@@ -185,7 +185,7 @@ export class DecisionBroker {
     const pending = this.#pending.get(id)
     if (pending === undefined) return { ok: false, reason: 'Ez a kérés már lezárult.' }
     if (pending.view.released) {
-      return { ok: false, reason: 'Az app már elengedte ezt a kérést — dönts a VSCode-ban.' }
+      return { ok: false, reason: 'Az app már elengedte ezt a kérést. Dönts a VSCode-ban.' }
     }
     const result = buildHookResponse(pending.view, decision)
     if (!result.ok) return result
@@ -258,7 +258,7 @@ export class DecisionBroker {
     })
   }
 
-  /** Minden tartott kérés elengedése — a daemon leállásakor, a `server.close()` ELŐTT. */
+  /** Minden tartott kérés elengedése a daemon leállásakor, a `server.close()` ELŐTT. */
   releaseAll(): void {
     this.#closed = true
     for (const pending of this.#pending.values()) {
@@ -277,7 +277,7 @@ export class DecisionBroker {
   /**
    * A legrégebbi, még párosítatlan azonos PreToolUse. Mért sorrend: PreToolUse, majd ~15 ms-mal
    * később a PermissionRequest, és a Claude Code a kéréseket a hívások sorrendjében küldi. Két
-   * azonos hívásnál a Pre(id1), Pre(id2), A, B sorrendben az A az id1-é — a legújabbtól keresve
+   * azonos hívásnál a Pre(id1), Pre(id2), A, B sorrendben az A az id1-é: a legújabbtól keresve
    * felcserélődnének, és az id1 PostToolUse-a a B-t zárná le. Az összefésült Pre(id1), A,
    * Pre(id2), B sorrendre is ez a helyes.
    */
@@ -296,7 +296,7 @@ export class DecisionBroker {
     pending.detach()
     pending.respond(undefined)
     // A sor marad: a natív prompt is marad. Lezárni a PostToolUse, a Stop / SessionEnd /
-    // SubagentStop, vagy — ha a session eltűnt a registry-ből — a pruneAbsent fogja.
+    // SubagentStop, vagy (ha a session eltűnt a registry-ből) a pruneAbsent fogja.
     pending.view = { ...pending.view, released: true }
     this.#emit()
   }

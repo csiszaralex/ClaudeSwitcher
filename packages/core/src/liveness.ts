@@ -4,7 +4,7 @@ import type { IdeLock, LiveSession, SessionRecord } from './types.js'
 
 export interface ProcessProbe {
   /**
-   * Igaz, ha a pid létezik ÉS — ha `procStart` meg van adva — a process
+   * Igaz, ha a pid létezik ÉS (ha `procStart` meg van adva) a process
    * indulási ideje egyezik. A pid önmagában nem elég: a Windows újrahasznosítja
    * a pideket, és az elárvult lock fájlok miatt rossz ablakra ugranánk.
    */
@@ -24,7 +24,7 @@ export interface ProcessProbe {
   startedAtMs(pid: number): number | undefined
   /**
    * Új pillanatképet vesz, ha az előző elavult. Az `isAlive` és az `imageName` szinkron,
-   * és mindig a legutóbbi pillanatképből válaszol — a lekérdezés soha nem fut bennük,
+   * és mindig a legutóbbi pillanatképből válaszol: a lekérdezés soha nem fut bennük,
    * mert a probe az Electron főprocesszben él, és ott minden blokkoló hívás az egész
    * appot megállítja. A szkennelés ezért egyszer, a sessionök feloldása előtt hívja.
    * Soha nem utasít el: hibánál az előző pillanatkép marad érvényben.
@@ -158,7 +158,7 @@ const EMPTY_SNAPSHOT: ProcessSnapshot = {
 
 /**
  * Egy `ProcessProbe`, ami a legutóbbi sikeres pillanatképből válaszol szinkron, és csak a
- * `refresh()` vesz újat — aszinkron, a fő szál blokkolása nélkül.
+ * `refresh()` vesz újat, aszinkron, a fő szál blokkolása nélkül.
  *
  * Ez a fagyás javítása: korábban az `isAlive`/`imageName` maga indította a lekérdezést egy
  * `execFileSync`-kel, ami az Electron főprocesszben az egész appot megállította (az overlayt,
@@ -168,7 +168,7 @@ const EMPTY_SNAPSHOT: ProcessSnapshot = {
  * - Egy sikeres pillanatkép `ttlMs`-ig érvényes. Amíg egyszer sem sikerült, 250 ms-onként
  *   próbálkozunk: az üres pillanatkép minden sessiont halottnak mutatna, és a teljes TTL-t
  *   végigvárni ezzel a hazugsággal rosszabb, mint egy gyors újrapróbálkozás.
- * - Hiba vagy üres eredmény esetén az előzőt tartjuk meg — egy elbukott lekérdezés ne
+ * - Hiba vagy üres eredmény esetén az előzőt tartjuk meg: egy elbukott lekérdezés ne
  *   tüntesse el az összes sessiont a listáról. Hibasorozatonként egyszer naplózunk, nem
  *   minden pollnál.
  * - A `refresh()` soha nem utasít el.
@@ -289,7 +289,7 @@ function runPowerShellSnapshot(): Promise<ProcessSnapshot> {
 }
 
 /**
- * Windows process probe PowerShell-lel — TARTALÉK. Az app a desktop natív (koffi) probe-ját
+ * Windows process probe PowerShell-lel, csak TARTALÉK. Az app a desktop natív (koffi) probe-ját
  * használja; ez csak akkor fut, ha az nem tölthető be.
  *
  * A `procStart` a session fájlban a process creation FILETIME decimálisan; a PowerShell

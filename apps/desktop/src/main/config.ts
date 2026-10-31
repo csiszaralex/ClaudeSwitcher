@@ -6,8 +6,8 @@ import { isNotFoundError, isRecord, transformSettingsFile } from '@claudeswitche
  * Az overlay gyorsbillentyűjének alapértéke.
  *
  * Szándékosan NEM `Control+Alt+Space`: azt a Claude desktop alkalmazás foglalja (ezen a
- * gépen lemérve — a regisztráció következetesen elbukott), és Windowson a `Control+Alt`
- * amúgy is azonos az `AltGr`-rel, ami magyar kiosztáson elnyelné az `AltGr+Space`-t — `@`
+ * gépen lemérve: a regisztráció következetesen elbukott), és Windowson a `Control+Alt`
+ * amúgy is azonos az `AltGr`-rel, ami magyar kiosztáson elnyelné az `AltGr+Space`-t: `@`
  * írása közben (`AltGr+V`) egy szóköz felhozná az overlayt. A `Shift+Alt` mindkettőt
  * elkerüli.
  */
@@ -53,13 +53,13 @@ async function readRaw(file: string): Promise<string | undefined> {
   }
 }
 
-/** A fájl JSON-objektumként, vagy `undefined`, ha nem az — elrontott kézi szerkesztés. */
+/** A fájl JSON-objektumként, vagy `undefined`, ha nem az (elrontott kézi szerkesztés). */
 function parseObject(raw: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(raw)
     if (isRecord(parsed)) return parsed
   } catch {
-    // Elrontott fájl: a hívó dönti el, mi legyen — írni sosem szabad bele.
+    // Elrontott fájl: a hívó dönti el, mi legyen. Írni sosem szabad bele.
   }
   return undefined
 }
@@ -97,7 +97,7 @@ function orDefaults(existing: Record<string, unknown>): Record<string, unknown> 
  *
  * A kulcsokat egyenként olvassuk: egy hibás gyorsbillentyű nem viszi el a jó auto-hide vagy
  * tab-ugrás értéket, és egy régebbi, egy kulcsot még nem ismerő fájl arra a kulcsra az
- * alapértékkel töltődik be — átírás nélkül.
+ * alapértékkel töltődik be, átírás nélkül.
  */
 export async function loadConfig(dir: string): Promise<Config> {
   let raw: string | undefined

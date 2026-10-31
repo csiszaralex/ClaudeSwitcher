@@ -54,7 +54,7 @@ interface Kernel32 {
 let kernel32: Kernel32 | null | undefined
 
 /**
- * Lustán tölti be a kernel32 kötéseket, és egy hibát elnyel — ugyanazért, amiért a
+ * Lustán tölti be a kernel32 kötéseket, és egy hibát elnyel, ugyanazért, amiért a
  * `focus-window.ts` a user32-t: egy modulszintű koffi-hiba az indulási hibadialógus bekötése
  * előtt dobna. Elérhetetlen natív modulnál a hívó a PowerShell tartalékra esik vissza; ezt
  * egyszer naplózzuk, mert az eredményt megjegyezzük.
@@ -139,7 +139,7 @@ export function entryFromStruct(raw: Pick<ProcessEntry32, 'th32ProcessID' | 'szE
 /**
  * Pillanatkép egy processzlistából. Az indulási időt lustán kérdezzük le, csak a ténylegesen
  * megkérdezett pidekre (egy szkennelés 20–30 pid, nem mind a ~650), és pidenként legfeljebb
- * egyszer — a sikertelen lekérdezést is megjegyezzük. Listán kívüli pidet nem kérdezünk le:
+ * egyszer: a sikertelen lekérdezést is megjegyezzük. Listán kívüli pidet nem kérdezünk le:
  * az halott, akármi is futna most azon a pid-en.
  */
 export function snapshotFromEntries(
@@ -230,12 +230,12 @@ export function takeNativeSnapshot(): ProcessSnapshot | undefined {
 }
 
 /**
- * A natív Windows process probe, vagy `undefined`, ha a kernel32 kötések nem tölthetők be —
+ * A natív Windows process probe, vagy `undefined`, ha a kernel32 kötések nem tölthetők be:
  * ilyenkor a hívó a core PowerShell probe-jára esik vissza.
  *
  * A `refresh()` a fő szálon veszi a listát, PowerShell nélkül. Ezen a gépen ~15 ms ~680
  * processzre (2026-10-22), és ennek szinte egésze maga a `CreateToolhelp32Snapshot` kernelhívás
- * — egy nyers Buffer-es bejárás ugyanennyi volt —, a 20–30 indulási idő lekérdezése ~0,3 ms.
+ * (egy nyers Buffer-es bejárás ugyanennyi volt), a 20–30 indulási idő lekérdezése ~0,3 ms.
  * Ez elhanyagolható a korábbi 330 ms–10 s blokkoláshoz képest, de nem nulla, ezért a TTL a
  * régi 2 s marad: a poll és a lifecycle hookok által sűrűn indított szkennelések sem kérnek gyakrabban.
  */

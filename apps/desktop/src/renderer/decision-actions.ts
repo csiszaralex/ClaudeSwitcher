@@ -6,7 +6,7 @@ export type DecisionAction = 'allow' | 'deny' | 'rule-project' | 'rule-machine' 
 /**
  * Billentyű → művelet, fajtánként. Kérdésnél nincs: azt csak az űrlappal lehet megválaszolni
  * (válasz nélkül nem engedhető tovább). Tervnél sincs: jóváhagyni a hookból nem lehet, az
- * elutasításhoz pedig visszajelzés kell — egy félreütött betű ne utasíthasson el egy tervet.
+ * elutasításhoz pedig visszajelzés kell, és egy félreütött betű ne utasíthasson el egy tervet.
  */
 const SHORTCUTS: Readonly<Record<DecisionKind, Readonly<Record<string, DecisionAction>>>> = {
   tool: { a: 'allow', d: 'deny', p: 'rule-project', g: 'rule-machine' },
@@ -26,13 +26,13 @@ export function shortcutFor(kind: DecisionKind, key: string, readable: boolean):
 
 /**
  * Kérdés, aminek a kérdéseit nem tudtuk kiolvasni (megváltozott `tool_input` alak). Válaszolni
- * rá innen nem lehet — a panel ilyenkor a kiutat kínálja: ugrás a VSCode-ba, vagy tiltás üzenettel.
+ * rá innen nem lehet. A panel ilyenkor a kiutat kínálja: ugrás a VSCode-ba, vagy tiltás üzenettel.
  */
 export function isUnreadableQuestion(decision: { kind: DecisionKind; questions: readonly unknown[] }): boolean {
   return decision.kind === 'question' && decision.questions.length === 0
 }
 
-/** Igaz, ha a billentyű egy szövegmezőé — ott a gépelés az övé, nem a listáé vagy a panelé. */
+/** Igaz, ha a billentyű egy szövegmezőé: ott a gépelés az övé, nem a listáé vagy a panelé. */
 export function isTypingTarget(target: unknown): boolean {
   if (typeof target !== 'object' || target === null) return false
   const element = target as { tagName?: unknown; isContentEditable?: unknown }
@@ -74,7 +74,7 @@ export const SUBMIT_CHORD_LABEL = 'Ctrl+Enter'
 
 export type DecideOutcome = { ok: true } | { ok: false; reason: string }
 
-/** A main processz `DecideResult`-ja, ellenőrizve — az IPC-n át bármi jöhet. */
+/** A main processz `DecideResult`-ja, ellenőrizve, mert az IPC-n át bármi jöhet. */
 export function readDecideResult(raw: unknown): DecideOutcome {
   if (isRecord(raw)) {
     if (raw['ok'] === true) return { ok: true }
@@ -90,7 +90,7 @@ export interface OverlaySettings {
 }
 
 /**
- * A main processz beállításai, ellenőrizve. Bármi másra az alapérték (elrejtés) jön — ugyanaz,
+ * A main processz beállításai, ellenőrizve. Bármi másra az alapérték (elrejtés) jön, ugyanaz,
  * amit a main config is ad, ha a kulcs hiányzik.
  */
 export function readOverlaySettings(raw: unknown): OverlaySettings {

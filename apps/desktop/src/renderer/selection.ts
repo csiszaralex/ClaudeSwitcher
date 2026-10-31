@@ -4,7 +4,7 @@ import { recentlyTyped } from './key-guard.js'
  * A kiválasztott session indexe a jelenlegi listában, vagy -1, ha a lista üres.
  *
  * A kiválasztást session-azonosító szerint követjük, nem index szerint. A lista
- * rendezett — a várakozó sessionök felülre ugranak —, így egy index-alapú kiválasztás
+ * rendezett (a várakozó sessionök felülre ugranak), így egy index-alapú kiválasztás
  * egy átrendeződéskor csendben egy MÁSIK sessionre mutatna, és az Enter rossz ablakra
  * ugrana. Ha a kiválasztott session eltűnt, az elsőre esünk vissza.
  */

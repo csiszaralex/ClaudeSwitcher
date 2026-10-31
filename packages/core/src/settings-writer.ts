@@ -77,8 +77,8 @@ export function mergeSettings(
  * Célfájlonkénti sorbaállítás.
  *
  * Enélkül két egyidejű hívás ugyanarra a fájlra összefésült, olvashatatlan
- * JSON-t hagyna maga után — pont az a katasztrófa, amit ez a modul megelőzni
- * hivatott —, ráadásul a második beolvasás lemaradna az első írásáról, tehát az
+ * JSON-t hagyna maga után (pont az a katasztrófa, amit ez a modul megelőzni
+ * hivatott), ráadásul a második beolvasás lemaradna az első írásáról, tehát az
  * egyik patch akkor is elveszne, ha a fájl épen marad.
  *
  * A Map csak annyi bejegyzést tart, ahány külön fájlt írunk vele (a felhasználói

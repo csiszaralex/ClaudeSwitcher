@@ -7,7 +7,7 @@ type MarkerTone = 'waiting' | 'released' | 'working' | 'done' | 'idle'
 export interface StatusMarker {
   tone: MarkerTone
   glyph: string
-  /** Magyar tooltip — a szín és a jel magában nem magyarázza meg magát. */
+  /** Magyar tooltip: a szín és a jel magában nem magyarázza meg magát. */
   title: string
 }
 

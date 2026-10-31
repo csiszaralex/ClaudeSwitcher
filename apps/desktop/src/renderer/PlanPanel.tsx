@@ -9,7 +9,7 @@ interface Props {
 }
 
 /**
- * A terv a teljes szövegével. Elutasítani itt is lehet, visszajelzéssel — abból tervez újra a
+ * A terv a teljes szövegével. Elutasítani itt is lehet, visszajelzéssel: abból tervez újra a
  * session (mérve, spike K3). Jóváhagyni csak a VSCode-ban: a hookból adott jóváhagyást a Claude
  * Code figyelmen kívül hagyja (három független mérés, spike K2/K2b/K2c).
  */

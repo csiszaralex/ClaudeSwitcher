@@ -5,7 +5,7 @@ import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
 import { broadRules, editorRows, suggestionCount } from './rule-editor.js'
 
 interface Props {
-  /** A Claude Code javaslata, soronként egy szabály — a felhasználó átírhatja. */
+  /** A Claude Code javaslata, soronként egy szabály, a felhasználó átírhatja. */
   initial: string
   /** Hány javaslat maradt ki a kezdőszövegből, mert sortörés van benne (rule-editor.ts `ruleEditorSeed`). */
   multilineSuggestions: number
@@ -53,8 +53,8 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, onSub
     >
       <p className="muted">
         {machine
-          ? 'Gépszintű szabály — minden projektre és sessionre érvényes (~/.claude/settings.json).'
-          : 'Projekt-szabály — csak ebben a projektben (.claude/settings.local.json).'}
+          ? 'Gépszintű szabály: minden projektre és sessionre érvényes (~/.claude/settings.json).'
+          : 'Projekt-szabály: csak ebben a projektben (.claude/settings.local.json).'}
       </p>
       {multilineSuggestions > 0 && (
         <p className="decision-error">

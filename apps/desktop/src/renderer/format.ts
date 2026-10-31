@@ -31,7 +31,7 @@ function subagentWork(subagent: SubagentView): string {
 }
 
 /**
- * A sor tooltipje: az összes aktív subagent, soronként egy. `undefined`, ha nincs — akkor a
+ * A sor tooltipje: az összes aktív subagent, soronként egy. `undefined`, ha nincs: akkor a
  * sornak nincs is tooltipje.
  */
 export function subagentTooltip(subagents: readonly SubagentView[] | undefined): string | undefined {
@@ -75,7 +75,7 @@ export function subagentLabel(
 
 /**
  * A sor összefoglalója. Sorrend: egy várakozó session értesítése; az aktív subagent munkája
- * (a legutóbbi, és `+N`, ha több is fut) — a fő session ilyenkor csak az `Agent` toolt futtatja,
+ * (a legutóbbi, és `+N`, ha több is fut), mert a fő session ilyenkor csak az `Agent` toolt futtatja,
  * vagy a Stop után már semmit; a fő session futó toolja; végül az utolsó assistant-szöveg.
  * A függő döntés ennél is erősebb, azt az App mutatja e helyett.
  */
@@ -87,7 +87,7 @@ export function summarize(view: {
   subagents?: readonly SubagentView[] | undefined
 }): string {
   // Az `activity` a típus szerint kötelező, de a daemon üzenete futásidőben bármi lehet.
-  // Egy hiányzó mező itt renderelési hibát dobna, ami az EGÉSZ overlayt leszedné — ezért
+  // Egy hiányzó mező itt renderelési hibát dobna, ami az EGÉSZ overlayt leszedné, ezért
   // itt is védekezünk, nem csak az ErrorBoundaryben.
   const waitingText = view.status === 'waiting' ? view.notificationText : undefined
   const [latest, ...others] = view.subagents ?? []

@@ -43,7 +43,7 @@ export interface HookEvents {
  *
  * Ez nem elméleti: a kezelők `void | Promise<void>`-ot adhatnak vissza, és egy
  * elkapatlan elutasítás alapértelmezett Node beállításokkal **az egész daemont
- * megölné** — vagyis minden session hook-kezelését, nem csak ezt az egy hívást.
+ * megölné**, vagyis minden session hook-kezelését, nem csak ezt az egy hívást.
  * Szándékosan nem `await`-eljük: a válasz azonnal megy, a kezelő a maga
  * tempójában fut.
  */
@@ -79,7 +79,7 @@ function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
 /**
  * A daemon hook-szervere. A display-only route-ok feltétel nélkül 200-at adnak üres törzzsel: a
  * szerver hibája soha nem akaszthat meg egy sessiont. A PermissionRequest route a döntést tartja,
- * de bármilyen hiba esetén ott is üres 200 megy — mérve, hogy ezt a Claude Code „nincs döntés"-nek
+ * de bármilyen hiba esetén ott is üres 200 megy. Mérve, hogy ezt a Claude Code „nincs döntés"-nek
  * veszi, nem tiltásnak.
  */
 export function createHookApp(token: string, events: HookEvents, rawLogPath?: string): Hono {
@@ -90,7 +90,7 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
    *
    * Azért a nyers törzs, és nem a kiolvasott mezők: a hookok tényleges alakja nincs
    * dokumentálva, tehát épp a saját értelmezésünk a leggyanúsabb. Ha rossz mezőnevet
-   * olvasunk, a feldolgozott adat ugyanúgy hiányos lesz — a nyers viszont megmutatja.
+   * olvasunk, a feldolgozott adat ugyanúgy hiányos lesz, a nyers viszont megmutatja.
    *
    * Soha nem vár rá a válasz, és egy írási hiba sem látszik a hívón: egy diagnosztika
    * nem akaszthat meg egy sessiont.
@@ -133,7 +133,7 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
             sessionId,
             cwd: nonEmptyString(b['cwd']) ?? '',
             type,
-            // A Claude Code `message`-ben küldi — a CLAUDESWITCHER_HOOK_LOG nyers naplójából
+            // A Claude Code `message`-ben küldi, a CLAUDESWITCHER_HOOK_LOG nyers naplójából
             // mérve. A `notification_text` csak tartalék, ha egy jövőbeli verzió átnevezné.
             text: nonEmptyString(b['message']) ?? nonEmptyString(b['notification_text']),
           }),
@@ -177,7 +177,7 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       const request = parsePermissionRequest(b)
       if (request === undefined) return c.body(null, 200)
       // A @hono/node-server ezt a jelet bontja, ha a válasz befejezése előtt zárul a kapcsolat
-      // (megszakítás a VSCode-ban, a session processzének halála) — valódi szerverrel tesztelve.
+      // (megszakítás a VSCode-ban, a session processzének halála), valódi szerverrel tesztelve.
       const decision = await events.onPermissionRequest(request, c.req.raw.signal)
       if (decision === undefined) return c.body(null, 200)
       return c.body(JSON.stringify(decision), 200, { 'content-type': 'application/json' })

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { parseDaemonMessage, sanitizeState } from './state-message.js'
 
 export interface OverlayState extends DaemonState {
-  /** Hamis, amíg nincs élő kapcsolat a daemonnal — a lista ilyenkor állott lehet. */
+  /** Hamis, amíg nincs élő kapcsolat a daemonnal: a lista ilyenkor állott lehet. */
   connected: boolean
   /**
    * Mikor jelzett utoljára a daemon, hogy végigszkennelte a sessionöket (`Date.now()`).
@@ -114,7 +114,7 @@ export function useDaemonState(): OverlayState {
 
       next.onclose = () => {
         if (closed || myGeneration !== generation) return
-        // Kapcsolatvesztés után az overlay némán állott maradna — egy monitorozó
+        // Kapcsolatvesztés után az overlay némán állott maradna, és egy monitorozó
         // eszközben ez ugyanolyan rossz, mint a hibás adat. Újracsatlakozunk, és addig
         // a felhasználó is látja, hogy nincs élő kapcsolat.
         setConnected(false)
@@ -129,7 +129,7 @@ export function useDaemonState(): OverlayState {
     }
 
     // MINDEN próbálkozás ezen megy át, az újraütemezettek is. Ha csak az első kapna
-    // `catch`-et, egy későbbi próbálkozás elutasítása — például ha az IPC nem válaszol —
+    // `catch`-et, egy későbbi próbálkozás elutasítása (például ha az IPC nem válaszol)
     // elkapatlan maradna, ÉS a ciklus némán leállna: több újraütemezés nem történne, az
     // overlay pedig örökre „nincs kapcsolat" állapotban maradna.
     function attemptConnect(): void {

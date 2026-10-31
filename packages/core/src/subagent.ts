@@ -12,7 +12,7 @@ import { flatText, isRecord } from './guards.js'
 /**
  * Ennyi ideig számít aktívnak egy subagent az utolsó transcript-írása után, ha a meta-ja nem
  * mondja, hogy kész. Egy összeomlott (vagy régebbi verzióval futott) subagent sosem írja ki a
- * `finished`-et — enélkül örökké „futna". 5 perc: egy hosszú Bash- vagy build-futás alatt a
+ * `finished`-et, enélkül örökké „futna". 5 perc: egy hosszú Bash- vagy build-futás alatt a
  * subagent nem ír, és addig se tűnjön el; ennél régebben néma subagent már nem érdekes.
  */
 export const SUBAGENT_STALE_MS = 5 * 60_000
@@ -25,7 +25,7 @@ export const SUBAGENT_SCAN_LIMIT = 3
 
 /**
  * Sessionönként legfeljebb ennyi, az elavulási ablakon belül írt subagent meta-fájlját olvassuk
- * el. A `SUBAGENT_SCAN_LIMIT` a KÉSZ subagentek kiszűrése UTÁN hat — különben néhány frissen
+ * el. A `SUBAGENT_SCAN_LIMIT` a KÉSZ subagentek kiszűrése UTÁN hat, különben néhány frissen
  * befejezett subagent eltakarná a még futót, csak mert később írtak. A meta kicsi; ez a korlát
  * csak azt zárja ki, hogy egy sűrűn subagentező session minden pollnál tucatnyi fájlt olvasson.
  */
