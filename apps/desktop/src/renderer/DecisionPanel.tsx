@@ -327,6 +327,8 @@ export function DecisionPanel({
         {sandboxDisabled(decision.toolInput) && (
           <p className="decision-warning">Sandbox nélkül futna (dangerouslyDisableSandbox: true).</p>
         )}
+        {/* A leírás a parancs fölött: egy hosszú parancs alatt görgetés nélkül nem látszana. */}
+        {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
         <pre className="decision-summary">
           {summary.segments.map((segment, index) =>
             // A láthatatlan karakter escape-je kiemelve, hogy ne lehessen a parancs részének nézni.
@@ -340,7 +342,6 @@ export function DecisionPanel({
           )}
         </pre>
         {summary.truncated && limitNote}
-        {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
         {preview !== undefined && (
           // Alapból nyitva: ez maga a jóváhagyandó tartalom. Natív <details>, hogy összecsukható legyen.
           <details className="decision-details edit-preview" open>

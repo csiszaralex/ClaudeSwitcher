@@ -107,7 +107,8 @@ body {
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
   color: #e8e6e3;
 }
-.decision-description { margin: -4px 0 8px; color: #8a8885; }
+/* A parancs fölött áll (DecisionPanel): a térközt alatta a parancs felső margója adja. */
+.decision-description { margin: 8px 0 0; color: #8a8885; }
 .decision-details { margin: 0 0 6px; }
 .decision-details summary { color: #a8a6a2; cursor: pointer; }
 .decision-details summary:focus-visible { outline: 2px solid #d97757; outline-offset: 1px; }
