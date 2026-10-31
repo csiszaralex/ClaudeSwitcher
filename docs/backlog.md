@@ -2,9 +2,9 @@
 
 Alex kérései 2026-10-28-án, a döntéseivel együtt. A hibajavító kör (6–8. hullám) a `docs/reviews/2026-10-25-repo-review.md` szerint fut, ez a fájl az utána jövő munkáé.
 
-## Hol tartunk (2026-10-30)
+## Hol tartunk (2026-10-31)
 
-A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási köréből ezek készültek el. Az 1. hullámtól a 6/4-ig mind a `main`-en vannak, Alex élő tesztjével együtt. A részletes eredmény hullámonként: a review „Eredmény” része.
+A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási köréből ezek készültek el. Mind a `main`-en vannak, Alex élő tesztjével együtt. A részletes eredmény hullámonként: a review „Eredmény” része.
 
 | Hullám | Tartalom | Commitok |
 |---|---|---|
@@ -18,11 +18,12 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
 | 6/3 | `pnpm verify` + pre-commit hook, szinkron spawn tiltás, knip, tsconfig-szétválasztás, dev mód javítása | `505ee3d`–`89f7768` |
 | 6/4 | tesztek takarítása, determinisztikus várások, gyors leállítás, kitalált token a fixture-ben | `4d85c0c`–`0116458` |
 | gép | új gépen: a renderer build `subst` meghajtón, 30 s a PowerShell probe-tartaléknak, bő időkorlát az élő Windows-teszteknek | `b42f2c7`, `6ea2ee8`, `6537a05` |
-| 6/5 | dokumentáció: README, projekt CLAUDE.md, a spec igazítása a kódhoz, az M1 halasztott tételei ide, „Eredmény” a review-ba, a halott IDE token és a tesztekben maradt valódi helyi adatok cseréje | a `docs/refresh` ág |
+| 6/5 | dokumentáció: README, projekt CLAUDE.md, a spec igazítása a kódhoz, az M1 halasztott tételei ide, „Eredmény” a review-ba, a halott IDE token és a tesztekben maradt valódi helyi adatok cseréje | `cb6ffef`–`1fdc142` |
+| 7 | Electron 45, ES modul főprocessz, minden függőség a legfrissebb főverzióra, Electron bináris indítás előtt, könnyű pre-commit hook | `8d8032e`–`3b61bf9` |
 
-**A 6/5 kész.** Ezzel a review 6. hulláma lezárult.
+**A 7. kész.** Ezzel a review javítási köre lezárult.
 
-**Következő lépés:** 7. Electron-frissítés, majd a lenti ütemezés.
+**Következő lépés:** F1, majd a lenti ütemezés.
 
 A munkamódszer a `CLAUDE.md`-ben, a telepítés (a pre-commit hookkal együtt) a `README.md`-ben van.
 

@@ -364,10 +364,17 @@ A fenti szöveg az átnézés állapota, változatlanul. Ez a rész azt rögzít
 - `README.md`, projekt `CLAUDE.md`, a spec igazítása a kódhoz, a még nyitott M1 halasztott tételek a `docs/backlog.md` „Halasztott tételek” részébe, ez az „Eredmény” rész, a halott IDE token és a tesztekben maradt valódi helyi adatok cseréje.
 - Előtte, egy új gépen: `b42f2c7` (a renderer a valódi útjáról épül egy `subst` meghajtón), `6ea2ee8` (a PowerShell probe-tartalék 30 s időkorlátja), `6537a05` (bő időkorlát az élő Windows-teszteknek).
 
+**7. hullám, `8d8032e^..3b61bf9`: Electron-frissítés és az egész eszközlánc (2026-10-31).** Három lépésben, mindegyik után Alex élő tesztjével.
+- 7/1: Electron 33 → 45.1.0 (Node 24.22.1), electron-vite 6, egyetlen Vite-főverzió.
+- 7/2: a főprocessz ES modul (`"type": "module"`), a preload CommonJS maradt (sandboxban nem lehet ES modul). A workspace csomagok csomagolási okból a bundle-ben maradtak, a listájuk a `package.json`-ból számolódik.
+- 7/3: minden függőség a legfrissebb főverzióra (vitest 5, Vite 8, TypeScript 6, ESLint 10, Nx 24, React 19.3, koffi 3, pnpm 12, knip 6.44), `engines.node` `>=24`. Két kerülőút kiesett: a `ws` natív függőségeinek külsővé tétele és a Vite `Plugin` típustrükk.
+- Eltérés a tervtől: a 7.1 csak az Electron-frissítést kérte, Alex döntésére lett belőle az egész eszközlánc. Közben két új gond jött elő és javult: az electron-vite 6 nem tölti le a hiányzó Electron binárist (`a2c8ef0`, `predev`/`prestart`), és a teljes `pnpm verify` pre-commit hookként túl lassú volt ezen a gépen (`3b61bf9`: könnyű pre-commit, a teljes ellenőrzés push és merge előtt).
+- Ami nem a legfrissebb, mért okkal: TypeScript 7 (a typescript-eslint peerje), Node 26 LTS a gépen (Alex lépése). Mindkettő a `docs/backlog.md` „Eszközlánc” részében.
+
 **A 2. rész döntései.**
 1. Rate limit: eltávolítva (6/1).
 2. `Co-Authored-By`: a történet átírva, a `git log --all --grep=Co-Authored-By` ma üres.
 3. Csomagolás: a `docs/backlog.md` ütemezésében a 8-as tétel.
 4. `feat/m1-monitor`: törölve.
 
-**Ami a backlogba került:** a 4. rész fejlesztései nem készültek el, ezek itt maradnak. Az 1. pontból (diagnosztika) csak egy kis rész van meg: a tálca jelzi az elavult integrációt. Az utána jövő funkciók és az M1 nyitott halasztott tételei a `docs/backlog.md`-ben vannak. A 7. hullám (Electron-frissítés) a következő.
+**Ami a backlogba került:** a 4. rész fejlesztései nem készültek el, ezek itt maradnak. Az 1. pontból (diagnosztika) csak egy kis rész van meg: a tálca jelzi az elavult integrációt. Az utána jövő funkciók és az M1 nyitott halasztott tételei a `docs/backlog.md`-ben vannak. A review javítási köre a 7. hullámmal lezárult.
