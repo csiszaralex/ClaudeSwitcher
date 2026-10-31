@@ -17,7 +17,9 @@ A részletes terv és a mért Claude Code viselkedés: [`docs/superpowers/specs/
 pnpm install
 ```
 
-A `prepare` szkript a `simple-git-hooks`-szal telepíti a pre-commit hookot, ami minden commit előtt a `pnpm verify`-t futtatja.
+A `prepare` szkript a `simple-git-hooks`-szal két hookot telepít:
+- **pre-commit:** `pnpm verify:commit`, gyors. A típusellenőrzés és a lint csak a változás által érintett csomagokra fut (`nx affected --uncommitted`), utána a `knip`.
+- **pre-push:** a teljes `pnpm verify`. Amíg a repónak nincs remote-ja, ez nem fut le, ezért a teljes ellenőrzés a merge előtt kézzel kötelező (`CLAUDE.md`).
 
 Az Electron binárisa nem jön le a `pnpm install`-lal: a 42-es főverzió óta az `electron` csomag telepítéskor nem tölti le (Electron breaking changes, 42.0), és az electron-vite 6.0.0 a hiányzó binárist nem tölti le magától, hanem „Electron uninstall” hibával megáll. Ezért a desktop `predev` és `prestart` szkriptje az indítás előtt lefuttatja az `install-electron`-t. Ha a bináris már a helyén van, nem tölt le semmit. A buildhez és a `pnpm verify`-hoz nem kell.
 

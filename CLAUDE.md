@@ -4,7 +4,7 @@ Futtatás, telepítés, env változók: `README.md`. Terv és mért Claude Code 
 
 ## Szigorúság
 - Mindenhol a lehető legszigorúbb beállítás: `tsconfig.base.json` (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`…), ESLint `strictTypeChecked` + `switch-exhaustiveness-check` + `eqeqeq`, a tesztek is típusellenőrzöttek, `knip` a halott kódra. Lazítani csak indoklással, Alex OK-jával.
-- `pnpm verify` (check-types, lint, test, build minden csomagra, utána a gyökér configok és a `knip`) exit 0 kell legyen. A pre-commit hook ugyanezt futtatja (`simple-git-hooks`, a `pnpm install` telepíti). Megkerülni (`--no-verify`, `SKIP_SIMPLE_GIT_HOOKS`) csak Alex OK-jával.
+- `pnpm verify` (check-types, lint, test, build minden csomagra, utána a gyökér configok és a `knip`) exit 0 kell legyen **minden merge előtt a main-be**: a merge előtt a vezető a merge-elendő ág HEAD-jén frissen lefuttatja, és csak zöld eredménnyel mergel. A hookok (`simple-git-hooks`, a `pnpm install` telepíti): a pre-commit a gyors `pnpm verify:commit` (az érintett csomagok típusellenőrzése és lintje, plusz `knip`), a pre-push a teljes `pnpm verify`. Remote nélkül a pre-push nem fut, ezért a merge előtti futás kötelező. Megkerülni (`--no-verify`, `SKIP_SIMPLE_GIT_HOOKS`) csak Alex OK-jával.
 
 ## Tilos
 - Szinkron gyerekprocessz (`execSync`, `execFileSync`, `spawnSync`) nem teszt kódban: megállítja az Electron főszálát, vele a daemont és minden session hookját. ESLint tiltja.
