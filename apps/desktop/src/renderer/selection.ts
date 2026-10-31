@@ -1,3 +1,5 @@
+import { recentlyTyped } from './key-guard.js'
+
 /**
  * A kiválasztott session indexe a jelenlegi listában, vagy -1, ha a lista üres.
  *
@@ -110,4 +112,54 @@ export function nextAfterDecision(
   const next = firstWaiting(sessions, rest, decided.sessionId)
   if (next !== undefined) return { select: next, hide: false }
   return { hide: hideEnabled }
+}
+
+interface ArrivalState {
+  /** A sorok a lista sorrendjében (rows.ts `buildRows`). */
+  sessions: readonly SessionLike[]
+  decisions: readonly DecisionLike[]
+  /** A kijelölt sor azonosítója, ahogy a lista feloldja (`resolveSelectedIndex`). */
+  selectedId: string | undefined
+  /** Lásd key-guard.ts `KeyHistory.lastTypedAt`. */
+  lastTypedAt: number | undefined
+  now: number
+}
+
+interface ArrivalInput extends ArrivalState {
+  /** Az előző állapotban már ismert kérések azonosítói: ami nincs köztük, az most érkezett. */
+  known: ReadonlySet<string>
+}
+
+/**
+ * Hova ugorjon a kijelölés, ha új, appból eldönthető kérés érkezett; `undefined`, ha maradjon.
+ *
+ * Csak akkor ugrik, ha a kijelölt sornak nincs tartott döntése (elengedett sem: az a felhasználó
+ * olvasnivalója), és a felhasználó nem gépelt az utolsó `TYPING_COOLDOWN_MS`-ben. Nyitott űrlap
+ * (tiltás, szabály, kérdés, terv) csak tartott döntésnél van, azt tehát az első feltétel fedi. A cél
+ * soha nem elengedett kérés. Több új kérésnél a lista sorrendjében első sor nyer.
+ *
+ * Az ugrás nem dönthet véletlenül: az új kérés panelje újra mountol (az App `key={decision.id}`-ja),
+ * és az engedélyező gombjai meg a betűjelei `SHORTCUT_ARM_MS`-ig nem élesek (DecisionPanel `mountArmedAt`).
+ */
+export function selectOnArrival(input: ArrivalInput): string | undefined {
+  const arrived = new Set(input.decisions.filter((d) => !d.released && !input.known.has(d.id)).map((d) => d.sessionId))
+  if (arrived.size === 0) return undefined
+  if (recentlyTyped(input.lastTypedAt, input.now)) return undefined
+  const selected = input.selectedId
+  if (selected !== undefined && input.decisions.some((d) => d.sessionId === selected)) return undefined
+  return input.sessions.find((s) => arrived.has(s.sessionId))?.sessionId
+}
+
+/**
+ * A `selectOnArrival` az előző állapot emlékével: minden hívás az addig látott kérésekhez méri az
+ * újakat, és megjegyzi a mostaniakat. Egy kérés csak az érkezésekor ránthat: ha akkor maradni
+ * kellett, később sem ugrunk rá: a sora a listában jelzi, hogy vár.
+ */
+export function trackArrivals(): (state: ArrivalState) => string | undefined {
+  let known: ReadonlySet<string> = new Set()
+  return (state) => {
+    const next = selectOnArrival({ ...state, known })
+    known = new Set(state.decisions.map((d) => d.id))
+    return next
+  }
 }

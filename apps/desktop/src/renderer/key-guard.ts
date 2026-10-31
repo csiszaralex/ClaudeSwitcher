@@ -52,6 +52,11 @@ export function isArmed(armedAt: number, now: number): boolean {
   return now >= armedAt
 }
 
+/** Gépelt-e a felhasználó szövegmezőbe az utolsó `TYPING_COOLDOWN_MS`-ben. */
+export function recentlyTyped(lastTypedAt: number | undefined, now: number): boolean {
+  return lastTypedAt !== undefined && now - lastTypedAt < TYPING_COOLDOWN_MS
+}
+
 /**
  * Hathat-e a betűjel. Minden feltételnek teljesülnie kell:
  * - nem ismétlés;
@@ -63,5 +68,5 @@ export function isArmed(armedAt: number, now: number): boolean {
 export function shortcutAllowed(key: ShortcutKey, clock: ShortcutClock): boolean {
   if (key.repeat || key.ctrlKey || key.altKey || key.metaKey || key.typingTarget) return false
   if (!isArmed(clock.armedAt, clock.now)) return false
-  return clock.lastTypedAt === undefined || clock.now - clock.lastTypedAt >= TYPING_COOLDOWN_MS
+  return !recentlyTyped(clock.lastTypedAt, clock.now)
 }

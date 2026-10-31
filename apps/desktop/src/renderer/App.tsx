@@ -6,7 +6,7 @@ import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decis
 import { formatDuration, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
-import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
+import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 import type { OverlayState } from './useDaemonState.js'
 import './styles.css'
@@ -69,6 +69,21 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
   const keyHistory = useRef<KeyHistory>({ shownArmedAt: 0, lastTypedAt: undefined })
   // Csak újrarenderelést vált ki megjelenéskor: a panel ebből tompítja az engedélyező gombokat.
   const [, rerenderOnShow] = useState(0)
+
+  // Új, appból eldönthető kérésnél a kijelölés rá ugrik, ha a kijelölt sornál nincs döntés, és a
+  // felhasználó nem gépel (selection.ts `selectOnArrival`). Csak akkor fut, ha a kérések listája
+  // változott; az előző állapot kéréseit a `trackArrivals` tartja.
+  const arrivals = useRef(trackArrivals())
+  useEffect(() => {
+    const next = arrivals.current({
+      sessions: rows,
+      decisions,
+      selectedId: selectedRowView?.sessionId,
+      lastTypedAt: keyHistory.current.lastTypedAt,
+      now: Date.now(),
+    })
+    if (next !== undefined) setSelectedId(next)
+  }, [decisions])
 
   // Megjelenéskor a legrégebben várakozó sessionre ugrunk, és a panel újra élesedik: az első
   // leütés még a régi kijelölésre mehetne. A jel a main `show` eseménye (az indoklás a main

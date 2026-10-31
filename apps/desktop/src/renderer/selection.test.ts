@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionStatus as Status } from '@claudeswitcher/core'
-import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow } from './selection.js'
+import { TYPING_COOLDOWN_MS } from './key-guard.js'
+import {
+  moveSelection,
+  nextAfterDecision,
+  resolveSelectedIndex,
+  selectOnArrival,
+  selectOnShow,
+  trackArrivals,
+} from './selection.js'
 
 const view = (sessionId: string, status: Status): { sessionId: string; status: Status } => ({ sessionId, status })
 const pending = (
@@ -134,5 +142,85 @@ describe('nextAfterDecision', () => {
     const sessions = [view('a', 'waiting'), view('r', 'waiting')]
     const decisions = [pending('da', 'a'), pending('dr', 'r', true)]
     expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'r', hide: false })
+  })
+})
+
+describe('selectOnArrival', () => {
+  const NOW = 100_000
+  const calm = { lastTypedAt: undefined, now: NOW }
+
+  it('jumps to a new decidable request when the selected row holds no decision', () => {
+    const sessions = [view('a', 'idle'), view('b', 'waiting')]
+    expect(
+      selectOnArrival({ sessions, decisions: [pending('db', 'b')], known: new Set(), selectedId: 'a', ...calm }),
+    ).toBe('b')
+  })
+
+  it('stays when nothing new arrived', () => {
+    const sessions = [view('a', 'idle'), view('b', 'waiting')]
+    expect(
+      selectOnArrival({ sessions, decisions: [pending('db', 'b')], known: new Set(['db']), selectedId: 'a', ...calm }),
+    ).toBeUndefined()
+  })
+
+  it('never pulls the selection away from a row with a held decision, the user is reading it', () => {
+    const sessions = [view('a', 'waiting'), view('b', 'waiting')]
+    const decisions = [pending('da', 'a'), pending('db', 'b')]
+    expect(selectOnArrival({ sessions, decisions, known: new Set(['da']), selectedId: 'a', ...calm })).toBeUndefined()
+  })
+
+  it('stays on a row whose held decision is released too', () => {
+    const sessions = [view('a', 'waiting'), view('b', 'waiting')]
+    const decisions = [pending('da', 'a', true), pending('db', 'b')]
+    expect(selectOnArrival({ sessions, decisions, known: new Set(['da']), selectedId: 'a', ...calm })).toBeUndefined()
+  })
+
+  it('stays while the user typed within TYPING_COOLDOWN_MS, and jumps after it', () => {
+    const sessions = [view('a', 'idle'), view('b', 'waiting')]
+    const input = { sessions, decisions: [pending('db', 'b')], known: new Set<string>(), selectedId: 'a' }
+    expect(selectOnArrival({ ...input, lastTypedAt: NOW - TYPING_COOLDOWN_MS + 1, now: NOW })).toBeUndefined()
+    expect(selectOnArrival({ ...input, lastTypedAt: NOW - TYPING_COOLDOWN_MS, now: NOW })).toBe('b')
+  })
+
+  it('never jumps to a released request', () => {
+    const sessions = [view('a', 'idle'), view('r', 'waiting')]
+    expect(
+      selectOnArrival({ sessions, decisions: [pending('dr', 'r', true)], known: new Set(), selectedId: 'a', ...calm }),
+    ).toBeUndefined()
+  })
+
+  it('picks the first row in list order when several requests arrive together', () => {
+    const sessions = [view('a', 'idle'), view('c', 'waiting'), view('b', 'waiting')]
+    const decisions = [pending('db', 'b'), pending('dc', 'c')]
+    expect(selectOnArrival({ sessions, decisions, known: new Set(), selectedId: 'a', ...calm })).toBe('c')
+  })
+
+  it('jumps from a row that waits outside the app (no held decision)', () => {
+    const sessions = [view('n', 'waiting'), view('b', 'waiting')]
+    expect(
+      selectOnArrival({ sessions, decisions: [pending('db', 'b')], known: new Set(), selectedId: 'n', ...calm }),
+    ).toBe('b')
+  })
+})
+
+describe('trackArrivals', () => {
+  const calm = { lastTypedAt: undefined, now: 100_000 }
+
+  it('jumps once per new request: the same state again does not move the selection', () => {
+    const track = trackArrivals()
+    const sessions = [view('a', 'idle'), view('b', 'waiting')]
+    expect(track({ sessions, decisions: [], selectedId: 'a', ...calm })).toBeUndefined()
+    expect(track({ sessions, decisions: [pending('db', 'b')], selectedId: 'a', ...calm })).toBe('b')
+    // A felhasználó visszalépett az `a`-ra: ugyanaz a kérés nem rántja el újra.
+    expect(track({ sessions, decisions: [pending('db', 'b')], selectedId: 'a', ...calm })).toBeUndefined()
+  })
+
+  it('does not jump later to a request that arrived while it had to stay', () => {
+    const track = trackArrivals()
+    const sessions = [view('a', 'waiting'), view('b', 'waiting')]
+    expect(track({ sessions, decisions: [pending('da', 'a')], selectedId: 'a', ...calm })).toBe(undefined)
+    expect(track({ sessions, decisions: [pending('da', 'a'), pending('db', 'b')], selectedId: 'a', ...calm })).toBeUndefined()
+    // Az `a` kérése lezárult: a `b` már nem új, nem ugrunk rá utólag.
+    expect(track({ sessions, decisions: [pending('db', 'b')], selectedId: 'a', ...calm })).toBeUndefined()
   })
 })

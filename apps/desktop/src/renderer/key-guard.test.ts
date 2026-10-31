@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   armUntil,
   isArmed,
+  recentlyTyped,
   SHORTCUT_ARM_MS,
   shortcutAllowed,
   TYPING_COOLDOWN_MS,
@@ -76,5 +77,13 @@ describe('shortcutAllowed', () => {
     expect(shortcutAllowed({ ...plainKey, repeat: true }, { armedAt: 0, lastTypedAt: undefined, now: NOW })).toBe(
       false,
     )
+  })
+})
+
+describe('recentlyTyped', () => {
+  it('is true within TYPING_COOLDOWN_MS of the last keystroke into a text field, false after and when nobody typed', () => {
+    expect(recentlyTyped(undefined, NOW)).toBe(false)
+    expect(recentlyTyped(NOW - TYPING_COOLDOWN_MS + 1, NOW)).toBe(true)
+    expect(recentlyTyped(NOW - TYPING_COOLDOWN_MS, NOW)).toBe(false)
   })
 })

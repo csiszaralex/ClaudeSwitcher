@@ -126,3 +126,17 @@ describe('rule suggestion mark', () => {
     }
   })
 })
+
+describe('arming a newly selected request', () => {
+  /** Az A (engedélyez) gomb teljes markupja. */
+  function allowButton(html: string): string | undefined {
+    return /<button[^>]*><kbd>A<\/kbd>[^<]*<\/button>/.exec(html)?.[0]
+  }
+
+  it('keeps the allow button disabled on a freshly mounted panel, even long after the overlay was shown', () => {
+    // A kijelölés ugrásakor a panel új kéréssel mountol (az App `key={decision.id}`-ja): a
+    // megjelenés régi élesítése nem élesíti az új kérést.
+    const html = render(bashDecision(), Date.now() - 60_000)
+    expect(allowButton(html)).toContain('disabled=""')
+  })
+})
