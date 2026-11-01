@@ -12,5 +12,8 @@ allowBuilds:
   koffi: true
   # `postinstall`: az nx saját telepítés utáni lépése (`dist/bin/post-install`).
   nx: true
+  # electron-builder dependency (through electron-builder-squirrel-windows). Its `install` script
+  # (`select-7z-arch.js`) only serves the Squirrel.Windows target; we build NSIS, so it does not run.
+  electron-winstaller: false
   # A hookot a gyökér `prepare` szkriptje telepíti; a csomag saját postinstallja ugyanezt tenné még egyszer.
   simple-git-hooks: false

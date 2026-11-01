@@ -1,0 +1,28 @@
+appId: com.claudeswitcher.desktop
+productName: ClaudeSwitcher
+directories:
+  output: release
+  # `build/` is gitignored, so resources live in `resources/`.
+  buildResources: resources
+files:
+  - out/**
+  - package.json
+  # Already bundled into out/main (BUNDLED_WORKSPACE_PACKAGES in electron.vite.config.ts).
+  - '!node_modules/@claudeswitcher/**'
+# The tray icons, read through `resourcesDir` (src/main/resources.ts).
+extraResources:
+  - from: resources
+    to: icons
+    filter:
+      - tray*.png
+# Reuse the binary `install-electron` already fetched instead of downloading it again.
+electronDist: node_modules/electron/dist
+win:
+  target: nsis
+  icon: resources/icon.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
+  deleteAppDataOnUninstall: false

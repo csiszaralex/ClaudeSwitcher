@@ -12,7 +12,8 @@
     "apps/desktop": {
       // A renderer belépési pontja a HTML, és a `window-api.ts` importálatlan globális
       // típusdeklaráció, amit a tsconfig `include`-ja hoz be.
-      "entry": ["src/renderer/index.html", "src/renderer/window-api.ts"]
+      // `scripts/make-icon.mjs` is a one-off generator run by hand (`node scripts/make-icon.mjs`).
+      "entry": ["src/renderer/index.html", "src/renderer/window-api.ts", "scripts/make-icon.mjs"]
     }
   }
 }

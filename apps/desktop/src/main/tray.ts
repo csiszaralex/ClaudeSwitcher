@@ -1,10 +1,11 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { Menu, Tray, nativeImage } from 'electron'
+import { Menu, Tray, app, nativeImage } from 'electron'
 import { hotkeyLabel, type HotkeyRegistration } from './hotkey.js'
+import { resourcesDir } from './resources.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
-const resources = path.join(dirname, '../../resources')
+const resources = resourcesDir(app.isPackaged, process.resourcesPath, dirname)
 
 export interface TrayHandle {
   setWaiting(count: number): void

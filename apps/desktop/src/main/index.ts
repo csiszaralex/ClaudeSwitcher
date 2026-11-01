@@ -29,6 +29,11 @@ import {
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
+import { userDataDir } from './user-data.js'
+
+// Must run before `requestSingleInstanceLock`, which is tied to `userData`. The packaged build
+// sets `productName`, which would otherwise move the directory and lose the token (see `userDataDir`).
+app.setPath('userData', userDataDir(app.getPath('appData')))
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 

@@ -8,11 +8,13 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
+    "dist": "electron-vite build && electron-builder --win nsis",
     "check-types": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.web.test.json --noEmit",
     "test": "vitest run",
     "lint": "eslint src electron.vite.config.ts vitest.config.ts",
     "predev": "install-electron",
-    "prestart": "install-electron"
+    "prestart": "install-electron",
+    "predist": "install-electron"
   },
   "dependencies": {
     "@claudeswitcher/core": "workspace:*",
@@ -24,9 +26,11 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "vite": "^8.3.5"
-  }
+  },
+  "description": "Tray app that lists Claude Code sessions and answers their permission prompts"
 }
