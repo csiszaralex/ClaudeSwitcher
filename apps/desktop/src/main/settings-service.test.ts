@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SettingKey } from '../shared/settings.js'
 import type { Autostart } from './autostart.js'
 import type { StoredConfig, StoredValues } from './config.js'
@@ -87,19 +87,19 @@ describe('createSettingsService', () => {
     expect(ignored).toEqual([])
   })
 
-  it('a change a listener makes reaches every listener after the current change', async () => {
+  it('one failing listener does not keep the others out of date', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const { persist } = fakePersist(true)
     const service = createSettingsService({ stored: stored(), autostart: fakeAutostart(true), persist })
-    const first: string[] = []
-    const second: string[] = []
-    service.onChange((snapshot) => {
-      first.push(snapshot.values.hotkey)
-      if (snapshot.values.hotkey === 'F9') void service.apply({ hotkey: 'Shift+Alt+Space' }, [])
+    const seen: boolean[] = []
+    service.onChange(() => {
+      throw new Error('broken listener')
     })
-    service.onChange((snapshot) => second.push(snapshot.values.hotkey))
-    await service.apply({ hotkey: 'F9' }, ['hotkey'])
-    expect(first).toEqual(['F9', 'Shift+Alt+Space'])
-    expect(second).toEqual(['F9', 'Shift+Alt+Space'])
+    service.onChange((snapshot) => seen.push(snapshot.values.jumpToTab))
+    await service.apply({ jumpToTab: false }, [])
+    expect(seen).toEqual([false])
+    expect(error).toHaveBeenCalledOnce()
+    error.mockRestore()
   })
 
   it('snapshot reads autostart from the OS', () => {

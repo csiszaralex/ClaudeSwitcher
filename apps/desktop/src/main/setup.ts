@@ -10,6 +10,7 @@ import {
   userSettingsPath,
   type HookContractEntry,
 } from '@claudeswitcher/core'
+import type { IntegrationKind } from '../shared/integration.js'
 import { DAEMON_PORT } from './daemon-port.js'
 
 export { DAEMON_PORT } from './daemon-port.js'
@@ -229,20 +230,20 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
 }
 
 /**
- * A telepített hookjaink állapota a settings.json szerint.
+ * The state of our installed hooks according to settings.json.
  *
- * - `not-installed`: egyik `HOOK_CONTRACT` eseménynél sincs saját hookunk.
- * - `current`: minden eseménynél van saját hookunk a helyes route-ra és a `DAEMON_PORT`-ra.
- * - `stale`: a mieink ott vannak, de a `missing` eseményeknél hiányzik a hook, vagy rossz route-ra
- *   vagy portra mutat. Egy korábbi verzió telepítése ilyen, ha azóta új esemény került a
- *   `HOOK_CONTRACT`-ba.
- * - `unknown`: a fájl nem olvasható vagy nem értelmezhető. Ez nem „elavult": nem tudjuk.
+ * - `not-installed`: no `HOOK_CONTRACT` event has a hook of ours.
+ * - `current`: every event has a hook of ours on the right route and on `DAEMON_PORT`.
+ * - `stale`: ours are there, but for the `missing` events the hook is absent or points to a wrong
+ *   route or port. An install by an earlier version looks like this once a new event has been added
+ *   to `HOOK_CONTRACT`.
+ * - `unknown`: the file cannot be read or parsed. That is not "stale": we do not know.
+ *
+ * The kinds are listed once, in `INTEGRATION_KINDS` (the setup window checks against it).
  */
 export type HookInstallState =
-  | { kind: 'not-installed' }
-  | { kind: 'current' }
+  | { kind: Exclude<IntegrationKind, 'stale'> }
   | { kind: 'stale'; missing: string[] }
-  | { kind: 'unknown' }
 
 /** Egy esemény saját hookjai, a matcher-csoportokon át. Hibás alakú bejegyzés: nincs benne a mienk. */
 function ourHooksOf(groups: unknown): Record<string, unknown>[] {

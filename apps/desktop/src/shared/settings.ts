@@ -79,3 +79,27 @@ export function settingsToAsk(
     (key) => !confirmed.has(key) && (key !== 'autostart' || options.autostartAvailable),
   )
 }
+
+/** The values of `keys` only: what the setup window saves, and the keys it keeps while merging. */
+export function pickSettings(values: SettingValues, keys: Iterable<SettingKey>): Partial<SettingValues> {
+  const picked: Partial<SettingValues> = {}
+  // One case per key: a write through a key union does not type-check, and
+  // `switch-exhaustiveness-check` makes a new setting add its case here.
+  for (const key of keys) {
+    switch (key) {
+      case 'autostart':
+        picked.autostart = values.autostart
+        break
+      case 'hideAfterLastDecision':
+        picked.hideAfterLastDecision = values.hideAfterLastDecision
+        break
+      case 'jumpToTab':
+        picked.jumpToTab = values.jumpToTab
+        break
+      case 'hotkey':
+        picked.hotkey = values.hotkey
+        break
+    }
+  }
+  return picked
+}

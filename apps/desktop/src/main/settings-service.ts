@@ -17,7 +17,11 @@ export interface SettingsService {
    * for this run only.
    */
   apply(patch: Partial<SettingValues>, confirm: readonly SettingKey[]): Promise<SettingsSnapshot>
-  /** Returns the unsubscribe function. */
+  /**
+   * Returns the unsubscribe function. A listener only reflects the change (tray, window); it must
+   * not call `apply` itself. A value that needs a check first (the hotkey) is checked before
+   * `apply` is called (see `saveSetup`).
+   */
   onChange(listener: (snapshot: SettingsSnapshot) => void): () => void
 }
 
@@ -30,25 +34,15 @@ export function createSettingsService(deps: {
   let values: StoredValues = { ...deps.stored.values }
   const confirmed = new Set(deps.stored.confirmed)
   const listeners = new Set<(snapshot: SettingsSnapshot) => void>()
-  // A listener may apply a change itself (the hotkey revert does). That change is queued until
-  // every listener has seen the current one, so no listener ever gets an older snapshot last.
-  const pending: SettingsSnapshot[] = []
-  let notifying = false
   const notify = (changed: SettingsSnapshot): void => {
-    pending.push(changed)
-    if (notifying) return
-    notifying = true
-    for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
-      for (const listener of [...listeners]) {
-        // One failing listener must not keep the others (the tray, the window) out of date.
-        try {
-          listener(next)
-        } catch (error) {
-          console.error('[settings] a change listener failed', error)
-        }
+    for (const listener of [...listeners]) {
+      // One failing listener must not keep the others (the tray, the window) out of date.
+      try {
+        listener(changed)
+      } catch (error) {
+        console.error('[settings] a change listener failed', error)
       }
     }
-    notifying = false
   }
 
   const snapshot = (): SettingsSnapshot => ({

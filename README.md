@@ -46,15 +46,15 @@ Egyszerre egy példány fut. A daemon a `127.0.0.1:47821` porton figyel (`apps/d
 
 ## A Claude Code integráció
 
-A tálcamenü **„Claude Code integráció telepítése”** pontja a `~/.claude/settings.json`-ba ír (vagy a `CLAUDE_CONFIG_DIR` alá, ha be van állítva):
+Az integrációt a beállítások ablakban lehet kezelni (tálcamenü, „Beállítások…”, „Claude Code integráció” rész). A **„Telepítés”** gomb a `~/.claude/settings.json`-ba ír (vagy a `CLAUDE_CONFIG_DIR` alá, ha be van állítva):
 - egy HTTP hookot minden eseményre, amit az app figyel. A lista egy helyen él: `packages/core/src/hook-contract.ts` `HOOK_CONTRACT`. Mindegyik a `http://127.0.0.1:47821/hooks/...` címre megy, `Authorization: Bearer $CLAUDESWITCHER_TOKEN` fejléccel;
 - az `env.CLAUDESWITCHER_TOKEN` értéket, a daemon tokenjét.
 
 Az idegen hookokhoz és beállításokhoz nem nyúl. Az első olyan írás előtt, ami egy meglévő fájlt megváltoztat, egyszer biztonsági másolatot készít: `settings.json.claudeswitcher-backup` (egy meglévő másolatot soha nem ír felül). Ha a fájl nem olvasható vagy nem értelmezhető, nem ír semmit.
 
-A **„Claude Code integráció eltávolítása”** csak a saját bejegyzéseket veszi ki, egy korábbi verzió kivezetett bejegyzéseivel együtt (`SessionStart` hook, a régi statusLine, `env.CLAUDESWITCHER_PORT`).
+Az **„Eltávolítás”** gomb csak a saját bejegyzéseket veszi ki, egy korábbi verzió kivezetett bejegyzéseivel együtt (`SessionStart` hook, a régi statusLine, `env.CLAUDESWITCHER_PORT`).
 
-Ha a telepített hookok elavultak (egy újabb verzió új hookot vár), a tálcamenü ezt jelzi: „Integráció elavult, telepítsd újra”.
+Az ablak a gombokat az állapothoz igazítja: nincs telepítve, csak „Telepítés”; telepítve, csak „Eltávolítás”; elavult vagy nem olvasható `settings.json`, mindkettő. Ha a telepített hookok elavultak (egy újabb verzió új hookot vár), a tálcamenü ezt egy sorral jelzi („Integráció elavult, telepítsd újra”), és a sorra kattintva megnyílik a beállítások ablak. A tálcamenüben nincs külön telepítő vagy eltávolító pont.
 
 ## Hol mi van
 

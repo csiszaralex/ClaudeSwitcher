@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isSettingKey, parseSettingValues, settingsToAsk } from './settings.js'
+import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isSettingKey, parseSettingValues, pickSettings, settingsToAsk } from './settings.js'
 import type { BooleanSettingKey, SettingKey, SettingValues } from './settings.js'
 
 describe('SETTINGS', () => {
@@ -81,5 +81,13 @@ describe('parseSettingValues', () => {
   it('rejects extra keys and inputs that are not objects', () => {
     expect(parseSettingValues({ ...DEFAULT_SETTINGS, extra: 1 })).toBeUndefined()
     for (const bad of [null, undefined, 'x', 3, [], true]) expect(parseSettingValues(bad)).toBeUndefined()
+  })
+})
+
+describe('pickSettings', () => {
+  it('copies exactly the given keys', () => {
+    const values: SettingValues = { ...DEFAULT_SETTINGS, jumpToTab: false, hotkey: 'F9' }
+    expect(pickSettings(values, ['jumpToTab', 'hotkey'])).toEqual({ jumpToTab: false, hotkey: 'F9' })
+    expect(pickSettings(values, [])).toEqual({})
   })
 })

@@ -15,12 +15,18 @@ import {
 import { createAutostart } from './autostart.js'
 import { loadConfig, saveSettings } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
-import { hotkeyLogText, registerHotkeyOrDefault, switchHotkey, type HotkeyRegistration } from './hotkey.js'
-import { isOverlaySender, rendererLocation } from './ipc-sender.js'
+import type { HotkeyRegistration } from '../shared/hotkey-status.js'
+import { settingsToAsk } from '../shared/settings.js'
+import { hardenWindow } from './harden-window.js'
+import { hotkeyLogText, registerHotkeyOrDefault, switchHotkey, type HotkeySwitch } from './hotkey.js'
+import { CAPTURE_SHORTCUTS, createHotkeyCapture } from './hotkey-capture.js'
+import { isRendererSender, rendererLocation, type RendererLocation } from './ipc-sender.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
 import { createSettingsService } from './settings-service.js'
+import { parseSaveRequest, saveSetup, setupState, type SaveResult } from './setup-ipc.js'
+import { createSetupWindowController } from './setup-window.js'
 import {
   DAEMON_PORT,
   installIntegration,
@@ -39,20 +45,28 @@ app.setPath('userData', userDataDir(app.getPath('appData')))
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
-/** Honnan tölt az overlay; az IPC-kezelők a küldőt is ehhez mérik (`fromOverlay`). */
-const RENDERER = rendererLocation(process.env['ELECTRON_RENDERER_URL'], path.join(dirname, '../renderer/index.html'))
+const RENDERER_DIR = path.join(dirname, '../renderer')
+/** Where the overlay loads from; its handlers check the sender against it (`fromOverlay`). */
+const RENDERER = rendererLocation(process.env['ELECTRON_RENDERER_URL'], RENDERER_DIR, 'index.html')
+/** Where the setup window loads from; its handlers check the sender against it (`fromSetup`). */
+const SETUP_PAGE = rendererLocation(process.env['ELECTRON_RENDERER_URL'], RENDERER_DIR, 'setup.html')
 
 /**
- * Igaz, ha az IPC-hívás a saját rendererünktől jött (lásd `isOverlaySender`). Egy idegen küldőt
- * naplózunk: ha a saját rendererünk URL-je valamiért eltérne, enélkül csak egy néma, üres overlay
- * látszana.
+ * True if the IPC call came from the given page of ours (see `isRendererSender`). A foreign sender
+ * is logged: if our own page's URL ever differed, the only symptom would otherwise be a silent,
+ * empty window.
  */
-function fromOverlay(event: IpcMainInvokeEvent, channel: string): boolean {
+function fromPage(page: RendererLocation, event: IpcMainInvokeEvent, channel: string): boolean {
   const url = event.senderFrame?.url
-  if (isOverlaySender(url, RENDERER)) return true
+  if (isRendererSender(url, page)) return true
   console.error(`[claudeswitcher] refused ${channel} from a foreign sender: ${url ?? '(no frame)'}`)
   return false
 }
+
+/** The overlay's handlers: in the build they refuse the setup page too. */
+const fromOverlay = (event: IpcMainInvokeEvent, channel: string): boolean => fromPage(RENDERER, event, channel)
+/** The setup window's handlers: in the build they refuse the overlay. */
+const fromSetup = (event: IpcMainInvokeEvent, channel: string): boolean => fromPage(SETUP_PAGE, event, channel)
 
 /** Az idegen küldőnek adott ok, a hibát jelző válaszokban és a dobott hibában is. */
 const FOREIGN_SENDER = 'Ismeretlen küldő.'
@@ -96,25 +110,8 @@ function createOverlay(): BrowserWindow {
     },
   })
 
-  // Az overlay csak a saját rendererét mutathatja. Egy idegen oldal ugyanazt a preloadot kapná
-  // (token, függő kérések, döntés), ezért a renderer felől indított navigáció, az új ablak és a
-  // <webview> tiltott. Az Electron-dokumentáció szerint a `will-navigate` a programból indított
-  // navigációra (például `loadURL`) nem fut le, így a saját betöltésünket és a `reload`-ot (az is
-  // programból indul) nem zárja ki. A `will-redirect`-et szándékosan nem tiltjuk: tiltott navigáció
-  // után nincs mit átirányítani, a saját betöltésünk átirányítását pedig nem akarjuk elrontani.
-  window.webContents.on('will-navigate', (event) => {
-    event.preventDefault()
-  })
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  window.webContents.on('will-attach-webview', (event) => {
-    event.preventDefault()
-  })
-  // Az overlaynek semmilyen engedély nem kell (kamera, értesítés, vágólap, teljes képernyő).
-  const { session } = window.webContents
-  session.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(false)
-  })
-  session.setPermissionCheckHandler(() => false)
+  // Only our own page may load in it (see `hardenWindow`).
+  hardenWindow(window)
 
   if (RENDERER.kind === 'dev-server') {
     void window.loadURL(RENDERER.url)
@@ -297,6 +294,18 @@ app.whenReady().then(async () => {
   const describeError = (error: unknown): string =>
     error instanceof Error ? error.message : String(error)
 
+  const setupWindow = createSetupWindowController({
+    page: SETUP_PAGE,
+    preload: path.join(dirname, '../preload/setup.cjs'),
+    // `capture` and `endCapture` are defined below; the window only calls them after startup.
+    capture: {
+      active: () => capture.active(),
+      end: () => {
+        endCapture()
+      },
+    },
+  })
+
   // A gyorsbillentyűt a tálca ELŐTT foglaljuk le, mert a menü megjeleníti az eredményt.
   // A showOverlay/toggleOverlay függvénydeklarációk, tehát hoistolódnak: a lentebbi
   // definíciójuk ekkor már hívható. Egy érvénytelen (elgépelt) érték nem állítja meg az
@@ -316,46 +325,14 @@ app.whenReady().then(async () => {
       showOverlay()
     },
     onSettings: () => {
-      // Task 4 opens the setup window here.
-      console.log('[claudeswitcher] settings window requested; not available yet')
+      if (quitting === 'no') setupWindow.open({ showAll: true })
     },
     onQuit: () => {
       app.quit()
     },
-    onInstall: () => {
-      installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token })
-        .then((conflicts) => {
-          void dialog.showMessageBox({
-            type: conflicts.length === 0 ? 'info' : 'warning',
-            title: 'ClaudeSwitcher',
-            message:
-              conflicts.length === 0
-                ? 'A Claude Code integráció telepítve.'
-                : 'A Claude Code integráció csak részben települt.',
-            detail: [
-              ...conflicts,
-              'Az újonnan indított Claude Code sessionök már jelentenek. A már futó sessionöket lehet, hogy újra kell indítani.',
-            ].join('\n\n'),
-          })
-        })
-        .catch((error: unknown) => {
-          dialog.showErrorBox('A telepítés nem sikerült', describeError(error))
-        })
-        .finally(syncIntegrationNotice)
-    },
-    onUninstall: () => {
-      uninstallIntegration(resolveClaudeDir())
-        .then(() => {
-          void dialog.showMessageBox({
-            type: 'info',
-            title: 'ClaudeSwitcher',
-            message: 'A Claude Code integráció eltávolítva.',
-          })
-        })
-        .catch((error: unknown) => {
-          dialog.showErrorBox('Az eltávolítás nem sikerült', describeError(error))
-        })
-        .finally(syncIntegrationNotice)
+    // The integration is handled in the setup window only; the notice line leads there.
+    onNotice: () => {
+      if (quitting === 'no') setupWindow.open({ showAll: true })
     },
   })
 
@@ -372,12 +349,58 @@ app.whenReady().then(async () => {
             (state.kind === 'stale' ? ` (missing: ${state.missing.join(', ')})` : ''),
         )
         tray.setNotice(integrationNotice(state))
+        // An open setup window shows the integration state too.
+        setupWindow.notifyChanged()
       })
       .catch((error: unknown) => {
         console.error('[claudeswitcher] hook install check failed', error)
       })
   }
   syncIntegrationNotice()
+
+  /**
+   * Installs the Claude Code integration for the tray item and the setup window alike: shows the
+   * dialogs, resyncs the tray notice, and answers the window with a short text. Never rejects.
+   */
+  function installFromUi(): Promise<{ ok: boolean; message: string }> {
+    return installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token })
+      .then((conflicts) => {
+        const message =
+          conflicts.length === 0
+            ? 'A Claude Code integráció telepítve.'
+            : 'A Claude Code integráció csak részben települt.'
+        void dialog.showMessageBox({
+          type: conflicts.length === 0 ? 'info' : 'warning',
+          title: 'ClaudeSwitcher',
+          message,
+          detail: [
+            ...conflicts,
+            'Az újonnan indított Claude Code sessionök már jelentenek. A már futó sessionöket lehet, hogy újra kell indítani.',
+          ].join('\n\n'),
+        })
+        return { ok: conflicts.length === 0, message }
+      })
+      .catch((error: unknown) => {
+        dialog.showErrorBox('A telepítés nem sikerült', describeError(error))
+        return { ok: false, message: `A telepítés nem sikerült: ${describeError(error)}` }
+      })
+      .finally(syncIntegrationNotice)
+  }
+
+  /** Removes the Claude Code integration for the setup window: dialogs, notice resync, a short text. Never rejects. */
+  function uninstallFromUi(): Promise<{ ok: boolean; message: string }> {
+    return uninstallIntegration(resolveClaudeDir())
+      .then(() => {
+        const message = 'A Claude Code integráció eltávolítva.'
+        void dialog.showMessageBox({ type: 'info', title: 'ClaudeSwitcher', message })
+        return { ok: true, message }
+      })
+      .catch((error: unknown) => {
+        dialog.showErrorBox('Az eltávolítás nem sikerült', describeError(error))
+        return { ok: false, message: `Az eltávolítás nem sikerült: ${describeError(error)}` }
+      })
+      .finally(syncIntegrationNotice)
+  }
 
   function showOverlay(): void {
     // Kilépés közben nem hozunk létre új ablakot, és nem mutatjuk a régit.
@@ -408,14 +431,45 @@ app.whenReady().then(async () => {
       ? registration.requested
       : registration.fallback.accelerator
   let heldHotkey = heldAccelerator(hotkey)
-  // The hotkey value the listener last saw, to tell a hotkey change from any other change.
-  let hotkeyValue = settings.snapshot().values.hotkey
-  settings.onChange((snapshot) => {
-    tray.setSettings(snapshot)
-    const next = snapshot.values.hotkey
-    if (next === hotkeyValue) return
-    const previous = hotkeyValue
-    hotkeyValue = next
+  /** The registration that holds now, for the tray and the setup window. */
+  let currentHotkey = hotkey
+
+  /** Suspends the held hotkey while the setup window captures a new one (`setup:capture`). */
+  const capture = createHotkeyCapture({
+    register,
+    unregister: (accelerator) => {
+      globalShortcut.unregister(accelerator)
+    },
+    held: () => heldHotkey,
+    handler: toggleOverlay,
+    temporaries: CAPTURE_SHORTCUTS,
+    // A temporary shortcut fired: that is the captured combination. Ended on the next tick, outside
+    // the shortcut's own callback, because ending unregisters that very shortcut.
+    onTemporary: (accelerator) => {
+      setImmediate(() => {
+        if (!capture.active()) return
+        endCapture()
+        setupWindow.sendCaptured({ accelerator })
+      })
+    },
+  })
+  /** Every end of a capture comes here. If the held hotkey was taken meanwhile, the tray and the window say so. */
+  const endCapture = (): void => {
+    const status = capture.stop()
+    if (status === undefined || status === 'registered') return
+    currentHotkey = { requested: heldHotkey, status }
+    tray.setHotkey(currentHotkey)
+    console.log(`[claudeswitcher] after capture: ${hotkeyLogText(currentHotkey)}`)
+    setupWindow.notifyChanged()
+  }
+
+  /**
+   * The setup window's hotkey change. `saveSetup` calls it BEFORE applying anything, so a refused
+   * hotkey is never applied, persisted or confirmed. The tray shows what holds afterwards either way.
+   */
+  const switchTo = (next: string): HotkeySwitch => {
+    // A capture still running would register the held hotkey again on top of the switch.
+    endCapture()
     const result = switchHotkey(
       {
         register,
@@ -427,17 +481,55 @@ app.whenReady().then(async () => {
       next,
       toggleOverlay,
     )
+    currentHotkey = result.registration
+    if (result.switched) heldHotkey = next
     tray.setHotkey(result.registration)
     console.log(`[claudeswitcher] ${hotkeyLogText(result.registration)}`)
-    if (result.switched) {
-      heldHotkey = next
-      return
-    }
-    // The old hotkey still holds, so the setting goes back to it. Setting `hotkeyValue` first
-    // keeps this listener from treating the revert as another switch.
-    hotkeyValue = previous
-    void settings.apply({ hotkey: previous }, [])
+    // A refusal applies nothing, so no change event follows; the window still has to see what holds.
+    if (!result.switched) setupWindow.notifyChanged()
+    return result
+  }
+
+  // Changes only reach the tray and the window here; the hotkey has already been switched by then.
+  settings.onChange((snapshot) => {
+    tray.setSettings(snapshot)
+    setupWindow.notifyChanged()
   })
+
+  // Every setup handler first checks that the setup page sent it (`fromSetup`).
+  ipcMain.handle('setup:load', async (event) => {
+    if (!fromSetup(event, 'setup:load')) throw foreignSender()
+    const integration = await readHookInstallState(resolveClaudeDir())
+    return setupState(settings.snapshot(), { hotkey: currentHotkey, integration, showAll: setupWindow.showAll() })
+  })
+  ipcMain.handle('setup:save', (event, raw: unknown): Promise<SaveResult> | SaveResult => {
+    if (!fromSetup(event, 'setup:save')) return { ok: false, reason: FOREIGN_SENDER }
+    // IPC input: the renderer may send anything.
+    const request = parseSaveRequest(raw)
+    if (request === undefined) return { ok: false, reason: 'Érvénytelen kérés.' }
+    return saveSetup(request, { settings, currentHotkey: () => currentHotkey, switchHotkey: switchTo })
+  })
+  ipcMain.handle('setup:install', (event) => {
+    if (!fromSetup(event, 'setup:install')) return { ok: false, message: FOREIGN_SENDER }
+    return installFromUi()
+  })
+  ipcMain.handle('setup:uninstall', (event) => {
+    if (!fromSetup(event, 'setup:uninstall')) return { ok: false, message: FOREIGN_SENDER }
+    return uninstallFromUi()
+  })
+  ipcMain.handle('setup:capture', (event, active: unknown) => {
+    if (!fromSetup(event, 'setup:capture')) throw foreignSender()
+    // IPC input: only a literal `true` starts a capture; anything else ends it.
+    if (active === true) capture.start()
+    else endCapture()
+    return capture.active()
+  })
+
+  // The window opens by itself only while a setting is unconfirmed; the integration never opens it.
+  const startup = settings.snapshot()
+  const toAsk = settingsToAsk(startup.confirmed, { autostartAvailable: startup.autostartAvailable })
+  console.log(`[claudeswitcher] setup window: ${toAsk.length > 0 ? `asking ${toAsk.join(', ')}` : 'nothing to ask'}`)
+  if (toAsk.length > 0) setupWindow.open({ showAll: false })
 
   // Egy második indítás (pl. a parancsikonra kattintva) a futó példányt hozza elő.
   app.on('second-instance', () => {
@@ -461,6 +553,8 @@ app.whenReady().then(async () => {
   // daemonra, és egy közben lefutó `syncTray` egy megsemmisült tálcaikont érne el.
   cleanup = () => {
     clearInterval(trayTimer)
+    // A capture still running holds temporary shortcuts; end it before everything is released.
+    endCapture()
     globalShortcut.unregisterAll()
     tray.destroy()
   }

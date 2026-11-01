@@ -12,8 +12,19 @@
     "apps/desktop": {
       // A renderer belépési pontja a HTML, és a `window-api.ts` importálatlan globális
       // típusdeklaráció, amit a tsconfig `include`-ja hoz be.
+      // The setup window is a second page with its own global declaration, the same way. Its script
+      // and its preload are listed too: knip did not follow `setup.html` to `setup-main.tsx` or find the
+      // second preload entry by itself (measured: both reported as unused files).
       // `scripts/make-icon.mjs` is a one-off generator run by hand (`node scripts/make-icon.mjs`).
-      "entry": ["src/renderer/index.html", "src/renderer/window-api.ts", "scripts/make-icon.mjs"]
+      "entry": [
+        "src/renderer/index.html",
+        "src/renderer/window-api.ts",
+        "src/renderer/setup.html",
+        "src/renderer/setup-window-api.ts",
+        "src/renderer/setup-main.tsx",
+        "src/preload/setup.ts",
+        "scripts/make-icon.mjs"
+      ]
     }
   }
 }

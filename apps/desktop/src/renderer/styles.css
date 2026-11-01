@@ -185,3 +185,35 @@ body {
   font: 12px/1.45 Consolas, "Cascadia Mono", monospace;
 }
 .plan-panel textarea { width: 100%; resize: vertical; }
+
+/*
+ * The setup window (setup.html, SetupWindow.tsx): a normal framed window, so it scrolls as a page.
+ * Same colours as the overlay.
+ */
+.setup { max-width: 520px; padding: 14px 18px 18px; }
+.setup h1 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+.setup h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #a8a6a2; }
+.setup-intro { margin: 0 0 10px; }
+.setup-section { margin: 0 0 10px; padding: 8px 12px; border: 1px solid #3a3836; border-radius: 6px; background: #242321; }
+.setup-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 5px 0; }
+.setup-label { flex: 1; min-width: 160px; }
+.setup-note { flex-basis: 100%; margin: 0; color: #6b6a67; font-size: 12px; }
+.setup-row input[type="checkbox"] + .setup-label + .setup-note { padding-left: 24px; }
+.setup-note.warning { color: #e3b341; }
+.setup-error { margin: 0 0 10px; color: #e0796b; font-weight: 600; }
+.setup button {
+  padding: 4px 12px;
+  border: 1px solid #4a4845;
+  border-radius: 4px;
+  background: #2f2e2c;
+  color: #e8e6e3;
+  font: inherit;
+  cursor: pointer;
+}
+.setup button:disabled { opacity: 0.45; cursor: default; }
+.setup button:focus-visible, .setup input:focus-visible { outline: 2px solid #d97757; outline-offset: 1px; }
+.setup .hotkey-capture { min-width: 180px; font: 12px/1.4 Consolas, "Cascadia Mono", monospace; }
+.setup .hotkey-capture.capturing { border-color: #d97757; color: #d97757; }
+.setup .setup-link { margin: 0 0 10px; padding: 0; border: none; background: none; color: #5fa8e8; text-decoration: underline; }
+.setup-footer { display: flex; justify-content: flex-end; }
+.setup button.primary { border-color: #d97757; background: #d97757; color: #1c1b1a; font-weight: 600; }

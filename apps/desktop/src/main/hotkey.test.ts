@@ -1,14 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_HOTKEY } from '../shared/settings.js'
-import {
-  hotkeyLabel,
-  hotkeyLogText,
-  registerHotkey,
-  registerHotkeyOrDefault,
-  switchHotkey,
-  type HotkeyRegistration,
-  type RegisterAccelerator,
-} from './hotkey.js'
+import type { HotkeyRegistration } from '../shared/hotkey-status.js'
+import { hotkeyLogText, registerHotkey, registerHotkeyOrDefault, switchHotkey, type RegisterAccelerator } from './hotkey.js'
 
 /** Egy hamis `globalShortcut.register`: a `taken` kombinációkra false, az `invalid`-okra dob. */
 function fakeRegister(options: { taken?: string[]; invalid?: string[] } = {}): {
@@ -121,7 +114,7 @@ describe('switchHotkey', () => {
   it('keeps the old hotkey when the new one is taken', () => {
     const { deps, calls } = fakeShortcuts({ taken: ['F9'] })
     const result = switchHotkey(deps, 'F8', 'F9', noop)
-    expect(result.switched).toBe(false)
+    expect(result).toMatchObject({ switched: false, attempted: 'taken' })
     expect(calls.at(-1)).toBe('register F8')
     expect(result.registration).toEqual<HotkeyRegistration>({ requested: 'F8', status: 'registered' })
   })
@@ -130,7 +123,7 @@ describe('switchHotkey', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const { deps, calls } = fakeShortcuts({ invalid: ['Shift+Alt+Spcae'] })
     const result = switchHotkey(deps, 'F8', 'Shift+Alt+Spcae', noop)
-    expect(result.switched).toBe(false)
+    expect(result).toMatchObject({ switched: false, attempted: 'invalid' })
     expect(calls.at(-1)).toBe('register F8')
     expect(result.registration).toEqual<HotkeyRegistration>({ requested: 'F8', status: 'registered' })
   })
@@ -147,39 +140,6 @@ describe('switchHotkey', () => {
     const result = switchHotkey(deps, 'F8', 'F8', noop)
     expect(calls).toEqual([])
     expect(result).toEqual({ switched: true, registration: { requested: 'F8', status: 'registered' } })
-  })
-})
-
-describe('hotkeyLabel', () => {
-  it('names the working accelerator', () => {
-    expect(hotkeyLabel({ requested: 'F9', status: 'registered' })).toBe('Gyorsbillentyű: F9')
-  })
-
-  it('says when another application holds it', () => {
-    expect(hotkeyLabel({ requested: 'F9', status: 'taken' })).toBe('Gyorsbillentyű: F9, FOGLALT, nem működik')
-  })
-
-  it('names the invalid value and the default that works in its place', () => {
-    expect(
-      hotkeyLabel({ requested: 'Spcae', status: 'invalid', fallback: { accelerator: DEFAULT_HOTKEY, status: 'registered' } }),
-    ).toBe(`ÉRVÉNYTELEN gyorsbillentyű: Spcae, alapérték él (${DEFAULT_HOTKEY})`)
-  })
-
-  it('says when the default could not be registered either', () => {
-    expect(
-      hotkeyLabel({ requested: 'Spcae', status: 'invalid', fallback: { accelerator: DEFAULT_HOTKEY, status: 'taken' } }),
-    ).toBe(`ÉRVÉNYTELEN gyorsbillentyű: Spcae, az alapérték (${DEFAULT_HOTKEY}) is FOGLALT`)
-  })
-
-  it('never contains a dash inside the text', () => {
-    const cases: HotkeyRegistration[] = [
-      { requested: 'F9', status: 'registered' },
-      { requested: 'F9', status: 'taken' },
-      { requested: 'x', status: 'invalid', fallback: { accelerator: DEFAULT_HOTKEY, status: 'registered' } },
-      { requested: 'x', status: 'invalid', fallback: { accelerator: DEFAULT_HOTKEY, status: 'taken' } },
-      { requested: 'x', status: 'invalid', fallback: { accelerator: DEFAULT_HOTKEY, status: 'invalid' } },
-    ]
-    for (const registration of cases) expect(hotkeyLabel(registration)).not.toMatch(/[–—]/)
   })
 })
 

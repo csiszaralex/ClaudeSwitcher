@@ -1,25 +1,11 @@
+import type { HotkeyRegistration, HotkeyStatus } from '../shared/hotkey-status.js'
 import { DEFAULT_HOTKEY } from '../shared/settings.js'
 
-/**
- * Egy gyorsbillentyű foglalásának eredménye:
- * - `registered`: él;
- * - `taken`: egy másik alkalmazás foglalja. Az Electron ilyenkor dokumentáltan NEM dob, hanem
- *   `false`-t ad;
- * - `invalid`: az Electron nem tudta értelmezni (dobott), például egy elgépelt kombinációt a
- *   config.json-ban (`Shift+Alt+Spcae`).
- */
-export type HotkeyStatus = 'registered' | 'taken' | 'invalid'
+// The registration result types and their Hungarian text are in `shared/hotkey-status.ts`: the
+// setup window shows them too.
 
 /** A `globalShortcut.register` alakja, hogy a foglalás Electron nélkül tesztelhető legyen. */
 export type RegisterAccelerator = (accelerator: string, handler: () => void) => boolean
-
-/** A beállított gyorsbillentyű eredménye, és ha érvénytelen volt, az alapértéké. */
-export interface HotkeyRegistration {
-  requested: string
-  status: HotkeyStatus
-  /** Csak `invalid` esetén: az alapértelmezett gyorsbillentyű, amit helyette foglaltunk. */
-  fallback?: { accelerator: string; status: HotkeyStatus } | undefined
-}
 
 /**
  * Lefoglal egy gyorsbillentyűt, és soha nem dob.
@@ -57,18 +43,7 @@ export function registerHotkeyOrDefault(
   }
 }
 
-/** A tálcamenü gyorsbillentyű sora: mi él, és ha valami nem, mit kell javítani. */
-export function hotkeyLabel(registration: HotkeyRegistration): string {
-  const { requested, status, fallback } = registration
-  if (status === 'registered') return `Gyorsbillentyű: ${requested}`
-  if (status === 'taken') return `Gyorsbillentyű: ${requested}, FOGLALT, nem működik`
-  const invalid = `ÉRVÉNYTELEN gyorsbillentyű: ${requested}`
-  if (fallback?.status === 'registered') return `${invalid}, alapérték él (${fallback.accelerator})`
-  if (fallback?.status === 'taken') return `${invalid}, az alapérték (${fallback.accelerator}) is FOGLALT`
-  return `${invalid}, nincs működő gyorsbillentyű`
-}
-
-/** Ugyanez az indulási naplóba, angolul, mint a többi naplósor. */
+/** The tray line (`hotkeyLabel`) for the startup log, in English like the other log lines. */
 export function hotkeyLogText(registration: HotkeyRegistration): string {
   const { requested, status, fallback } = registration
   if (status === 'registered') return `hotkey ${requested} registered`
@@ -81,6 +56,14 @@ export function hotkeyLogText(registration: HotkeyRegistration): string {
 }
 
 /**
+ * The result of a live switch. `registration` is what holds afterwards: `next` when switched,
+ * otherwise `current` registered again. `attempted` is what became of `next`.
+ */
+export type HotkeySwitch =
+  | { switched: true; registration: HotkeyRegistration }
+  | { switched: false; registration: HotkeyRegistration; attempted: Exclude<HotkeyStatus, 'registered'> }
+
+/**
  * Moves the global shortcut from `current` to `next` while the app runs, and never throws.
  * If `next` does not register (taken or invalid), `current` is registered again, so the user is
  * never left without a working hotkey because of a bad choice.
@@ -90,7 +73,7 @@ export function switchHotkey(
   current: string,
   next: string,
   handler: () => void,
-): { registration: HotkeyRegistration; switched: boolean } {
+): HotkeySwitch {
   if (next === current) return { registration: { requested: current, status: 'registered' }, switched: true }
   try {
     deps.unregister(current)
@@ -103,5 +86,6 @@ export function switchHotkey(
   return {
     registration: { requested: current, status: registerHotkey(deps.register, current, handler) },
     switched: false,
+    attempted: status,
   }
 }

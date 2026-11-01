@@ -2,15 +2,21 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * Honnan tölti az overlay a rendererét. Egyetlen forrás: a `createOverlay` ebből tölt, és az
- * IPC-kezelők ehhez mérik a küldőt, így a kettő nem csúszhat szét.
- * - `dev-server`: `electron-vite dev`, ami az `ELECTRON_RENDERER_URL`-t beállítja;
- * - `file`: a lefordított `index.html`, `loadFile`-lal.
+ * Where one renderer page loads from. One source per page: the window loads from it, and the IPC
+ * handlers check the sender against it, so the two cannot drift apart.
+ * - `dev-server`: `electron-vite dev`, which sets `ELECTRON_RENDERER_URL` (the server's origin);
+ * - `file`: the built page, with `loadFile`.
  */
 export type RendererLocation = { kind: 'dev-server'; url: string } | { kind: 'file'; path: string }
 
-export function rendererLocation(devServerUrl: string | undefined, indexFile: string): RendererLocation {
-  return devServerUrl === undefined ? { kind: 'file', path: indexFile } : { kind: 'dev-server', url: devServerUrl }
+/**
+ * @param rendererDir the built renderer directory (`out/renderer`).
+ * @param page the page's HTML file, for example `index.html` (the overlay) or `setup.html`.
+ */
+export function rendererLocation(devServerUrl: string | undefined, rendererDir: string, page: string): RendererLocation {
+  return devServerUrl === undefined
+    ? { kind: 'file', path: path.join(rendererDir, page) }
+    : { kind: 'dev-server', url: new URL(page, devServerUrl).href }
 }
 
 function parse(url: string): URL | undefined {
@@ -39,18 +45,20 @@ function comparable(file: string): string {
 }
 
 /**
- * Igaz, ha az IPC-hívás a saját rendererünktől jött: a küldő keret URL-je a betöltött renderer.
+ * True if the IPC call came from our own page: the sending frame's URL is the page `renderer`
+ * names. Each page has its own location, so in the build the overlay's handlers refuse the setup
+ * page and the other way round.
  *
- * Erre azért van szükség, mert egy az overlayben megnyílt idegen oldal (egy jövőbeli hiba, vagy
- * az ablakra húzott URL) ugyanazt a preloadot kapná: megkapná a tokent és minden függő kérést, és
- * egy gépszintű engedélyt íratna a Claude Code-dal.
- * - Fejlesztés közben a dev szerver origója számít (séma, hoszt, port). Ez lazább: a dev szerver
- *   bármelyik oldala átmegy, de az csak a fejlesztői gépen fut, a saját forrásainkból.
- * - Élesben pontosan a saját `index.html`-ünk; a query és a hash nem számít.
+ * This is needed because a foreign page opened in the overlay (a future bug, or a URL dropped on
+ * the window) would get the same preload: it would receive the token and every pending request,
+ * and could make Claude Code write a machine-wide permission.
+ * - In development the dev server's origin counts (scheme, host, port). This is looser: any page
+ *   of the dev server passes, but it only runs on the developer's machine, from our own sources.
+ * - In the build exactly our own page (`renderer.path`); the query and the hash do not matter.
  *
- * @param senderUrl `event.senderFrame?.url`; `undefined`, ha a keret már nem létezik.
+ * @param senderUrl `event.senderFrame?.url`; `undefined` if the frame no longer exists.
  */
-export function isOverlaySender(senderUrl: string | undefined, renderer: RendererLocation): boolean {
+export function isRendererSender(senderUrl: string | undefined, renderer: RendererLocation): boolean {
   if (senderUrl === undefined) return false
   const sender = parse(senderUrl)
   if (sender === undefined) return false

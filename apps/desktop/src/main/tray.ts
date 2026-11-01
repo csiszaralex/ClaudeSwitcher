@@ -2,7 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Menu, Tray, app, nativeImage, type MenuItemConstructorOptions } from 'electron'
 import { SETTINGS, type BooleanSettingKey, type SettingDefinition } from '../shared/settings.js'
-import { hotkeyLabel, type HotkeyRegistration } from './hotkey.js'
+import { hotkeyLabel, type HotkeyRegistration } from '../shared/hotkey-status.js'
 import { resourcesDir } from './resources.js'
 import type { SettingsSnapshot } from './settings-service.js'
 
@@ -11,7 +11,7 @@ const resources = resourcesDir(app.isPackaged, process.resourcesPath, dirname)
 
 export interface TrayHandle {
   setWaiting(count: number): void
-  /** A warning line in the menu (for example an outdated integration); `undefined` removes it. */
+  /** A warning line in the menu (an outdated integration); clicking it calls `onNotice`. `undefined` removes it. */
   setNotice(text: string | undefined): void
   /** Shows the current settings; the setup window can change them while the tray is open. */
   setSettings(snapshot: SettingsSnapshot): void
@@ -60,8 +60,8 @@ export function createTray(options: {
   /** Opens the setup window with every setting. */
   onSettings: () => void
   onQuit: () => void
-  onInstall: () => void
-  onUninstall: () => void
+  /** The notice line (an outdated integration) was clicked: the setup window handles the integration. */
+  onNotice: () => void
 }): TrayHandle {
   const idle = loadIcon('tray.png')
   const waiting = loadIcon('tray-waiting.png')
@@ -89,6 +89,10 @@ export function createTray(options: {
     }
   }
 
+  // The integration is installed and removed in the setup window only; the notice line opens it.
+  const noticeItems = (): MenuItemConstructorOptions[] =>
+    notice === undefined ? [] : [{ label: notice, click: options.onNotice }, { type: 'separator' }]
+
   const buildMenu = (): Menu =>
     Menu.buildFromTemplate([
       { label: 'Megnyitás', click: options.onOpen },
@@ -100,11 +104,7 @@ export function createTray(options: {
       { type: 'separator' },
       ...TOGGLES.map(toggleItem),
       { type: 'separator' },
-      // Directly above the install item, because that is the thing to do.
-      ...(notice === undefined ? [] : [{ label: notice, enabled: false }]),
-      { label: 'Claude Code integráció telepítése', click: options.onInstall },
-      { label: 'Claude Code integráció eltávolítása', click: options.onUninstall },
-      { type: 'separator' },
+      ...noticeItems(),
       { label: 'Kilépés', click: options.onQuit },
     ])
   const rebuild = (): void => {

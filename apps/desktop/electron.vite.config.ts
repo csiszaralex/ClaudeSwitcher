@@ -43,8 +43,9 @@ if (BUNDLED_WORKSPACE_PACKAGES.length === 0) {
 }
 
 /**
- * A renderer CSP-je az `index.html` helyőrzőjébe (lásd `rendererCsp`). A dev szerveren (`ctx.server`)
- * a lazább, csak fejlesztői változat megy ki, a buildben a szigorú.
+ * Writes the renderer CSP into the placeholder of every page (`index.html`, `setup.html`; see
+ * `rendererCsp`). The dev server (`ctx.server`) gets the looser, development-only policy, the build
+ * the strict one.
  */
 function rendererCspPlugin(): Plugin {
   return {
@@ -57,28 +58,42 @@ function rendererCspPlugin(): Plugin {
 }
 
 /**
- * A renderer gyökere a valódi (feloldott) útvonalon. Egy `subst`-tal leképezett meghajtón (pl. `P:` → `D:\P`)
- * a Vite az `index.html`-t a valódi útvonalra oldja fel, a gyökeret viszont a leképezettre hagyná: a
- * kettő közti relatív út abszolút lesz, és a build elbukik. Mérve 2026-10-30, egy `subst` P: meghajtón.
- * Az útvonal a config fájlhoz képest számít, nem a munkakönyvtárhoz: a knip a repó gyökeréből tölti be.
+ * The renderer root on its real (resolved) path. On a drive mapped with `subst` (for example
+ * `P:` → `D:\P`) Vite resolves the HTML entry to the real path but would keep the root on the mapped
+ * one: the relative path between them becomes absolute, and the build fails. Measured 2026-10-30 on
+ * a `subst` P: drive. The path is relative to this config file, not to the working directory: knip
+ * loads the config from the repo root.
  *
- * A belépő HTML-t (`RENDERER_INPUT`) is a valódi útvonalon adjuk meg. Az electron-vite 6 a munkakönyvtárból
- * számolja (`electronRendererConfigPresetPlugin`, `findInput`), és a Vite 8 Rolldownja egy `P:` alatti
- * munkakönyvtárból indítva (`pnpm run build` az `apps/desktop`-ban) a `D:` alatti gyökérhez képest abszolút
- * nevet kapna, amit „neither absolute nor relative paths” hibával elutasít. Mérve 2026-10-30, Vite 8.3.5-tel;
- * a Vite 7 ezt még elfogadta.
+ * The entry pages (`RENDERER_INPUT`) are given on the real path too. electron-vite 6 computes them
+ * from the working directory (`electronRendererConfigPresetPlugin`, `findInput`), and Vite 8's
+ * Rolldown, started from a working directory under `P:` (`pnpm run build` in `apps/desktop`), would
+ * get a name that is absolute relative to the root under `D:`, which it rejects with "neither
+ * absolute nor relative paths". Measured 2026-10-30 with Vite 8.3.5; Vite 7 still accepted it.
  */
 const RENDERER_ROOT = realpathSync.native(fileURLToPath(new URL('./src/renderer', import.meta.url)))
-const RENDERER_INPUT = path.join(RENDERER_ROOT, 'index.html')
+/** The two pages: the overlay (`index`) and the setup window (`setup`). */
+const RENDERER_INPUT = {
+  index: path.join(RENDERER_ROOT, 'index.html'),
+  setup: path.join(RENDERER_ROOT, 'setup.html'),
+}
 
 export default defineConfig({
   main: {
     build: { externalizeDeps: { exclude: BUNDLED_WORKSPACE_PACKAGES } },
   },
-  // A preload CommonJS marad: sandboxolt preload nem lehet ES modul (Electron `docs/tutorial/esm.md`).
-  // A `"type": "module"` miatt az electron-vite ESM-et adna, ezért a formátum ki van írva; a kimenet
-  // így `out/preload/index.cjs`. A függőségeket alapból (`build.externalizeDeps`) externalizálja.
-  preload: { build: { rolldownOptions: { output: { format: 'cjs' } } } },
+  // The preload stays CommonJS: a sandboxed preload cannot be an ES module (Electron
+  // `docs/tutorial/esm.md`). Because of `"type": "module"` electron-vite would emit ESM, so the format
+  // is spelled out; the output is `out/preload/index.cjs` and `out/preload/setup.cjs`. Dependencies
+  // are externalized by default (`build.externalizeDeps`).
+  // Two entries, one per window: the setup window's preload exposes only `SetupApi`, never the token.
+  preload: {
+    build: {
+      rolldownOptions: {
+        input: { index: 'src/preload/index.ts', setup: 'src/preload/setup.ts' },
+        output: { format: 'cjs' },
+      },
+    },
+  },
   renderer: {
     root: RENDERER_ROOT,
     build: { rolldownOptions: { input: RENDERER_INPUT } },

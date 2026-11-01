@@ -121,6 +121,7 @@ Settings and the token survive, because they live in `userData` and not in the i
   - It keeps quick toggles for `hideAfterLastDecision`, `jumpToTab` and autostart. They read from and write to the same settings list, and stay in sync with an open window.
   - It gains "Beállítások…".
   - It loses "edit config.json", which the hotkey capture field replaces.
+  - It loses the integration install and remove items (Alex's decision, 2026-11-01): the integration is handled in the setup window only. The outdated-integration notice line stays, and clicking it opens the window with every setting.
 - **"Different build"** is the pair of executable path and app path (`process.execPath` + `app.getAppPath()`). So `dev` versus `start` from the repo also counts as different and gets the dialog. The same pair again keeps today's silent hand-over.
 - **Closing a running app cleanly.** The installer, the uninstaller and the different-build hand-over all use the same path: they ask the running app to quit through its normal `before-quit` sequence, never a force kill.
   - The normal sequence lets the daemon release held permission requests (`STOP_TIMEOUT_MS`), so Claude Code falls back to its native prompt.

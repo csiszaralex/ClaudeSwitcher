@@ -431,10 +431,11 @@ visszajelzés-mező, a szabályhoz szerkeszthető előnézet. A billentyűzetes 
 megmarad (nyilak, Enter, Esc), az overlay a döntés után sem zárul be automatikusan, ha más
 is vár. ~~Limitsávok~~: kivezetve (§3.5).
 
-**Keményítés** (az átnézés 5. hulláma): az overlay nem navigálhat (`will-navigate` tiltva), új
-ablakot nem nyithat (`setWindowOpenHandler` → `deny`), és minden engedélykérést elutasít. Minden
-IPC-kezelő ellenőrzi, hogy a hívás a saját rendererünkből jött (`ipc-sender.ts`
-`isOverlaySender`). A renderer CSP-je egy helyen készül (`csp/renderer-csp.ts`): a WebSocket a
+**Keményítés** (az átnézés 5. hulláma): az overlay és a beállítások ablak nem navigálhat
+(`will-navigate` tiltva), új ablakot nem nyithat (`setWindowOpenHandler` → `deny`), és minden
+engedélykérést elutasít (`harden-window.ts` `hardenWindow`). Minden IPC-kezelő ellenőrzi, hogy a
+hívás a saját oldalától jött (`ipc-sender.ts` `isRendererSender`): élesben az overlay kezelői a
+beállítások oldalt is elutasítják, és fordítva. A renderer CSP-je egy helyen készül (`csp/renderer-csp.ts`): a WebSocket a
 pontos daemon-portra (`DAEMON_PORT`, 47821) szűkül, `object-src`, `base-uri` és `form-action`
 `'none'`, az `'unsafe-inline'` csak a dev szerveren.
 

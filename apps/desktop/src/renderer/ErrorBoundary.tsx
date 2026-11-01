@@ -31,7 +31,7 @@ export class ErrorBoundary extends Component<Props, BoundaryState> {
   }
 
   override componentDidCatch(error: unknown, info: ErrorInfo): void {
-    console.error(`[overlay] render failed (${this.props.label})`, error, info.componentStack)
+    console.error(`[renderer] render failed (${this.props.label})`, error, info.componentStack)
   }
 
   override render(): ReactNode {
