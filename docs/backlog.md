@@ -20,10 +20,11 @@ A teljes repó-átnézés (`docs/reviews/2026-10-25-repo-review.md`) javítási 
 | gép | új gépen: a renderer build `subst` meghajtón, 30 s a PowerShell probe-tartaléknak, bő időkorlát az élő Windows-teszteknek | `b42f2c7`, `6ea2ee8`, `6537a05` |
 | 6/5 | dokumentáció: README, projekt CLAUDE.md, a spec igazítása a kódhoz, az M1 halasztott tételei ide, „Eredmény” a review-ba, a halott IDE token és a tesztekben maradt valódi helyi adatok cseréje | `cb6ffef`–`1fdc142` |
 | 7 | Electron 45, ES modul főprocessz, minden függőség a legfrissebb főverzióra, Electron bináris indítás előtt, könnyű pre-commit hook | `8d8032e`–`3b61bf9` |
+| F1 | elengedettre nem ugrik vissza, telefon csak Remote Controllal, leírás a parancs fölött, Ctrl+Enter felirat, szabályjavaslat a P/G gombon, ugrás az új kérésre, gondolatjelek a forrásban | `2969d58`–`4602ce0` |
 
-**A 7. kész.** Ezzel a review javítási köre lezárult.
+**A 7. és az F1 kész.** Ezzel a review javítási köre lezárult.
 
-**Következő lépés:** F1, majd a lenti ütemezés.
+**Következő lépés:** a 8. hullám. Öt részből áll, a sorrend és az 1. rész terve: `docs/superpowers/specs/2026-10-31-installer-design.md`.
 
 A munkamódszer a `CLAUDE.md`-ben, a telepítés (a pre-commit hookkal együtt) a `README.md`-ben van.
 
@@ -32,7 +33,7 @@ A munkamódszer a `CLAUDE.md`-ben, a telepítés (a pre-commit hookkal együtt) 
 1. 6/3–6/5: eszközök, tesztek, dokumentáció (a review 6. hulláma).
 2. 7: Electron-frissítés.
 3. **F1**, gyors UX-kör, csak renderer: 3, 9, 11, 7, 6, 2.
-4. 8: telepítő és automatikus indulás (login item, nem Windows-szolgáltatás).
+4. 8: telepítő, automatikus indulás, első beállítás, publikálás előtti takarítás, publikus GitHub repó, kiadások és frissítés az appból.
 5. **F2**, main és tálca: 5, 10, 12, 8.
 6. **F3**: 1, automatikus mód.
 7. **F4**: 4, saját szabálymotor és AI-magyarázat, külön tervezéssel.
@@ -66,6 +67,8 @@ A munkamódszer a `CLAUDE.md`-ben, a telepítés (a pre-commit hookkal együtt) 
 10. **Villogó tálcaikon 9 perc után.** Pirosan villog, ha bármely kérés 540 mp-nél régebben vár. Az app 590 mp-nél engedi el a kérést.
 11. **Hosszú parancsnál az indoklás görgetés nélkül.** A leírás a parancs fölé kerül.
 12. **Fókusz vissza bezáráskor.** Megnyitáskor az app megjegyzi az előtérben lévő ablakot, Esc-re oda adja vissza. Enter (ugrás) után nem.
+
+13. **A GUI többnyelvű (i18n).** A felület ma magyar, a kód és a dokumentáció a 8. hullámtól angol. Később, külön tervezéssel.
 
 **+1. Mobil felület** (PWA vagy APK, WireGuardon át). Csak megjegyzés, a teljes app után kerül sorra.
 - Ehhez a daemont ki kellene nyitni a hálózatra, ami hitelesítést, TLS-t és interfész-korlátozást igényel.

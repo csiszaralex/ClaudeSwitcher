@@ -23,7 +23,7 @@ Futtatás, telepítés, env változók: `README.md`. Terv és mért Claude Code 
 - Az élő átvételi teszt Alex dolga. Minden javítás után pontos, lépésenkénti teszt-protokollt kap a cs-spike-ra (`P:\08_Apps\cs-spike`): mit csináljon, és mit kell látnia.
 
 ## Nyelv
-- Kód-azonosítók, parancsok és commit üzenetek angolul. Kommentek és dokumentáció magyarul.
+- Kód-azonosítók, parancsok és commit üzenetek angolul. Az új kommentek és dokumentáció angolul készülnek (a 8. hullámtól), a meglévő magyarokat a 8. hullám 2. része fordítja le. A GUI szövegei magyarok.
 - Magyar szövegben mondaton belül soha nincs gondolatjel (– vagy —): vessző vagy új mondat.
 
 ## Egy tény egy helyen
