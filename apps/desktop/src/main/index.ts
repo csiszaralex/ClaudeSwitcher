@@ -12,13 +12,15 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from 'electron'
-import { configPath, loadConfig, saveSettings } from './config.js'
+import { createAutostart } from './autostart.js'
+import { loadConfig, saveSettings } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
-import { hotkeyLogText, registerHotkeyOrDefault } from './hotkey.js'
+import { hotkeyLogText, registerHotkeyOrDefault, switchHotkey, type HotkeyRegistration } from './hotkey.js'
 import { isOverlaySender, rendererLocation } from './ipc-sender.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
+import { createSettingsService } from './settings-service.js'
 import {
   DAEMON_PORT,
   installIntegration,
@@ -203,11 +205,18 @@ app.whenReady().then(async () => {
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
   const userData = app.getPath('userData')
-  const config = await loadConfig(userData)
-  // Futás közben a tálcapipa állítja; a renderer minden appból hozott döntés után innen kérdezi.
-  let hideAfterLastDecision = config.values.hideAfterLastDecision
-  // Ugyanígy: a tálcapipa azonnal átállítja, a következő fókuszkérés már az új értéket látja.
-  let jumpToTab = config.values.jumpToTab
+  // Every handler reads the settings from the service at the time of use, so a change from the
+  // tray (or the setup window) takes effect at once.
+  const settings = createSettingsService({
+    stored: await loadConfig(userData),
+    autostart: createAutostart(app.isPackaged, {
+      get: () => app.getLoginItemSettings(),
+      set: (openAtLogin) => {
+        app.setLoginItemSettings({ openAtLogin })
+      },
+    }),
+    persist: (patch, confirm) => saveSettings(userData, patch, confirm),
+  })
   const token = await loadOrCreateToken(userData)
   // Egy helyi, nem-null konstans: a kezelők ezt fogják be, így nincs szükség `!`-re, és a típus
   // garantálja, hogy indulás után minden kezelő ugyanazt a futó daemont látja. A modulszintű
@@ -258,7 +267,7 @@ app.whenReady().then(async () => {
     // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
     // A döntéseket a fókusz UTÁN olvassuk: a várakozás alatt egy fájlírás-kérés is beérkezhetett.
     // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
-    const uri = tabFocusUri(view, outcome, jumpToTab, running.state().decisions)
+    const uri = tabFocusUri(view, outcome, settings.snapshot().values.jumpToTab, running.state().decisions)
     if (uri !== undefined) void openTabFocusUri(uri)
     return outcome !== 'failed'
   })
@@ -270,7 +279,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('settings:get', (event) => {
     if (!fromOverlay(event, 'settings:get')) throw foreignSender()
-    return { hideAfterLastDecision }
+    return { hideAfterLastDecision: settings.snapshot().values.hideAfterLastDecision }
   })
 
   // Indulási összegzés a főprocessz stdoutjára. Ez teszi a Step 5 ellenőrzését
@@ -292,34 +301,23 @@ app.whenReady().then(async () => {
   // A showOverlay/toggleOverlay függvénydeklarációk, tehát hoistolódnak: a lentebbi
   // definíciójuk ekkor már hívható. Egy érvénytelen (elgépelt) érték nem állítja meg az
   // indulást: helyette az alapérték él, és a tálca megmondja, mit kell javítani.
-  const hotkey = registerHotkeyOrDefault(
-    (accelerator, handler) => globalShortcut.register(accelerator, handler),
-    config.values.hotkey,
-    toggleOverlay,
-  )
+  const register = (accelerator: string, handler: () => void): boolean => globalShortcut.register(accelerator, handler)
+  const hotkey = registerHotkeyOrDefault(register, settings.snapshot().values.hotkey, toggleOverlay)
 
   const tray = createTray({
+    settings: settings.snapshot(),
     hotkey,
-    // A config fájl megnyitása a rendszer szerkesztőjével. Enélkül az „állítható"
-    // gyakorlatban azt jelentené, hogy a felhasználónak ki kell találnia egy útvonalat az
-    // AppData alatt.
-    onEditHotkey: () => {
-      void shell.openPath(configPath(userData))
-    },
-    hideAfterLastDecision,
-    onToggleHideAfterLastDecision: (enabled) => {
-      // Azonnal él, akkor is, ha a mentés elbukik (pl. elrontott config fájl), akkor csak
-      // ennek a futásnak a végéig.
-      hideAfterLastDecision = enabled
-      void saveSettings(userData, { hideAfterLastDecision: enabled }, [])
-    },
-    jumpToTab,
-    onToggleJumpToTab: (enabled) => {
-      jumpToTab = enabled
-      void saveSettings(userData, { jumpToTab: enabled }, [])
+    // A tray change confirms that setting. It holds at once even if saving fails (for example a
+    // broken config file), then only until the app quits.
+    onToggle: (key, enabled) => {
+      void settings.apply({ [key]: enabled }, [key])
     },
     onOpen: () => {
       showOverlay()
+    },
+    onSettings: () => {
+      // Task 4 opens the setup window here.
+      console.log('[claudeswitcher] settings window requested; not available yet')
     },
     onQuit: () => {
       app.quit()
@@ -403,6 +401,43 @@ app.whenReady().then(async () => {
     if (overlay !== undefined && !overlay.isDestroyed() && overlay.isVisible()) overlay.hide()
     else showOverlay()
   }
+
+  /** The accelerator the app actually holds: the configured one, or the default it fell back to. */
+  const heldAccelerator = (registration: HotkeyRegistration): string =>
+    registration.status !== 'invalid' || registration.fallback === undefined
+      ? registration.requested
+      : registration.fallback.accelerator
+  let heldHotkey = heldAccelerator(hotkey)
+  // The hotkey value the listener last saw, to tell a hotkey change from any other change.
+  let hotkeyValue = settings.snapshot().values.hotkey
+  settings.onChange((snapshot) => {
+    tray.setSettings(snapshot)
+    const next = snapshot.values.hotkey
+    if (next === hotkeyValue) return
+    const previous = hotkeyValue
+    hotkeyValue = next
+    const result = switchHotkey(
+      {
+        register,
+        unregister: (accelerator) => {
+          globalShortcut.unregister(accelerator)
+        },
+      },
+      heldHotkey,
+      next,
+      toggleOverlay,
+    )
+    tray.setHotkey(result.registration)
+    console.log(`[claudeswitcher] ${hotkeyLogText(result.registration)}`)
+    if (result.switched) {
+      heldHotkey = next
+      return
+    }
+    // The old hotkey still holds, so the setting goes back to it. Setting `hotkeyValue` first
+    // keeps this listener from treating the revert as another switch.
+    hotkeyValue = previous
+    void settings.apply({ hotkey: previous }, [])
+  })
 
   // Egy második indítás (pl. a parancsikonra kattintva) a futó példányt hozza elő.
   app.on('second-instance', () => {

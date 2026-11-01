@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest'
+import type { SettingKey } from '../shared/settings.js'
+import type { Autostart } from './autostart.js'
+import type { StoredConfig, StoredValues } from './config.js'
+import { createSettingsService, type SettingsSnapshot } from './settings-service.js'
+
+function stored(confirmed: SettingKey[] = []): StoredConfig {
+  return { values: { hideAfterLastDecision: true, jumpToTab: true, hotkey: 'Shift+Alt+Space' }, confirmed: new Set(confirmed) }
+}
+
+/** A fake autostart that keeps its state in memory and records every write. */
+function fakeAutostart(available: boolean, initial = true): Autostart & { writes: boolean[] } {
+  const writes: boolean[] = []
+  let state = initial
+  return {
+    available,
+    enabled: () => available && state,
+    set: (value) => {
+      writes.push(value)
+      if (available) state = value
+    },
+    writes,
+  }
+}
+
+interface PersistCall {
+  patch: Partial<StoredValues>
+  confirm: readonly SettingKey[]
+}
+
+function fakePersist(result: boolean): {
+  persist: (patch: Partial<StoredValues>, confirm: readonly SettingKey[]) => Promise<boolean>
+  calls: PersistCall[]
+} {
+  const calls: PersistCall[] = []
+  return {
+    persist: (patch, confirm) => {
+      calls.push({ patch, confirm })
+      return Promise.resolve(result)
+    },
+    calls,
+  }
+}
+
+describe('createSettingsService', () => {
+  it('apply changes values in memory even if persisting fails', async () => {
+    const { persist } = fakePersist(false)
+    const service = createSettingsService({ stored: stored(), autostart: fakeAutostart(true), persist })
+    const snapshot = await service.apply({ jumpToTab: false }, ['jumpToTab'])
+    expect(snapshot.values.jumpToTab).toBe(false)
+    expect(service.snapshot().values.jumpToTab).toBe(false)
+  })
+
+  it('autostart goes to the OS, not to persist', async () => {
+    const { persist, calls } = fakePersist(true)
+    const autostart = fakeAutostart(true)
+    const service = createSettingsService({ stored: stored(), autostart, persist })
+    await service.apply({ autostart: false }, ['autostart'])
+    expect(autostart.writes).toEqual([false])
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.patch).not.toHaveProperty('autostart')
+    expect(calls[0]?.confirm).toContain('autostart')
+    expect(service.snapshot().confirmed.has('autostart')).toBe(true)
+  })
+
+  it('autostart is not confirmed where it is unavailable', async () => {
+    const { persist, calls } = fakePersist(true)
+    const service = createSettingsService({ stored: stored(), autostart: fakeAutostart(false), persist })
+    const snapshot = await service.apply({}, ['autostart', 'jumpToTab'])
+    expect(calls[0]?.confirm).toEqual(['jumpToTab'])
+    expect([...snapshot.confirmed]).toEqual(['jumpToTab'])
+    expect(snapshot.autostartAvailable).toBe(false)
+  })
+
+  it('listeners get every change', async () => {
+    const { persist } = fakePersist(true)
+    const service = createSettingsService({ stored: stored(), autostart: fakeAutostart(true), persist })
+    const seen: SettingsSnapshot[] = []
+    const ignored: SettingsSnapshot[] = []
+    service.onChange((snapshot) => seen.push(snapshot))
+    const unsubscribe = service.onChange((snapshot) => ignored.push(snapshot))
+    unsubscribe()
+    await service.apply({ jumpToTab: false }, [])
+    await service.apply({ hotkey: 'F9' }, ['hotkey'])
+    expect(seen.map((snapshot) => snapshot.values.jumpToTab)).toEqual([false, false])
+    expect(seen.map((snapshot) => snapshot.values.hotkey)).toEqual(['Shift+Alt+Space', 'F9'])
+    expect(ignored).toEqual([])
+  })
+
+  it('a change a listener makes reaches every listener after the current change', async () => {
+    const { persist } = fakePersist(true)
+    const service = createSettingsService({ stored: stored(), autostart: fakeAutostart(true), persist })
+    const first: string[] = []
+    const second: string[] = []
+    service.onChange((snapshot) => {
+      first.push(snapshot.values.hotkey)
+      if (snapshot.values.hotkey === 'F9') void service.apply({ hotkey: 'Shift+Alt+Space' }, [])
+    })
+    service.onChange((snapshot) => second.push(snapshot.values.hotkey))
+    await service.apply({ hotkey: 'F9' }, ['hotkey'])
+    expect(first).toEqual(['F9', 'Shift+Alt+Space'])
+    expect(second).toEqual(['F9', 'Shift+Alt+Space'])
+  })
+
+  it('snapshot reads autostart from the OS', () => {
+    const { persist } = fakePersist(true)
+    const autostart = fakeAutostart(true, false)
+    const service = createSettingsService({ stored: stored(['hotkey']), autostart, persist })
+    expect(service.snapshot().values.autostart).toBe(autostart.enabled())
+    expect(service.snapshot().values.autostart).toBe(false)
+    expect([...service.snapshot().confirmed]).toEqual(['hotkey'])
+  })
+})

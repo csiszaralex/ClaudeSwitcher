@@ -58,7 +58,7 @@ Ha a telepített hookok elavultak (egy újabb verzió új hookot vár), a tálca
 
 ## Hol mi van
 
-- **Config és token:** az Electron `userData` könyvtárában (`app.getPath('userData')`): `config.json` (gyorsbillentyű, tálcapipák) és `daemon-token`. A tálcamenü „Gyorsbillentyű átállítása…” pontja megnyitja a `config.json`-t; az új billentyű újraindítás után él.
+- **Config és token:** az Electron `userData` könyvtárában (`app.getPath('userData')`): `config.json` (gyorsbillentyű, tálcapipák, a felhasználó által megerősített beállítások) és `daemon-token`. A tálcapipák azonnal hatnak, és a módosított beállítást megerősítettnek jegyzik. Az automatikus indítást a Windows bejelentkezési eleme tárolja, és csak a telepített app állíthatja.
 - **`CLAUDESWITCHER_HOOK_LOG=<fájl>`:** ha be van állítva az app indításakor, a daemon minden beérkező hook nyers törzsét egy JSON-sorként hozzáfűzi ehhez a fájlhoz. Diagnosztika, alapból ki van kapcsolva.
 - **`CS_PROBE_MEASURE=1`:** bekapcsolja a kézi processz-probe mérést (`apps/desktop/src/main/process-probe.measure.test.ts`), ami nélküle kihagyódik. Futtatás Git Bash-ből: `CS_PROBE_MEASURE=1 pnpm --filter @claudeswitcher/desktop test process-probe.measure`.
 

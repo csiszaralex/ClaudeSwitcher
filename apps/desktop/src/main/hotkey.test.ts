@@ -5,6 +5,7 @@ import {
   hotkeyLogText,
   registerHotkey,
   registerHotkeyOrDefault,
+  switchHotkey,
   type HotkeyRegistration,
   type RegisterAccelerator,
 } from './hotkey.js'
@@ -88,6 +89,64 @@ describe('registerHotkeyOrDefault', () => {
       accelerator: DEFAULT_HOTKEY,
       status: 'taken',
     })
+  })
+})
+
+describe('switchHotkey', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** A fake `globalShortcut` pair that logs every call in one list, so the order shows. */
+  function fakeShortcuts(options: { taken?: string[]; invalid?: string[] } = {}): {
+    deps: { register: RegisterAccelerator; unregister: (accelerator: string) => void }
+    calls: string[]
+  } {
+    const calls: string[] = []
+    const fake = fakeRegister(options)
+    return {
+      deps: {
+        register: (accelerator, handler) => {
+          calls.push(`register ${accelerator}`)
+          return fake.register(accelerator, handler)
+        },
+        unregister: (accelerator) => {
+          calls.push(`unregister ${accelerator}`)
+        },
+      },
+      calls,
+    }
+  }
+
+  it('keeps the old hotkey when the new one is taken', () => {
+    const { deps, calls } = fakeShortcuts({ taken: ['F9'] })
+    const result = switchHotkey(deps, 'F8', 'F9', noop)
+    expect(result.switched).toBe(false)
+    expect(calls.at(-1)).toBe('register F8')
+    expect(result.registration).toEqual<HotkeyRegistration>({ requested: 'F8', status: 'registered' })
+  })
+
+  it('keeps the old hotkey when the new one is invalid', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const { deps, calls } = fakeShortcuts({ invalid: ['Shift+Alt+Spcae'] })
+    const result = switchHotkey(deps, 'F8', 'Shift+Alt+Spcae', noop)
+    expect(result.switched).toBe(false)
+    expect(calls.at(-1)).toBe('register F8')
+    expect(result.registration).toEqual<HotkeyRegistration>({ requested: 'F8', status: 'registered' })
+  })
+
+  it('switches when the new one registers', () => {
+    const { deps, calls } = fakeShortcuts()
+    const result = switchHotkey(deps, 'F8', 'F9', noop)
+    expect(calls).toEqual(['unregister F8', 'register F9'])
+    expect(result).toEqual({ switched: true, registration: { requested: 'F9', status: 'registered' } })
+  })
+
+  it('the same accelerator is a no-op', () => {
+    const { deps, calls } = fakeShortcuts()
+    const result = switchHotkey(deps, 'F8', 'F8', noop)
+    expect(calls).toEqual([])
+    expect(result).toEqual({ switched: true, registration: { requested: 'F8', status: 'registered' } })
   })
 })
 

@@ -32,7 +32,7 @@ export function registerHotkey(register: RegisterAccelerator, accelerator: strin
   try {
     return register(accelerator, handler) ? 'registered' : 'taken'
   } catch (error) {
-    console.error(`[hotkey] invalid accelerator "${accelerator}" in config.json`, error)
+    console.error(`[hotkey] invalid accelerator "${accelerator}"`, error)
     return 'invalid'
   }
 }
@@ -78,4 +78,30 @@ export function hotkeyLogText(registration: HotkeyRegistration): string {
       ? 'no default to fall back to'
       : `default ${fallback.accelerator} ${fallback.status === 'registered' ? 'registered' : `NOT registered (${fallback.status})`}`
   return `hotkey ${requested} INVALID; ${fallbackText}`
+}
+
+/**
+ * Moves the global shortcut from `current` to `next` while the app runs, and never throws.
+ * If `next` does not register (taken or invalid), `current` is registered again, so the user is
+ * never left without a working hotkey because of a bad choice.
+ */
+export function switchHotkey(
+  deps: { register: RegisterAccelerator; unregister: (accelerator: string) => void },
+  current: string,
+  next: string,
+  handler: () => void,
+): { registration: HotkeyRegistration; switched: boolean } {
+  if (next === current) return { registration: { requested: current, status: 'registered' }, switched: true }
+  try {
+    deps.unregister(current)
+  } catch (error) {
+    console.error(`[hotkey] could not unregister "${current}"`, error)
+  }
+  const status = registerHotkey(deps.register, next, handler)
+  if (status === 'registered') return { registration: { requested: next, status }, switched: true }
+  console.error(`[hotkey] "${next}" is ${status}; keeping "${current}"`)
+  return {
+    registration: { requested: current, status: registerHotkey(deps.register, current, handler) },
+    switched: false,
+  }
 }
