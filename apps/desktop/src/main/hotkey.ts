@@ -1,4 +1,4 @@
-import { DEFAULT_HOTKEY } from './config.js'
+import { DEFAULT_HOTKEY } from '../shared/settings.js'
 
 /**
  * Egy gyorsbillentyű foglalásának eredménye:

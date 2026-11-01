@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_HOTKEY } from './config.js'
+import { DEFAULT_HOTKEY } from '../shared/settings.js'
 import {
   hotkeyLabel,
   hotkeyLogText,

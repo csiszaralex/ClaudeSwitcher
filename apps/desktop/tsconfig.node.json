@@ -8,5 +8,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "src/csp/**/*", "electron.vite.config.ts", "vitest.config.ts"]
+  "include": ["src/main/**/*", "src/shared/**/*", "src/preload/**/*", "src/csp/**/*", "electron.vite.config.ts", "vitest.config.ts"]
 }

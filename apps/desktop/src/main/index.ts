@@ -12,7 +12,7 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from 'electron'
-import { configPath, loadConfig, updateConfig } from './config.js'
+import { configPath, loadConfig, saveSettings } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { hotkeyLogText, registerHotkeyOrDefault } from './hotkey.js'
 import { isOverlaySender, rendererLocation } from './ipc-sender.js'
@@ -205,9 +205,9 @@ app.whenReady().then(async () => {
   const userData = app.getPath('userData')
   const config = await loadConfig(userData)
   // Futás közben a tálcapipa állítja; a renderer minden appból hozott döntés után innen kérdezi.
-  let hideAfterLastDecision = config.hideAfterLastDecision
+  let hideAfterLastDecision = config.values.hideAfterLastDecision
   // Ugyanígy: a tálcapipa azonnal átállítja, a következő fókuszkérés már az új értéket látja.
-  let jumpToTab = config.jumpToTab
+  let jumpToTab = config.values.jumpToTab
   const token = await loadOrCreateToken(userData)
   // Egy helyi, nem-null konstans: a kezelők ezt fogják be, így nincs szükség `!`-re, és a típus
   // garantálja, hogy indulás után minden kezelő ugyanazt a futó daemont látja. A modulszintű
@@ -294,7 +294,7 @@ app.whenReady().then(async () => {
   // indulást: helyette az alapérték él, és a tálca megmondja, mit kell javítani.
   const hotkey = registerHotkeyOrDefault(
     (accelerator, handler) => globalShortcut.register(accelerator, handler),
-    config.hotkey,
+    config.values.hotkey,
     toggleOverlay,
   )
 
@@ -311,12 +311,12 @@ app.whenReady().then(async () => {
       // Azonnal él, akkor is, ha a mentés elbukik (pl. elrontott config fájl), akkor csak
       // ennek a futásnak a végéig.
       hideAfterLastDecision = enabled
-      void updateConfig(userData, { hideAfterLastDecision: enabled })
+      void saveSettings(userData, { hideAfterLastDecision: enabled }, [])
     },
     jumpToTab,
     onToggleJumpToTab: (enabled) => {
       jumpToTab = enabled
-      void updateConfig(userData, { jumpToTab: enabled })
+      void saveSettings(userData, { jumpToTab: enabled }, [])
     },
     onOpen: () => {
       showOverlay()

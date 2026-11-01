@@ -1,38 +1,35 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isNotFoundError, isRecord, transformSettingsFile } from '@claudeswitcher/core'
+import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isSettingKey } from '../shared/settings.js'
+import type { SettingKey, SettingValues } from '../shared/settings.js'
 
-/**
- * Az overlay gyorsbillentyűjének alapértéke.
- *
- * Szándékosan NEM `Control+Alt+Space`: azt a Claude desktop alkalmazás foglalja (ezen a
- * gépen lemérve: a regisztráció következetesen elbukott), és Windowson a `Control+Alt`
- * amúgy is azonos az `AltGr`-rel, ami magyar kiosztáson elnyelné az `AltGr+Space`-t: `@`
- * írása közben (`AltGr+V`) egy szóköz felhozná az overlayt. A `Shift+Alt` mindkettőt
- * elkerüli.
- */
-export const DEFAULT_HOTKEY = 'Shift+Alt+Space'
+export type StoredValues = Omit<SettingValues, 'autostart'>
 
-export interface Config {
-  /** Electron accelerator, pl. `Shift+Alt+Space`. */
-  hotkey: string
-  /**
-   * Elrejtőzzön-e az overlay, ha az appból eldöntött kérés után már senki nem vár. Alapból igen
-   * (az eredeti kérés), de kikapcsolható: „néha jól jön, hogy ott van és csak A-kat kell nyomni".
-   */
-  hideAfterLastDecision: boolean
-  /**
-   * A fókuszálás a session pontos Claude Code tabját is előhozza-e, nem csak az ablakát. Alapból
-   * igen; kikapcsolva a viselkedés pontosan az M1-es: csak az ablak jön elő.
-   */
-  jumpToTab: boolean
+export interface StoredConfig {
+  values: StoredValues
+  /** The settings the user has answered. An older file without the list confirms nothing. */
+  confirmed: ReadonlySet<SettingKey>
 }
 
-const DEFAULT_CONFIG: Config = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true, jumpToTab: true }
+const DEFAULT_VALUES: StoredValues = {
+  hideAfterLastDecision: DEFAULT_SETTINGS.hideAfterLastDecision,
+  jumpToTab: DEFAULT_SETTINGS.jumpToTab,
+  hotkey: DEFAULT_SETTINGS.hotkey,
+}
+
+function defaultConfig(): StoredConfig {
+  return { values: { ...DEFAULT_VALUES }, confirmed: new Set() }
+}
 
 /** Egy logikai kulcs értéke, vagy az alapértéke, ha hiányzik vagy nem logikai érték. */
 function booleanOr(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
+}
+
+/** The known keys of the `confirmed` list; anything else in it, or a non-list, is ignored. */
+function confirmedKeys(value: unknown): Set<SettingKey> {
+  return new Set(Array.isArray(value) ? value.filter(isSettingKey) : [])
 }
 
 /** A config fájl útvonala az Electron `userData` könyvtárában. */
@@ -84,7 +81,7 @@ async function transformConfig(
  * a jelentésén.
  */
 function orDefaults(existing: Record<string, unknown>): Record<string, unknown> {
-  return Object.keys(existing).length === 0 ? { ...DEFAULT_CONFIG } : existing
+  return Object.keys(existing).length === 0 ? { ...DEFAULT_VALUES } : existing
 }
 
 /**
@@ -99,27 +96,30 @@ function orDefaults(existing: Record<string, unknown>): Record<string, unknown> 
  * tab-ugrás értéket, és egy régebbi, egy kulcsot még nem ismerő fájl arra a kulcsra az
  * alapértékkel töltődik be, átírás nélkül.
  */
-export async function loadConfig(dir: string): Promise<Config> {
+export async function loadConfig(dir: string): Promise<StoredConfig> {
   let raw: string | undefined
   try {
     raw = await readRaw(configPath(dir))
   } catch (error) {
     console.error('[claudeswitcher] could not read the config file; using defaults', error)
-    return { ...DEFAULT_CONFIG }
+    return defaultConfig()
   }
 
   if (raw !== undefined) {
     const parsed = parseObject(raw)
-    if (parsed === undefined) return { ...DEFAULT_CONFIG }
-    const { hotkey, hideAfterLastDecision, jumpToTab } = parsed
+    if (parsed === undefined) return defaultConfig()
+    const { hotkey, hideAfterLastDecision, jumpToTab, confirmed } = parsed
     return {
-      hotkey: typeof hotkey === 'string' && hotkey.trim() !== '' ? hotkey : DEFAULT_HOTKEY,
-      hideAfterLastDecision: booleanOr(hideAfterLastDecision, DEFAULT_CONFIG.hideAfterLastDecision),
-      jumpToTab: booleanOr(jumpToTab, DEFAULT_CONFIG.jumpToTab),
+      values: {
+        hotkey: typeof hotkey === 'string' && hotkey.trim() !== '' ? hotkey : DEFAULT_HOTKEY,
+        hideAfterLastDecision: booleanOr(hideAfterLastDecision, DEFAULT_VALUES.hideAfterLastDecision),
+        jumpToTab: booleanOr(jumpToTab, DEFAULT_VALUES.jumpToTab),
+      },
+      confirmed: confirmedKeys(confirmed),
     }
   }
 
-  const config: Config = { ...DEFAULT_CONFIG }
+  const config = defaultConfig()
   try {
     // Ha a fájl az olvasás óta mégis megjelent, a tartalma marad.
     await transformConfig(dir, orDefaults)
@@ -130,7 +130,8 @@ export async function loadConfig(dir: string): Promise<Config> {
 }
 
 /**
- * Egy beállítás tartós módosítása (a tálcamenüből). Soha nem dob; igaz, ha sikerült kiírni.
+ * Persists changed values and, optionally, marks settings as confirmed by the user: the stored
+ * list plus `confirm`, deduplicated, in `SETTINGS` order. Never throws; true if it was written.
  *
  * A fájlt frissen olvassuk be, és csak a megadott kulcsokat írjuk át benne: ha a felhasználó
  * indulás óta kézzel átírta a gyorsbillentyűt (az újraindítás után él), vagy saját kulcsot
@@ -138,9 +139,19 @@ export async function loadConfig(dir: string): Promise<Config> {
  * ugyanaz a garancia, mint a betöltésnél; a változás ilyenkor csak a futó appban él. A hívások
  * fájlonként sorba állnak, így két egymás után, várakozás nélkül indított módosítás is megmarad.
  */
-export async function updateConfig(dir: string, patch: Partial<Config>): Promise<boolean> {
+export async function saveSettings(
+  dir: string,
+  patch: Partial<StoredValues>,
+  confirm: readonly SettingKey[],
+): Promise<boolean> {
   try {
-    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), ...patch }))
+    await transformConfig(dir, (existing) => {
+      const merged = { ...orDefaults(existing), ...patch }
+      const confirmed = confirmedKeys(existing['confirmed'])
+      for (const key of confirm) confirmed.add(key)
+      const ordered = SETTINGS.map((setting) => setting.key).filter((key) => confirmed.has(key))
+      return ordered.length === 0 ? merged : { ...merged, confirmed: ordered }
+    })
     return true
   } catch (error) {
     console.error('[claudeswitcher] could not update the config file; not overwriting it', error)

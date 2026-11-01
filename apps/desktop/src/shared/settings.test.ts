@@ -1,0 +1,85 @@
+import { describe, expect, it } from 'vitest'
+import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isSettingKey, parseSettingValues, settingsToAsk } from './settings.js'
+import type { BooleanSettingKey, SettingKey, SettingValues } from './settings.js'
+
+describe('SETTINGS', () => {
+  it('lists the settings in window order with the tray labels', () => {
+    expect(SETTINGS.map((setting) => setting.key)).toEqual(['autostart', 'hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+    expect(SETTINGS.map((setting) => setting.label)).toEqual([
+      'Induljon el bejelentkezéskor',
+      'Elrejtés az utolsó döntés után',
+      'Ugrás a pontos Claude-tabra',
+      'Gyorsbillentyű',
+    ])
+  })
+
+  it('has a default for every listed setting', () => {
+    expect(Object.keys(DEFAULT_SETTINGS).sort()).toEqual(SETTINGS.map((setting) => setting.key).sort())
+    expect(DEFAULT_SETTINGS.hotkey).toBe(DEFAULT_HOTKEY)
+  })
+})
+
+describe('boolean settings', () => {
+  it('are exactly the ones whose default is a boolean', () => {
+    const flags: BooleanSettingKey[] = ['autostart', 'hideAfterLastDecision', 'jumpToTab']
+    expect(SETTINGS.filter((setting) => setting.kind === 'boolean').map((setting) => setting.key)).toEqual(flags)
+    for (const key of flags) expect(typeof DEFAULT_SETTINGS[key]).toBe('boolean')
+  })
+})
+
+describe('isSettingKey', () => {
+  it('accepts the listed keys only', () => {
+    expect(isSettingKey('jumpToTab')).toBe(true)
+    expect(isSettingKey('bogus')).toBe(false)
+    expect(isSettingKey(3)).toBe(false)
+    expect(isSettingKey(undefined)).toBe(false)
+  })
+})
+
+describe('settingsToAsk', () => {
+  it('asks everything on a first start', () => {
+    expect(settingsToAsk(new Set(), { autostartAvailable: true })).toEqual([
+      'autostart',
+      'hideAfterLastDecision',
+      'jumpToTab',
+      'hotkey',
+    ])
+  })
+
+  it('asks only the new setting after an update', () => {
+    const confirmed = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+    expect(settingsToAsk(confirmed, { autostartAvailable: true })).toEqual(['autostart'])
+  })
+
+  it('never asks autostart where it cannot be set', () => {
+    expect(settingsToAsk(new Set(), { autostartAvailable: false })).not.toContain('autostart')
+    const rest = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+    expect(settingsToAsk(rest, { autostartAvailable: false })).toEqual([])
+  })
+})
+
+describe('parseSettingValues', () => {
+  it('accepts the defaults', () => {
+    expect(parseSettingValues(DEFAULT_SETTINGS)).toEqual(DEFAULT_SETTINGS)
+  })
+
+  it('rejects a missing key', () => {
+    const rest: Partial<SettingValues> = { ...DEFAULT_SETTINGS }
+    delete rest.jumpToTab
+    expect(parseSettingValues(rest)).toBeUndefined()
+  })
+
+  it('rejects a non-boolean flag', () => {
+    expect(parseSettingValues({ ...DEFAULT_SETTINGS, autostart: 'true' })).toBeUndefined()
+  })
+
+  it('rejects a blank or non-string hotkey', () => {
+    expect(parseSettingValues({ ...DEFAULT_SETTINGS, hotkey: '   ' })).toBeUndefined()
+    expect(parseSettingValues({ ...DEFAULT_SETTINGS, hotkey: 7 })).toBeUndefined()
+  })
+
+  it('rejects extra keys and inputs that are not objects', () => {
+    expect(parseSettingValues({ ...DEFAULT_SETTINGS, extra: 1 })).toBeUndefined()
+    for (const bad of [null, undefined, 'x', 3, [], true]) expect(parseSettingValues(bad)).toBeUndefined()
+  })
+})

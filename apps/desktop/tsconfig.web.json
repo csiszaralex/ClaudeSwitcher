@@ -9,6 +9,6 @@
     "types": [],
     "noEmit": true
   },
-  "include": ["src/renderer/**/*", "src/preload/api.ts"],
+  "include": ["src/renderer/**/*", "src/shared/**/*", "src/preload/api.ts"],
   "exclude": ["src/renderer/**/*.test.ts", "src/renderer/**/*.test.tsx"]
 }
