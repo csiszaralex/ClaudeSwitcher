@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
@@ -12,7 +13,7 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from 'electron'
-import { createAutostart } from './autostart.js'
+import { createAutostart, type LoginItems } from './autostart.js'
 import { loadConfig, saveSettings } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import type { HotkeyRegistration } from '../shared/hotkey-status.js'
@@ -20,6 +21,19 @@ import { settingsToAsk } from '../shared/settings.js'
 import { hardenWindow } from './harden-window.js'
 import { hotkeyLogText, registerHotkeyOrDefault, switchHotkey, type HotkeySwitch } from './hotkey.js'
 import { CAPTURE_SHORTCUTS, createHotkeyCapture } from './hotkey-capture.js'
+import {
+  HANDOVER_TIMEOUT_MS,
+  LAUNCH_EXIT_CODE,
+  describeBuild,
+  instanceAction,
+  launchMode,
+  parseInstanceMessage,
+  sameBuild,
+  type BuildIdentity,
+  type InstanceMessage,
+  type LaunchMode,
+} from './instance.js'
+import { readInstanceRecord, removeInstanceRecord, writeInstanceRecord } from './instance-file.js'
 import { isRendererSender, rendererLocation, type RendererLocation } from './ipc-sender.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
@@ -38,6 +52,7 @@ import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
 import { userDataDir } from './user-data.js'
+import { waitForExit, waitUntil } from './wait-for-exit.js'
 
 // Must run before `requestSingleInstanceLock`, which is tied to `userData`. The packaged build
 // sets `productName`, which would otherwise move the directory and lose the token (see `userDataDir`).
@@ -50,6 +65,23 @@ const RENDERER_DIR = path.join(dirname, '../renderer')
 const RENDERER = rendererLocation(process.env['ELECTRON_RENDERER_URL'], RENDERER_DIR, 'index.html')
 /** Where the setup window loads from; its handlers check the sender against it (`fromSetup`). */
 const SETUP_PAGE = rendererLocation(process.env['ELECTRON_RENDERER_URL'], RENDERER_DIR, 'setup.html')
+
+/** This process's build: written to the instance record and sent with the lock request. */
+const THIS_BUILD: BuildIdentity = {
+  execPath: process.execPath,
+  appPath: app.getAppPath(),
+  renderer: RENDERER.kind,
+  version: app.getVersion(),
+  packaged: app.isPackaged,
+}
+
+/** Electron's login item, for the running app's settings and for `--uninstall` alike. */
+const LOGIN_ITEMS: LoginItems = {
+  get: () => app.getLoginItemSettings(),
+  set: (openAtLogin) => {
+    app.setLoginItemSettings({ openAtLogin })
+  },
+}
 
 /**
  * True if the IPC call came from the given page of ours (see `isRendererSender`). A foreign sender
@@ -189,15 +221,172 @@ async function openTabFocusUri(uri: string): Promise<void> {
  * közös `userData` miatt a Chromium cache-t is összeakasztaná („Unable to move the cache:
  * Access is denied"). Ezért a második példány csendben kilép, még a port lefoglalása és
  * bármilyen ablak előtt; az első a `second-instance` eseményre megmutatja az overlayt.
+ *
+ * A different build that finds the lock taken asks first, and can hand over (`handOverOrQuit`).
+ * The `--quit` and `--uninstall` helpers ask the running app to quit (`runHelper`). Each tells
+ * the primary what it wants through the lock request's `additionalData` (`InstanceMessage`).
  */
-const isPrimaryInstance = app.requestSingleInstanceLock()
-if (!isPrimaryInstance) {
-  console.log('[claudeswitcher] another instance is already running; quitting')
+const MODE = launchMode(process.argv)
+const LOCK_MESSAGE: InstanceMessage = MODE === 'normal' ? { kind: 'show', build: THIS_BUILD } : { kind: 'quit' }
+const isPrimaryInstance = app.requestSingleInstanceLock(LOCK_MESSAGE)
+
+/** The `userData` directory this instance wrote its record to; the `before-quit` sequence removes it. */
+let recordedIn: string | undefined
+/** Shows the overlay once `startApp` has created it; until then a `show` request is ignored. */
+let showOverlayWhenStarted: (() => void) | undefined
+
+/**
+ * Right after the lock is acquired, before `whenReady` and the startup: the record and the
+ * `second-instance` handler exist from the first moment, so a `--quit` or a different build
+ * arriving during the (slow) startup is not lost. A `quit` then runs the `before-quit` sequence,
+ * which copes with a daemon not started yet (`daemon` undefined, `cleanup` still a no-op).
+ */
+function becomePrimary(): void {
+  void recordInstance()
+  app.on('second-instance', (_event, _argv, _workingDirectory, additionalData) => {
+    switch (instanceAction(parseInstanceMessage(additionalData), THIS_BUILD)) {
+      case 'quit':
+        // A waiting helper repeats the request until it gets the lock (`closeRunningApp`): log once.
+        if (quitting === 'no') console.log('[claudeswitcher] another instance asked this one to quit')
+        app.quit()
+        break
+      case 'show':
+        // Egy második indítás (pl. a parancsikonra kattintva) a futó példányt hozza elő.
+        showOverlayWhenStarted?.()
+        break
+      case 'ignore':
+        break
+    }
+  })
+}
+
+/** Becomes the primary, then starts the app once Electron is ready. */
+function launchPrimary(): Promise<void> {
+  becomePrimary()
+  return app.whenReady().then(startApp).catch(startupFailed)
+}
+
+/** A failed write only costs another build its hand-over dialog: it then quits silently, as before. */
+async function recordInstance(): Promise<void> {
+  const dir = app.getPath('userData')
+  try {
+    await writeInstanceRecord(dir, { pid: process.pid, build: THIS_BUILD })
+    recordedIn = dir
+  } catch (error) {
+    console.error('[claudeswitcher] could not write the instance record', error)
+  }
+}
+
+/**
+ * Starts this same build in `--quit` mode. Packaged, the exe is the app. In a repo build the exe
+ * is `electron.exe`, which needs the app path first: `electron-vite dev` and `preview` start it as
+ * `electron.exe . <args>` in `apps/desktop`, and `app.getAppPath()` is that same directory as an
+ * absolute path. The helper runs this same `index.ts`, so it sets the same `userData` and reaches
+ * the same lock.
+ */
+function spawnQuitHelper(): void {
+  const args = app.isPackaged ? ['--quit'] : [app.getAppPath(), '--quit']
+  const helper = spawn(process.execPath, args, { stdio: 'ignore', windowsHide: true })
+  helper.on('error', (error) => {
+    console.error('[claudeswitcher] could not start the quit helper', error)
+  })
+  helper.on('exit', (code) => {
+    console.log(`[claudeswitcher] quit helper exited with ${String(code)}`)
+  })
+}
+
+/**
+ * Normal start, lock refused. The same build (or one that left no record) quits silently, and the
+ * primary shows the overlay. A different build asks whether to close the running one and take over.
+ */
+async function handOverOrQuit(): Promise<void> {
+  const record = await readInstanceRecord(app.getPath('userData'))
+  if (record === undefined || sameBuild(record.build, THIS_BUILD)) {
+    console.log('[claudeswitcher] another instance is already running; quitting')
+    app.quit()
+    return
+  }
+  await app.whenReady()
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    title: 'ClaudeSwitcher',
+    message: `Már fut egy ClaudeSwitcher (${describeBuild(record.build)}). Bezárjam, és ez induljon?`,
+    buttons: ['Bezárás és indítás', 'Mégse'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  })
+  if (response !== 0) {
+    app.quit()
+    return
+  }
+  spawnQuitHelper()
+  const exited = await waitForExit(record.pid, HANDOVER_TIMEOUT_MS)
+  console.log(`[claudeswitcher] running instance ${exited ? 'exited' : 'did not exit in time'}`)
+  if (app.requestSingleInstanceLock(LOCK_MESSAGE)) {
+    await launchPrimary()
+    return
+  }
+  dialog.showErrorBox('ClaudeSwitcher', 'A futó ClaudeSwitcher nem zárult be. Zárd be a tálcáról, és indítsd újra.')
   app.quit()
 }
 
-app.whenReady().then(async () => {
-  if (!isPrimaryInstance) return
+/**
+ * Lock refused in a helper mode: the lock request has already delivered `{ kind: 'quit' }`, so the
+ * primary is running its `before-quit` sequence. True once this process holds the lock.
+ *
+ * It waits on the lock itself, not on the pid in the instance record: the primary removes its
+ * record while quitting, possibly before this helper gets to read it; the holder may be another
+ * helper, which writes no record; and a stale record may name a reused pid. Each retry delivers
+ * `{ kind: 'quit' }` again, which a quitting primary ignores (`before-quit`).
+ */
+function closeRunningApp(): Promise<boolean> {
+  return waitUntil(() => app.requestSingleInstanceLock(LOCK_MESSAGE), HANDOVER_TIMEOUT_MS)
+}
+
+/**
+ * The `--quit` and `--uninstall` launch modes, run by the installer and the uninstaller. They never
+ * start the daemon, a window, the tray or the hotkey, and never write the instance record. Exit codes:
+ * `LAUNCH_EXIT_CODE`.
+ */
+async function runHelper(mode: Exclude<LaunchMode, 'normal'>, primary: boolean): Promise<void> {
+  // Holding the lock means nothing was running: no wait, and `--quit` exits before `whenReady`.
+  const closed = primary || (await closeRunningApp())
+  if (!closed) {
+    app.exit(LAUNCH_EXIT_CODE.notClosed)
+    return
+  }
+  if (mode === 'quit') {
+    app.exit(LAUNCH_EXIT_CODE.ok)
+    return
+  }
+  await app.whenReady()
+  try {
+    createAutostart(app.isPackaged, LOGIN_ITEMS).set(false)
+  } catch (error) {
+    console.error('[claudeswitcher] could not remove the autostart entry', error)
+  }
+  try {
+    await uninstallIntegration(resolveClaudeDir())
+    app.exit(LAUNCH_EXIT_CODE.ok)
+  } catch (error) {
+    console.error('[claudeswitcher] could not remove the Claude Code integration', error)
+    app.exit(LAUNCH_EXIT_CODE.integrationFailed)
+  }
+}
+
+switch (MODE) {
+  case 'normal':
+    if (isPrimaryInstance) void launchPrimary()
+    else void handOverOrQuit()
+    break
+  case 'quit':
+  case 'uninstall':
+    void runHelper(MODE, isPrimaryInstance)
+    break
+}
+
+async function startApp(): Promise<void> {
   // A token tartós, a port rögzített: a telepített hookok ezeket kapják
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
@@ -206,12 +395,7 @@ app.whenReady().then(async () => {
   // tray (or the setup window) takes effect at once.
   const settings = createSettingsService({
     stored: await loadConfig(userData),
-    autostart: createAutostart(app.isPackaged, {
-      get: () => app.getLoginItemSettings(),
-      set: (openAtLogin) => {
-        app.setLoginItemSettings({ openAtLogin })
-      },
-    }),
+    autostart: createAutostart(app.isPackaged, LOGIN_ITEMS),
     persist: (patch, confirm) => saveSettings(userData, patch, confirm),
   })
   const token = await loadOrCreateToken(userData)
@@ -531,10 +715,8 @@ app.whenReady().then(async () => {
   console.log(`[claudeswitcher] setup window: ${toAsk.length > 0 ? `asking ${toAsk.join(', ')}` : 'nothing to ask'}`)
   if (toAsk.length > 0) setupWindow.open({ showAll: false })
 
-  // Egy második indítás (pl. a parancsikonra kattintva) a futó példányt hozza elő.
-  app.on('second-instance', () => {
-    showOverlay()
-  })
+  // From here on a second start of the same build brings the overlay up (`becomePrimary`).
+  showOverlayWhenStarted = showOverlay
 
   // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
   // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
@@ -558,7 +740,9 @@ app.whenReady().then(async () => {
     globalShortcut.unregisterAll()
     tray.destroy()
   }
-}).catch((error: unknown) => {
+}
+
+function startupFailed(error: unknown): void {
   // Tálcaikonos app: ha az indulás elbukik (tipikusan a daemon), nincs ablak és
   // nincs tálcaikon, a processz csendben halott maradna, a felhasználó pedig csak
   // azt látná, hogy „nem csinál semmit". A showErrorBox szinkron és ablak nélkül
@@ -569,7 +753,7 @@ app.whenReady().then(async () => {
     error instanceof Error ? error.message : String(error),
   )
   app.quit()
-})
+}
 
 app.on('window-all-closed', () => {
   // Tálcaikonos app: az ablak bezárása nem lépteti ki.
@@ -595,8 +779,11 @@ app.on('before-quit', (event) => {
   }
   const running = daemon
   const stopped = running === undefined ? Promise.resolve(true) : stopWithin(() => running.stop())
-  void stopped.then((inTime) => {
+  void stopped.then(async (inTime) => {
     if (!inTime) console.error('[claudeswitcher] daemon did not stop in time; quitting anyway')
+    // After the daemon released the port: a build waiting for this pid may start once it is gone.
+    // Never throws, and only removes a record that still names this process.
+    if (recordedIn !== undefined) await removeInstanceRecord(recordedIn, process.pid)
     quitting = 'done'
     app.quit()
   })

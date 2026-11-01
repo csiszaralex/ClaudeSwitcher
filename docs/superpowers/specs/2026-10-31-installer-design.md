@@ -70,7 +70,7 @@ Autostart is a setting like the others: stored, confirmed, shown in the window. 
   The buttons are **[Bezárás és indítás]** and **[Mégse]**.
   - **Mégse:** the new build quits, and the old one keeps running.
   - **Bezárás és indítás:** the old one quits cleanly (its daemon releases port 47821), and the new one takes over.
-- **"Different build"** means a different executable path. The version is only for the text.
+- **"Different build"** is defined under "Details settled after the builder check". The version is only for the text.
 - **Known risk, to be measured, not guessed:** Electron's single-instance lock only lets the second instance send data to the first, and the first cannot answer. So either:
   - the first instance shows the dialog and quits on "yes", while the second waits for the lock and retries; or
   - another mechanism is used.
@@ -122,7 +122,7 @@ Settings and the token survive, because they live in `userData` and not in the i
   - It gains "Beállítások…".
   - It loses "edit config.json", which the hotkey capture field replaces.
   - It loses the integration install and remove items (Alex's decision, 2026-11-01): the integration is handled in the setup window only. The outdated-integration notice line stays, and clicking it opens the window with every setting.
-- **"Different build"** is the pair of executable path and app path (`process.execPath` + `app.getAppPath()`). So `dev` versus `start` from the repo also counts as different and gets the dialog. The same pair again keeps today's silent hand-over.
+- **"Different build"** is a different executable path (`process.execPath`), app path (`app.getAppPath()`) or renderer source. `dev` and `start` both run `electron .` in `apps/desktop`, so their path pair is equal: only the renderer source (`ELECTRON_RENDERER_URL` set by `electron-vite dev`, or not) tells them apart. So `dev` versus `start` from the repo also counts as different and gets the dialog. The same build again keeps today's silent hand-over. The comparison is `instance.ts` `sameBuild`.
 - **Closing a running app cleanly.** The installer, the uninstaller and the different-build hand-over all use the same path: they ask the running app to quit through its normal `before-quit` sequence, never a force kill.
   - The normal sequence lets the daemon release held permission requests (`STOP_TIMEOUT_MS`), so Claude Code falls back to its native prompt.
   - The intended mechanism is the app's own executable started with a quit argument, delivered through `second-instance`.
