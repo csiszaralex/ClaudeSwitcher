@@ -10,7 +10,7 @@ export interface SetupApi {
   load: () => Promise<unknown>
   /** Sends a `SaveRequest`; the main process answers with a `SaveResult`. */
   save: (request: unknown) => Promise<unknown>
-  /** Installs the Claude Code integration; the answer is `{ ok: boolean; message: string }`. */
+  /** Installs the Claude Code integration; the answer is an `InstallReply`. */
   installIntegration: () => Promise<unknown>
   /** Removes the Claude Code integration; the same answer as `installIntegration`. */
   uninstallIntegration: () => Promise<unknown>

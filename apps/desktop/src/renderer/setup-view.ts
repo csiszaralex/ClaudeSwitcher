@@ -9,6 +9,7 @@ import {
   type SettingKey,
   type SettingValues,
 } from '../shared/settings.js'
+import type { InstallReply } from '../shared/setup-channels.js'
 import type { SetupState } from '../shared/setup-state.js'
 
 const HOTKEY_STATUSES: readonly HotkeyStatus[] = ['registered', 'taken', 'invalid']
@@ -80,7 +81,7 @@ export function readSaveReply(raw: unknown): { ok: true } | { ok: false; reason:
 }
 
 /** The answer to `setup:install`; anything malformed is a failure. */
-export function readInstallReply(raw: unknown): { ok: boolean; message: string } {
+export function readInstallReply(raw: unknown): InstallReply {
   if (isRecord(raw) && typeof raw['ok'] === 'boolean' && typeof raw['message'] === 'string') {
     return { ok: raw['ok'], message: raw['message'] }
   }

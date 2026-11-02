@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron'
+import { SETUP_CHANNELS } from '../shared/setup-channels.js'
 import { hardenWindow } from './harden-window.js'
 import { captureStep } from './hotkey-capture.js'
 import type { RendererLocation } from './ipc-sender.js'
@@ -64,10 +65,10 @@ export function createSetupWindowController(options: {
     current !== undefined && !current.isDestroyed()
 
   const notifyChanged = (): void => {
-    if (isOpen(window)) window.webContents.send('setup:changed')
+    if (isOpen(window)) window.webContents.send(SETUP_CHANNELS.changed)
   }
   const sendCaptured = (payload: CapturedPayload): void => {
-    if (isOpen(window)) window.webContents.send('setup:captured', payload)
+    if (isOpen(window)) window.webContents.send(SETUP_CHANNELS.captured, payload)
   }
 
   const create = (): BrowserWindow => {

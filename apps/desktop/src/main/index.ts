@@ -11,12 +11,13 @@ import {
   ipcMain,
   screen,
   shell,
-  type IpcMainInvokeEvent,
 } from 'electron'
 import { createAutostart, type LoginItems } from './autostart.js'
 import { loadConfig, saveSettings } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import type { HotkeyRegistration } from '../shared/hotkey-status.js'
+import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
+import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
 import { hardenWindow } from './harden-window.js'
 import { hotkeyLogText, registerHotkeyOrDefault, switchHotkey, type HotkeySwitch } from './hotkey.js'
@@ -34,7 +35,8 @@ import {
   type LaunchMode,
 } from './instance.js'
 import { readInstanceRecord, removeInstanceRecord, writeInstanceRecord } from './instance-file.js'
-import { isRendererSender, rendererLocation, type RendererLocation } from './ipc-sender.js'
+import { createHandleFrom } from './ipc-handle.js'
+import { rendererLocation } from './ipc-sender.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
@@ -61,9 +63,9 @@ app.setPath('userData', userDataDir(app.getPath('appData')))
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const RENDERER_DIR = path.join(dirname, '../renderer')
-/** Where the overlay loads from; its handlers check the sender against it (`fromOverlay`). */
+/** Where the overlay loads from; its handlers check the sender against it (`handleFrom`). */
 const RENDERER = rendererLocation(process.env['ELECTRON_RENDERER_URL'], RENDERER_DIR, 'index.html')
-/** Where the setup window loads from; its handlers check the sender against it (`fromSetup`). */
+/** Where the setup window loads from; its handlers check the sender against it (`handleFrom`). */
 const SETUP_PAGE = rendererLocation(process.env['ELECTRON_RENDERER_URL'], RENDERER_DIR, 'setup.html')
 
 /** This process's build: written to the instance record and sent with the lock request. */
@@ -84,29 +86,10 @@ const LOGIN_ITEMS: LoginItems = {
 }
 
 /**
- * True if the IPC call came from the given page of ours (see `isRendererSender`). A foreign sender
- * is logged: if our own page's URL ever differed, the only symptom would otherwise be a silent,
- * empty window.
+ * Registers an IPC handler that answers only one of our pages. The overlay's handlers pass
+ * `RENDERER`, the setup window's `SETUP_PAGE`: in the build each refuses the other page.
  */
-function fromPage(page: RendererLocation, event: IpcMainInvokeEvent, channel: string): boolean {
-  const url = event.senderFrame?.url
-  if (isRendererSender(url, page)) return true
-  console.error(`[claudeswitcher] refused ${channel} from a foreign sender: ${url ?? '(no frame)'}`)
-  return false
-}
-
-/** The overlay's handlers: in the build they refuse the setup page too. */
-const fromOverlay = (event: IpcMainInvokeEvent, channel: string): boolean => fromPage(RENDERER, event, channel)
-/** The setup window's handlers: in the build they refuse the overlay. */
-const fromSetup = (event: IpcMainInvokeEvent, channel: string): boolean => fromPage(SETUP_PAGE, event, channel)
-
-/** Az idegen küldőnek adott ok, a hibát jelző válaszokban és a dobott hibában is. */
-const FOREIGN_SENDER = 'Ismeretlen küldő.'
-
-/** Az idegen küldő elutasítása azoknál a kezelőknél, amelyeknek nincs hibát jelző válaszuk. */
-function foreignSender(): Error {
-  return new Error(FOREIGN_SENDER)
-}
+const handleFrom = createHandleFrom(ipcMain)
 
 let daemon: Daemon | undefined
 let overlay: BrowserWindow | undefined
@@ -159,7 +142,7 @@ function createOverlay(): BrowserWindow {
   // session:focus), a Chromium láthatósági jele pedig az ablakelfedés-követéstől függ. A
   // `show` mindig lefut, amikor az ablak ténylegesen láthatóvá válik, és csak akkor.
   window.on('show', () => {
-    window.webContents.send('overlay:shown')
+    window.webContents.send(OVERLAY_CHANNELS.shown)
   })
 
   // Az Alt+F4 a keret nélküli ablakot is bezárná, és vele az egyetlen ablakot végleg. Utána a
@@ -433,53 +416,57 @@ async function startApp(): Promise<void> {
   }
   await running.refresh()
 
-  // Minden kezelő előbb a küldőt nézi (`fromOverlay`). Ahol a válasznak van hibát jelző alakja, azt
-  // kapja az idegen küldő; a többi kezelő dob, ami a rendererben elutasított ígéret.
-  ipcMain.handle('daemon:connection', (event) => {
-    if (!fromOverlay(event, 'daemon:connection')) throw foreignSender()
+  // Every handler first checks the sender (`handleFrom`). Where the reply has a failure shape, a
+  // foreign sender gets that; the other handlers throw, which is a rejected promise in the renderer.
+  handleFrom(RENDERER, OVERLAY_CHANNELS.connection, () => {
     return { port: running.port, token: running.token }
   })
-  ipcMain.handle('daemon:state', (event) => {
-    if (!fromOverlay(event, 'daemon:state')) throw foreignSender()
+  handleFrom(RENDERER, OVERLAY_CHANNELS.state, () => {
     return running.state()
   })
-  ipcMain.handle('decision:decide', (event, id: unknown, raw: unknown) => {
-    if (!fromOverlay(event, 'decision:decide')) return { ok: false, reason: FOREIGN_SENDER }
-    // IPC-bemenet: a renderer bármit küldhet. Csak egy pontosan érvényes döntés jut a
-    // daemonhoz, annak érvényességét az adott kérésre a broker még külön ellenőrzi.
-    if (typeof id !== 'string') return { ok: false, reason: 'Érvénytelen azonosító.' }
-    const decision = parseUserDecision(raw)
-    if (decision === undefined) return { ok: false, reason: 'Érvénytelen döntés.' }
-    return running.decide(id, decision)
-  })
+  handleFrom(
+    RENDERER,
+    OVERLAY_CHANNELS.decide,
+    (id: unknown, raw: unknown) => {
+      // IPC-bemenet: a renderer bármit küldhet. Csak egy pontosan érvényes döntés jut a
+      // daemonhoz, annak érvényességét az adott kérésre a broker még külön ellenőrzi.
+      if (typeof id !== 'string') return { ok: false, reason: 'Érvénytelen azonosító.' }
+      const decision = parseUserDecision(raw)
+      if (decision === undefined) return { ok: false, reason: 'Érvénytelen döntés.' }
+      return running.decide(id, decision)
+    },
+    (reason) => ({ ok: false, reason }),
+  )
 
-  ipcMain.handle('session:focus', async (event, sessionId: unknown) => {
-    if (!fromOverlay(event, 'session:focus')) return false
-    // IPC-bemenet: a renderer bármit küldhet, ezért `unknown`, és itt ellenőrizzük.
-    if (typeof sessionId !== 'string') return false
-    const view = running.state().sessions.find((s) => s.sessionId === sessionId)
-    if (view === undefined) return false
-    // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
-    // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van:
-    // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
-    // tálcagombot villogtatná. Ha így is elbukik, a `code` CLI tartalék megoldja.
-    const outcome = await focusSessionWindow(view)
+  handleFrom(
+    RENDERER,
+    OVERLAY_CHANNELS.focusSession,
+    async (sessionId: unknown) => {
+      // IPC-bemenet: a renderer bármit küldhet, ezért `unknown`, és itt ellenőrizzük.
+      if (typeof sessionId !== 'string') return false
+      const view = running.state().sessions.find((s) => s.sessionId === sessionId)
+      if (view === undefined) return false
+      // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
+      // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van:
+      // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
+      // tálcagombot villogtatná. Ha így is elbukik, a `code` CLI tartalék megoldja.
+      const outcome = await focusSessionWindow(view)
+      hideOverlay()
+      // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
+      // A döntéseket a fókusz UTÁN olvassuk: a várakozás alatt egy fájlírás-kérés is beérkezhetett.
+      // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
+      const uri = tabFocusUri(view, outcome, settings.snapshot().values.jumpToTab, running.state().decisions)
+      if (uri !== undefined) void openTabFocusUri(uri)
+      return outcome !== 'failed'
+    },
+    () => false,
+  )
+
+  handleFrom(RENDERER, OVERLAY_CHANNELS.hide, () => {
     hideOverlay()
-    // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
-    // A döntéseket a fókusz UTÁN olvassuk: a várakozás alatt egy fájlírás-kérés is beérkezhetett.
-    // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
-    const uri = tabFocusUri(view, outcome, settings.snapshot().values.jumpToTab, running.state().decisions)
-    if (uri !== undefined) void openTabFocusUri(uri)
-    return outcome !== 'failed'
   })
 
-  ipcMain.handle('overlay:hide', (event) => {
-    if (!fromOverlay(event, 'overlay:hide')) throw foreignSender()
-    hideOverlay()
-  })
-
-  ipcMain.handle('settings:get', (event) => {
-    if (!fromOverlay(event, 'settings:get')) throw foreignSender()
+  handleFrom(RENDERER, OVERLAY_CHANNELS.settings, () => {
     return { hideAfterLastDecision: settings.snapshot().values.hideAfterLastDecision }
   })
 
@@ -566,7 +553,7 @@ async function startApp(): Promise<void> {
    * Installs the Claude Code integration for the setup window (the tray has no install item): shows the
    * dialogs, resyncs the tray notice, and answers the window with a short text. Never rejects.
    */
-  function installFromUi(): Promise<{ ok: boolean; message: string }> {
+  function installFromUi(): Promise<InstallReply> {
     return installIntegration(resolveClaudeDir(), { port: DAEMON_PORT, token })
       .then((conflicts) => {
         const message =
@@ -592,7 +579,7 @@ async function startApp(): Promise<void> {
   }
 
   /** Removes the Claude Code integration for the setup window: dialogs, notice resync, a short text. Never rejects. */
-  function uninstallFromUi(): Promise<{ ok: boolean; message: string }> {
+  function uninstallFromUi(): Promise<InstallReply> {
     return uninstallIntegration(resolveClaudeDir())
       .then(() => {
         const message = 'A Claude Code integráció eltávolítva.'
@@ -700,29 +687,35 @@ async function startApp(): Promise<void> {
     setupWindow.notifyChanged()
   })
 
-  // Every setup handler first checks that the setup page sent it (`fromSetup`).
-  ipcMain.handle('setup:load', async (event) => {
-    if (!fromSetup(event, 'setup:load')) throw foreignSender()
+  // Every setup handler first checks that the setup page sent it (`handleFrom`).
+  handleFrom(SETUP_PAGE, SETUP_CHANNELS.load, async () => {
     const integration = await readHookInstallState(resolveClaudeDir())
     return setupState(settings.snapshot(), { hotkey: currentHotkey, integration, showAll: setupWindow.showAll() })
   })
-  ipcMain.handle('setup:save', (event, raw: unknown): Promise<SaveResult> | SaveResult => {
-    if (!fromSetup(event, 'setup:save')) return { ok: false, reason: FOREIGN_SENDER }
-    // IPC input: the renderer may send anything.
-    const request = parseSaveRequest(raw)
-    if (request === undefined) return { ok: false, reason: 'Érvénytelen kérés.' }
-    return saveSetup(request, { settings, currentHotkey: () => currentHotkey, switchHotkey: switchTo })
-  })
-  ipcMain.handle('setup:install', (event) => {
-    if (!fromSetup(event, 'setup:install')) return { ok: false, message: FOREIGN_SENDER }
-    return installFromUi()
-  })
-  ipcMain.handle('setup:uninstall', (event) => {
-    if (!fromSetup(event, 'setup:uninstall')) return { ok: false, message: FOREIGN_SENDER }
-    return uninstallFromUi()
-  })
-  ipcMain.handle('setup:capture', (event, active: unknown) => {
-    if (!fromSetup(event, 'setup:capture')) throw foreignSender()
+  handleFrom(
+    SETUP_PAGE,
+    SETUP_CHANNELS.save,
+    (raw: unknown): Promise<SaveResult> | SaveResult => {
+      // IPC input: the renderer may send anything.
+      const request = parseSaveRequest(raw)
+      if (request === undefined) return { ok: false, reason: 'Érvénytelen kérés.' }
+      return saveSetup(request, { settings, currentHotkey: () => currentHotkey, switchHotkey: switchTo })
+    },
+    (reason) => ({ ok: false, reason }),
+  )
+  handleFrom(
+    SETUP_PAGE,
+    SETUP_CHANNELS.install,
+    () => installFromUi(),
+    (reason) => ({ ok: false, message: reason }),
+  )
+  handleFrom(
+    SETUP_PAGE,
+    SETUP_CHANNELS.uninstall,
+    () => uninstallFromUi(),
+    (reason) => ({ ok: false, message: reason }),
+  )
+  handleFrom(SETUP_PAGE, SETUP_CHANNELS.capture, (active: unknown) => {
     // IPC input: only a literal `true` starts a capture; anything else ends it.
     if (active === true) capture.start()
     else endCapture()

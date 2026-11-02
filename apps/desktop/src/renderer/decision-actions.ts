@@ -1,5 +1,6 @@
 import type { DecisionKind } from '@claudeswitcher/core'
 import { isRecord } from '@claudeswitcher/core/browser'
+import type { DecideOutcome } from '../shared/overlay-channels.js'
 
 export type DecisionAction = 'allow' | 'deny' | 'rule-project' | 'rule-machine' | 'session-edits'
 
@@ -71,8 +72,6 @@ export function isSubmitChord(event: { key: string; ctrlKey: boolean }): boolean
  * küld (a tiltás indoklása, a kérdések szabad szövege), ott nincs felirat.
  */
 export const SUBMIT_CHORD_LABEL = 'Ctrl+Enter'
-
-export type DecideOutcome = { ok: true } | { ok: false; reason: string }
 
 /** A main processz `DecideResult`-ja, ellenőrizve, mert az IPC-n át bármi jöhet. */
 export function readDecideResult(raw: unknown): DecideOutcome {
