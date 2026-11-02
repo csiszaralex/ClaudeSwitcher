@@ -4,12 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon } from '@claudeswitcher/daemon'
 import {
-  BrowserWindow,
   app,
   dialog,
   globalShortcut,
   ipcMain,
-  screen,
   shell,
 } from 'electron'
 import { createAutostart, type LoginItems } from './autostart.js'
@@ -18,7 +16,6 @@ import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocus
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
 import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
-import { hardenWindow, loadPage, secureWebPreferences } from './harden-window.js'
 import { hotkeyLogText } from './hotkey.js'
 import { createHotkeyController } from './hotkey-controller.js'
 import {
@@ -36,10 +33,9 @@ import {
 import { readInstanceRecord, removeInstanceRecord, writeInstanceRecord } from './instance-file.js'
 import { createHandleFrom } from './ipc-handle.js'
 import { rendererLocation } from './ipc-sender.js'
-import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
+import { createOverlayController } from './overlay-window.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { createQuitSequence } from './quit-sequence.js'
-import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
 import { createSettingsService } from './settings-service.js'
 import { parseSaveRequest, saveSetup, setupState, type SaveResult } from './setup-ipc.js'
 import { createSetupWindowController } from './setup-window.js'
@@ -90,86 +86,6 @@ const LOGIN_ITEMS: LoginItems = {
  * `RENDERER`, the setup window's `SETUP_PAGE`: in the build each refuses the other page.
  */
 const handleFrom = createHandleFrom(ipcMain)
-
-let overlay: BrowserWindow | undefined
-/**
- * True when Windows ends the session (shutdown, restart, sign-out). Electron's documentation says
- * `before-quit` does not run then, so `quitSequence.isQuitting()` stays false; the overlay's close
- * must not be held back in that case either.
- */
-let sessionEnding = false
-/** Az overlay renderer-újratöltéseinek korlátja, az újra létrehozott overlayen át is közös. */
-const allowRendererReload = createReloadLimiter()
-
-function createOverlay(): BrowserWindow {
-  const window = new BrowserWindow({
-    width: OVERLAY_WIDTH,
-    height: OVERLAY_HEIGHT,
-    show: false,
-    frame: false,
-    resizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    webPreferences: secureWebPreferences(path.join(dirname, '../preload/index.cjs')),
-  })
-
-  // Only our own page may load in it (see `hardenWindow`).
-  hardenWindow(window)
-
-  loadPage(window, RENDERER)
-  window.on('blur', () => {
-    window.hide()
-  })
-  // Az overlay megjelenésének jele a renderernek: erre jelöli ki a legrégebben várakozó
-  // sessiont. Szándékosan a main `show` eseménye, nem a renderer `focus`-a vagy a
-  // `visibilitychange`: a Windows előtérzára a `focus()`-t csendben megtagadhatja (lásd
-  // session:focus), a Chromium láthatósági jele pedig az ablakelfedés-követéstől függ. A
-  // `show` mindig lefut, amikor az ablak ténylegesen láthatóvá válik, és csak akkor.
-  window.on('show', () => {
-    window.webContents.send(OVERLAY_CHANNELS.shown)
-  })
-
-  // Az Alt+F4 a keret nélküli ablakot is bezárná, és vele az egyetlen ablakot végleg. Utána a
-  // gyorsbillentyű és a tálca egy megsemmisült ablakot érne el („Object has been destroyed"),
-  // miközben a hookok tovább élnek. Ezért a bezárás csak elrejt, amíg nem lépünk ki: így a
-  // renderer állapota és a WS kapcsolata is megmarad.
-  // On quit, `before-quit` starts the quit sequence before the windows' `close` events, so
-  // `isQuitting()` is already true here and a real quit is not held back.
-  window.on('close', (event) => {
-    if (quitSequence.isQuitting() || sessionEnding) return
-    event.preventDefault()
-    window.hide()
-  })
-  window.on('session-end', () => {
-    sessionEnding = true
-  })
-
-  // Ha a renderer processz meghal (OOM, GPU- vagy V8-összeomlás), az Electron egy üres
-  // keretet hagy, és semmi nem tölti újra. Az overlay az egyetlen ablak, tehát a
-  // gyorsbillentyű onnantól egy üres ablakot mutatna, ami pont úgy néz ki, mint a „nincs
-  // futó session", vagyis a monitorozó eszköz a legrosszabb módon hibázna: csendben.
-  // Az újratöltés korlátos: egy betöltéskor mindig összeomló renderer különben végtelen
-  // ciklusba esne. A korlát után az overlay következő megnyitása próbálja újra (`showOverlay`).
-  window.webContents.on('render-process-gone', (_event, details) => {
-    if (window.isDestroyed()) return
-    if (allowRendererReload()) {
-      console.error(`[claudeswitcher] renderer gone (${details.reason}); reloading`)
-      window.reload()
-    } else {
-      console.error(
-        `[claudeswitcher] renderer gone (${details.reason}) after ${RELOAD_LIMIT} reloads ` +
-          `within ${RELOAD_WINDOW_MS / 1000} s; not reloading until the overlay is opened again`,
-      )
-    }
-  })
-
-  return window
-}
-
-/** Elrejti az overlayt, ha még létezik. Egy megsemmisült ablak `hide()`-ja dobna. */
-function hideOverlay(): void {
-  if (overlay !== undefined && !overlay.isDestroyed()) overlay.hide()
-}
 
 /**
  * Elküldi a tab-fókusz URI-t a VSCode-nak, `TAB_FOCUS_SETTLE_MS` várakozás után. Soha nem dob:
@@ -451,7 +367,7 @@ async function startApp(): Promise<void> {
       // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
       // tálcagombot villogtatná. Ha így is elbukik, a `code` CLI tartalék megoldja.
       const outcome = await focusSessionWindow(view)
-      hideOverlay()
+      overlay.hide()
       // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
       // A döntéseket a fókusz UTÁN olvassuk: a várakozás alatt egy fájlírás-kérés is beérkezhetett.
       // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
@@ -463,7 +379,7 @@ async function startApp(): Promise<void> {
   )
 
   handleFrom(RENDERER, OVERLAY_CHANNELS.hide, () => {
-    hideOverlay()
+    overlay.hide()
   })
 
   handleFrom(RENDERER, OVERLAY_CHANNELS.settings, () => {
@@ -480,21 +396,27 @@ async function startApp(): Promise<void> {
       `process probe ${nativeProbe === undefined ? 'PowerShell (fallback)' : 'native'}`,
   )
 
-  overlay = createOverlay()
+  // Created after the overlay handlers above: its page invokes them as soon as it has loaded. Only
+  // the overlay's preload exposes them, so none of them can reach `overlay` before this line.
+  const overlay = createOverlayController({
+    page: RENDERER,
+    preload: path.join(dirname, '../preload/index.cjs'),
+    isQuitting: quitSequence.isQuitting,
+  })
 
   const describeError = (error: unknown): string =>
     error instanceof Error ? error.message : String(error)
 
-  // The hotkey is registered BEFORE the tray, because the menu shows the result. `toggleOverlay`
-  // is a function declaration, so it is hoisted and callable here. An invalid (mistyped) value
-  // does not stop the startup: the default holds instead, and the tray says what to fix.
+  // The hotkey is registered BEFORE the tray, because the menu shows the result. An invalid
+  // (mistyped) value does not stop the startup: the default holds instead, and the tray says what
+  // to fix.
   const hotkeyController = createHotkeyController({
     register: (accelerator, handler) => globalShortcut.register(accelerator, handler),
     unregister: (accelerator) => {
       globalShortcut.unregister(accelerator)
     },
     configured: settings.snapshot().values.hotkey,
-    onFire: toggleOverlay,
+    onFire: overlay.toggle,
     // `tray` and `setupWindow` are defined below; neither callback runs during startup.
     onRegistrationChanged: (registration, change) => {
       tray.setHotkey(registration)
@@ -522,7 +444,7 @@ async function startApp(): Promise<void> {
       void settings.apply({ [key]: enabled }, [key])
     },
     onOpen: () => {
-      showOverlay()
+      overlay.show()
     },
     onSettings: () => {
       if (!quitSequence.isQuitting()) setupWindow.open({ showAll: true })
@@ -602,29 +524,6 @@ async function startApp(): Promise<void> {
       .finally(syncIntegrationNotice)
   }
 
-  function showOverlay(): void {
-    // Kilépés közben nem hozunk létre új ablakot, és nem mutatjuk a régit.
-    if (quitSequence.isQuitting()) return
-    // A `close` kezelő óta az overlay csak kilépéskor semmisül meg. Ha mégis megsemmisült (egy
-    // ismeretlen út), egy új ablak jobb, mint egy „Object has been destroyed" kivétel.
-    if (overlay === undefined || overlay.isDestroyed()) overlay = createOverlay()
-    const window = overlay
-    // Ha a renderer a korlát miatt halott maradt, a megnyitás próbálja újra (szintén korlátosan).
-    if (window.webContents.isCrashed() && allowRendererReload()) window.reload()
-    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-    // Hely és méret egyetlen `setBounds`-szal, a munkaterülethez szorítva. Egy alacsony
-    // kijelzőn így az overlay teteje sem lóg ki; a csak pozíciót állító `setPosition` eltérő
-    // méretezésű kijelzők között a méretet is elronthatja.
-    window.setBounds(overlayBounds(display.workArea))
-    window.show()
-    window.focus()
-  }
-
-  function toggleOverlay(): void {
-    if (overlay !== undefined && !overlay.isDestroyed() && overlay.isVisible()) overlay.hide()
-    else showOverlay()
-  }
-
   // Changes only reach the tray and the window here; the hotkey has already been switched by then.
   settings.onChange((snapshot) => {
     tray.setSettings(snapshot)
@@ -677,7 +576,7 @@ async function startApp(): Promise<void> {
   if (toAsk.length > 0) setupWindow.open({ showAll: false })
 
   // From here on a second start of the same build brings the overlay up (`becomePrimary`).
-  showOverlayWhenStarted = showOverlay
+  showOverlayWhenStarted = overlay.show
 
   // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
   // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
