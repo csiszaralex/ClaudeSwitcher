@@ -18,7 +18,7 @@ import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocus
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
 import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
-import { hardenWindow } from './harden-window.js'
+import { hardenWindow, loadPage, secureWebPreferences } from './harden-window.js'
 import { hotkeyLogText } from './hotkey.js'
 import { createHotkeyController } from './hotkey-controller.js'
 import {
@@ -110,26 +110,13 @@ function createOverlay(): BrowserWindow {
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    webPreferences: {
-      preload: path.join(dirname, '../preload/index.cjs'),
-      // Ezek az Electron alapértelmezései (a 45-ös típusdefiníciói szerint is). Szándékosan
-      // kiírjuk őket: így a biztonsági állás önmagát dokumentálja, és egy jövőbeli
-      // Electron-verzió megváltozott alapértéke sem tudja csendben meggyengíteni. A preload
-      // csak az `electron` modult tölti be (contextBridge, ipcRenderer), ami sandboxban is működik.
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: secureWebPreferences(path.join(dirname, '../preload/index.cjs')),
   })
 
   // Only our own page may load in it (see `hardenWindow`).
   hardenWindow(window)
 
-  if (RENDERER.kind === 'dev-server') {
-    void window.loadURL(RENDERER.url)
-  } else {
-    void window.loadFile(RENDERER.path)
-  }
+  loadPage(window, RENDERER)
   window.on('blur', () => {
     window.hide()
   })

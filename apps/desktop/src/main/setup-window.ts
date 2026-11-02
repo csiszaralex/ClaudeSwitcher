@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron'
 import { SETUP_CHANNELS } from '../shared/setup-channels.js'
-import { hardenWindow } from './harden-window.js'
+import { hardenWindow, loadPage, secureWebPreferences } from './harden-window.js'
 import { captureStep } from './hotkey-capture.js'
 import type { RendererLocation } from './ipc-sender.js'
 
@@ -85,13 +85,7 @@ export function createSetupWindowController(options: {
       // Also in `styles.css` (`body` background), and needed here too: this colour shows before the
       // page has painted, so the window does not flash white. Keep the two the same.
       backgroundColor: '#1c1b1a',
-      webPreferences: {
-        preload: options.preload,
-        // The same explicit security settings as the overlay (see `createOverlay`).
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
+      webPreferences: secureWebPreferences(options.preload),
     })
     // A framed window gets Electron's default menu bar (File, Edit, …); this page has no use for it.
     created.removeMenu()
@@ -121,11 +115,7 @@ export function createSetupWindowController(options: {
       options.capture.end()
       if (window === created) window = undefined
     })
-    if (options.page.kind === 'dev-server') {
-      void created.loadURL(options.page.url)
-    } else {
-      void created.loadFile(options.page.path)
-    }
+    loadPage(created, options.page)
     return created
   }
 

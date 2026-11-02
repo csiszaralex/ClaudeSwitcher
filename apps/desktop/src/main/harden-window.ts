@@ -1,4 +1,32 @@
-import type { BrowserWindow } from 'electron'
+import type { BrowserWindow, WebPreferences } from 'electron'
+import type { RendererLocation } from './ipc-sender.js'
+
+/**
+ * The `webPreferences` both windows (the overlay and the setup window) are created with.
+ *
+ * `contextIsolation`, `nodeIntegration` and `sandbox` are Electron's defaults (its 45 type
+ * definitions say so too). They are written out on purpose: the security settings document
+ * themselves, and a default changed by a future Electron version cannot weaken them silently. Each
+ * preload loads only the `electron` module at run time (`contextBridge`, `ipcRenderer`; the shared
+ * channel names are bundled into it), which works in the sandbox.
+ */
+export function secureWebPreferences(preload: string): WebPreferences {
+  return {
+    preload,
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  }
+}
+
+/** Loads our page into a window: from the dev server by URL, or the built file. */
+export function loadPage(window: Pick<BrowserWindow, 'loadURL' | 'loadFile'>, location: RendererLocation): void {
+  if (location.kind === 'dev-server') {
+    void window.loadURL(location.url)
+  } else {
+    void window.loadFile(location.path)
+  }
+}
 
 /**
  * Locks a window to the page we load into it. Both windows (the overlay and the setup window) call
