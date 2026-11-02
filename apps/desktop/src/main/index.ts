@@ -15,13 +15,12 @@ import {
 import { createAutostart, type LoginItems } from './autostart.js'
 import { loadConfig, saveSettings } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
-import type { HotkeyRegistration } from '../shared/hotkey-status.js'
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
 import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
 import { hardenWindow } from './harden-window.js'
-import { hotkeyLogText, registerHotkeyOrDefault, switchHotkey, type HotkeySwitch } from './hotkey.js'
-import { CAPTURE_SHORTCUTS, createHotkeyCapture } from './hotkey-capture.js'
+import { hotkeyLogText } from './hotkey.js'
+import { createHotkeyController } from './hotkey-controller.js'
 import {
   HANDOVER_TIMEOUT_MS,
   LAUNCH_EXIT_CODE,
@@ -499,24 +498,33 @@ async function startApp(): Promise<void> {
   const describeError = (error: unknown): string =>
     error instanceof Error ? error.message : String(error)
 
+  // The hotkey is registered BEFORE the tray, because the menu shows the result. `toggleOverlay`
+  // is a function declaration, so it is hoisted and callable here. An invalid (mistyped) value
+  // does not stop the startup: the default holds instead, and the tray says what to fix.
+  const hotkeyController = createHotkeyController({
+    register: (accelerator, handler) => globalShortcut.register(accelerator, handler),
+    unregister: (accelerator) => {
+      globalShortcut.unregister(accelerator)
+    },
+    configured: settings.snapshot().values.hotkey,
+    onFire: toggleOverlay,
+    // `tray` and `setupWindow` are defined below; neither callback runs during startup.
+    onRegistrationChanged: (registration, change) => {
+      tray.setHotkey(registration)
+      // A successful switch is followed by the settings change, which reloads the window.
+      if (change !== 'switched') setupWindow.notifyChanged()
+    },
+    onCaptured: (accelerator) => {
+      setupWindow.sendCaptured({ accelerator })
+    },
+  })
+  const hotkey = hotkeyController.registration()
+
   const setupWindow = createSetupWindowController({
     page: SETUP_PAGE,
     preload: path.join(dirname, '../preload/setup.cjs'),
-    // `capture` and `endCapture` are defined below; the window only calls them after startup.
-    capture: {
-      active: () => capture.active(),
-      end: () => {
-        endCapture()
-      },
-    },
+    capture: { active: hotkeyController.capturing, end: hotkeyController.endCapture },
   })
-
-  // A gyorsbillentyűt a tálca ELŐTT foglaljuk le, mert a menü megjeleníti az eredményt.
-  // A showOverlay/toggleOverlay függvénydeklarációk, tehát hoistolódnak: a lentebbi
-  // definíciójuk ekkor már hívható. Egy érvénytelen (elgépelt) érték nem állítja meg az
-  // indulást: helyette az alapérték él, és a tálca megmondja, mit kell javítani.
-  const register = (accelerator: string, handler: () => void): boolean => globalShortcut.register(accelerator, handler)
-  const hotkey = registerHotkeyOrDefault(register, settings.snapshot().values.hotkey, toggleOverlay)
 
   const tray = createTray({
     settings: settings.snapshot(),
@@ -630,71 +638,6 @@ async function startApp(): Promise<void> {
     else showOverlay()
   }
 
-  /** The accelerator the app actually holds: the configured one, or the default it fell back to. */
-  const heldAccelerator = (registration: HotkeyRegistration): string =>
-    registration.status !== 'invalid' || registration.fallback === undefined
-      ? registration.requested
-      : registration.fallback.accelerator
-  let heldHotkey = heldAccelerator(hotkey)
-  /** The registration that holds now, for the tray and the setup window. */
-  let currentHotkey = hotkey
-
-  /** Suspends the held hotkey while the setup window captures a new one (`setup:capture`). */
-  const capture = createHotkeyCapture({
-    register,
-    unregister: (accelerator) => {
-      globalShortcut.unregister(accelerator)
-    },
-    held: () => heldHotkey,
-    handler: toggleOverlay,
-    temporaries: CAPTURE_SHORTCUTS,
-    // A temporary shortcut fired: that is the captured combination. Ended on the next tick, outside
-    // the shortcut's own callback, because ending unregisters that very shortcut.
-    onTemporary: (accelerator) => {
-      setImmediate(() => {
-        if (!capture.active()) return
-        endCapture()
-        setupWindow.sendCaptured({ accelerator })
-      })
-    },
-  })
-  /** Every end of a capture comes here. If the held hotkey was taken meanwhile, the tray and the window say so. */
-  const endCapture = (): void => {
-    const status = capture.stop()
-    if (status === undefined || status === 'registered') return
-    currentHotkey = { requested: heldHotkey, status }
-    tray.setHotkey(currentHotkey)
-    console.log(`[claudeswitcher] after capture: ${hotkeyLogText(currentHotkey)}`)
-    setupWindow.notifyChanged()
-  }
-
-  /**
-   * The setup window's hotkey change. `saveSetup` calls it BEFORE applying anything, so a refused
-   * hotkey is never applied, persisted or confirmed. The tray shows what holds afterwards either way.
-   */
-  const switchTo = (next: string): HotkeySwitch => {
-    // A capture still running would register the held hotkey again on top of the switch.
-    endCapture()
-    const result = switchHotkey(
-      {
-        register,
-        unregister: (accelerator) => {
-          globalShortcut.unregister(accelerator)
-        },
-      },
-      heldHotkey,
-      next,
-      toggleOverlay,
-    )
-    currentHotkey = result.registration
-    if (result.switched) heldHotkey = next
-    tray.setHotkey(result.registration)
-    console.log(`[claudeswitcher] ${hotkeyLogText(result.registration)}`)
-    // A refusal applies nothing, so no change event follows; the window still has to see what holds.
-    if (!result.switched) setupWindow.notifyChanged()
-    return result
-  }
-
   // Changes only reach the tray and the window here; the hotkey has already been switched by then.
   settings.onChange((snapshot) => {
     tray.setSettings(snapshot)
@@ -704,7 +647,7 @@ async function startApp(): Promise<void> {
   // Every setup handler first checks that the setup page sent it (`handleFrom`).
   handleFrom(SETUP_PAGE, SETUP_CHANNELS.load, async () => {
     const integration = await readHookInstallState(resolveClaudeDir())
-    return setupState(settings.snapshot(), { hotkey: currentHotkey, integration, showAll: setupWindow.showAll() })
+    return setupState(settings.snapshot(), { hotkey: hotkeyController.registration(), integration, showAll: setupWindow.showAll() })
   })
   handleFrom(
     SETUP_PAGE,
@@ -713,7 +656,11 @@ async function startApp(): Promise<void> {
       // IPC input: the renderer may send anything.
       const request = parseSaveRequest(raw)
       if (request === undefined) return { ok: false, reason: 'Érvénytelen kérés.' }
-      return saveSetup(request, { settings, currentHotkey: () => currentHotkey, switchHotkey: switchTo })
+      return saveSetup(request, {
+        settings,
+        currentHotkey: hotkeyController.registration,
+        switchHotkey: hotkeyController.switchTo,
+      })
     },
     (reason) => ({ ok: false, reason }),
   )
@@ -731,9 +678,9 @@ async function startApp(): Promise<void> {
   )
   handleFrom(SETUP_PAGE, SETUP_CHANNELS.capture, (active: unknown) => {
     // IPC input: only a literal `true` starts a capture; anything else ends it.
-    if (active === true) capture.start()
-    else endCapture()
-    return capture.active()
+    if (active === true) hotkeyController.startCapture()
+    else hotkeyController.endCapture()
+    return hotkeyController.capturing()
   })
 
   // The window opens by itself only while a setting is unconfirmed; the integration never opens it.
@@ -763,7 +710,7 @@ async function startApp(): Promise<void> {
   quitSequence.setCleanup(() => {
     clearInterval(trayTimer)
     // A capture still running holds temporary shortcuts; end it before everything is released.
-    endCapture()
+    hotkeyController.endCapture()
     globalShortcut.unregisterAll()
     tray.destroy()
   })

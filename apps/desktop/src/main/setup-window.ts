@@ -25,7 +25,7 @@ export interface SetupWindowController {
 /** The `setup:captured` payload; the renderer reads it with `readCaptured`. */
 type CapturedPayload = { accelerator: string } | { cancelled: true }
 
-/** The hotkey capture as the window sees it (`createHotkeyCapture` plus what `index.ts` does on stop). */
+/** The hotkey capture as the window sees it (`HotkeyController`: `capturing` and `endCapture`). */
 export interface WindowCapture {
   active(): boolean
   /** Ends the capture and registers the held hotkey again. Does nothing when none is active. */
