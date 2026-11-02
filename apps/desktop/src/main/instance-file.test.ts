@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest'
 import type { InstanceRecord } from './instance.js'
 import { INSTANCE_FILE, readInstanceRecord, removeInstanceRecord, writeInstanceRecord } from './instance-file.js'
 import { tempDir } from './test-helpers.js'
-import { waitForExit } from './wait-for-exit.js'
 
 const record: InstanceRecord = {
   pid: 4242,
@@ -56,16 +55,5 @@ describe('instance record file', () => {
   it('removing a missing file does not throw', async () => {
     const dir = await tempDir('cs-instance-')
     await expect(removeInstanceRecord(dir, record.pid)).resolves.toBeUndefined()
-  })
-
-  it('a record from a dead older instance does not block', async () => {
-    const dir = await tempDir('cs-instance-')
-    await writeInstanceRecord(dir, record)
-    const stale = await readInstanceRecord(dir)
-    expect(stale).toBeDefined()
-    const started = Date.now()
-    // The pid is dead: waiting on it resolves at once, without a single poll interval.
-    await expect(waitForExit(stale?.pid ?? 0, 60_000, () => false)).resolves.toBe(true)
-    expect(Date.now() - started).toBeLessThan(100)
   })
 })

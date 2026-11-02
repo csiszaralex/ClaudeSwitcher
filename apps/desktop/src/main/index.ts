@@ -52,7 +52,7 @@ import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
 import { userDataDir } from './user-data.js'
-import { waitForExit, waitUntil } from './wait-for-exit.js'
+import { waitUntil } from './wait-for-exit.js'
 
 // Must run before `requestSingleInstanceLock`, which is tied to `userData`. The packaged build
 // sets `productName`, which would otherwise move the directory and lose the token (see `userDataDir`).
@@ -282,16 +282,20 @@ async function recordInstance(): Promise<void> {
  * is `electron.exe`, which needs the app path first: `electron-vite dev` and `preview` start it as
  * `electron.exe . <args>` in `apps/desktop`, and `app.getAppPath()` is that same directory as an
  * absolute path. The helper runs this same `index.ts`, so it sets the same `userData` and reaches
- * the same lock.
+ * the same lock. Resolves once the helper is gone (or could not start).
  */
-function spawnQuitHelper(): void {
+function runQuitHelper(): Promise<void> {
   const args = app.isPackaged ? ['--quit'] : [app.getAppPath(), '--quit']
   const helper = spawn(process.execPath, args, { stdio: 'ignore', windowsHide: true })
-  helper.on('error', (error) => {
-    console.error('[claudeswitcher] could not start the quit helper', error)
-  })
-  helper.on('exit', (code) => {
-    console.log(`[claudeswitcher] quit helper exited with ${String(code)}`)
+  return new Promise((resolve) => {
+    helper.on('error', (error) => {
+      console.error('[claudeswitcher] could not start the quit helper', error)
+      resolve()
+    })
+    helper.on('exit', (code) => {
+      console.log(`[claudeswitcher] quit helper exited with ${String(code)}`)
+      resolve()
+    })
   })
 }
 
@@ -320,10 +324,17 @@ async function handOverOrQuit(): Promise<void> {
     app.quit()
     return
   }
-  spawnQuitHelper()
-  const exited = await waitForExit(record.pid, HANDOVER_TIMEOUT_MS)
-  console.log(`[claudeswitcher] running instance ${exited ? 'exited' : 'did not exit in time'}`)
-  if (app.requestSingleInstanceLock(LOCK_MESSAGE)) {
+  // Requests the lock only after the helper is gone. While it waits, the helper retries the lock
+  // with `{ kind: 'quit' }`: had this build taken the lock first, the helper's next retry would
+  // have asked this build to quit (measured by Alex, 2026-11-02). The helper exits once it holds
+  // the lock (or gives up after `HANDOVER_TIMEOUT_MS`), and releases it while exiting, so the
+  // lock is then polled too. Each refused request sends `{ kind: 'show', build }` to the holder:
+  // the exiting helper has no `second-instance` handler, and an old primary that did not quit
+  // ignores it (`instanceAction`: a different build).
+  await runQuitHelper()
+  const tookOver = await waitUntil(() => app.requestSingleInstanceLock(LOCK_MESSAGE), HANDOVER_TIMEOUT_MS)
+  console.log(`[claudeswitcher] ${tookOver ? 'took over from' : 'could not take over from'} the running instance`)
+  if (tookOver) {
     await launchPrimary()
     return
   }
@@ -333,7 +344,9 @@ async function handOverOrQuit(): Promise<void> {
 
 /**
  * Lock refused in a helper mode: the lock request has already delivered `{ kind: 'quit' }`, so the
- * primary is running its `before-quit` sequence. True once this process holds the lock.
+ * primary is running its `before-quit` sequence. True once this process holds the lock, which
+ * Electron releases during the primary's quit sequence, after its daemon stopped. That is not the
+ * same as the primary process being gone.
  *
  * It waits on the lock itself, not on the pid in the instance record: the primary removes its
  * record while quitting, possibly before this helper gets to read it; the holder may be another

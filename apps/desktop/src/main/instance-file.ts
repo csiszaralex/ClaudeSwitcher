@@ -27,8 +27,8 @@ export async function readInstanceRecord(dir: string): Promise<InstanceRecord | 
 
 /**
  * Removes the record only if it still names `pid`. A file naming another pid belongs to a newer
- * instance that took over meanwhile, and stays. Never throws: a leftover record only costs the
- * next build a wait on a dead pid, which returns at once (`waitForExit`).
+ * instance that took over meanwhile, and stays. Never throws; a leftover record is harmless, since the
+ * next primary overwrites it, and a build that finds the lock free never reads it.
  */
 export async function removeInstanceRecord(dir: string, pid: number): Promise<void> {
   const record = await readInstanceRecord(dir)
