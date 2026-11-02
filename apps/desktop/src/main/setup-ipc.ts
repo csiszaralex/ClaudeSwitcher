@@ -1,6 +1,7 @@
 import { isRecord } from '@claudeswitcher/core'
 import { hotkeyRefusal, type HotkeyRegistration } from '../shared/hotkey-status.js'
 import {
+  DEFAULT_SETTINGS,
   isSettingKey,
   parseSettingValues,
   pickSettings,
@@ -17,14 +18,19 @@ import type { HookInstallState } from './setup.js'
  * The answer to `setup:load`. The renderer checks it with `readSetupState`, against the same
  * `SetupState` type, so the two sides cannot drift apart. The integration never adds to `ask`:
  * installing it is an action, not a setting.
+ *
+ * While autostart is unconfirmed and available, the window shows its default (ticked) instead of
+ * the OS state, which is off on a fresh install: "Mentés" then applies and confirms the default.
+ * Once confirmed, the real OS value is shown.
  */
 export function setupState(
   snapshot: SettingsSnapshot,
   extra: { hotkey: HotkeyRegistration; integration: HookInstallState; showAll: boolean },
 ): SetupState {
   const { values, confirmed, autostartAvailable } = snapshot
+  const presentDefault = autostartAvailable && !confirmed.has('autostart')
   return {
-    values,
+    values: presentDefault ? { ...values, autostart: DEFAULT_SETTINGS.autostart } : values,
     ask: settingsToAsk(confirmed, { autostartAvailable }),
     autostartAvailable,
     hotkey: extra.hotkey,

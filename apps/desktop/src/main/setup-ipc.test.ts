@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { SettingKey, SettingValues } from '../shared/settings.js'
+import { DEFAULT_SETTINGS, type SettingKey, type SettingValues } from '../shared/settings.js'
 import type { HotkeyRegistration } from '../shared/hotkey-status.js'
 import type { HotkeySwitch } from './hotkey.js'
 import type { SettingsSnapshot } from './settings-service.js'
@@ -147,6 +147,37 @@ describe('setupState', () => {
       integration: 'stale',
       showAll: true,
     })
+  })
+
+  it('pre-ticks the default autostart while it is unconfirmed, whatever the OS says', () => {
+    const snapshot: SettingsSnapshot = {
+      values: { ...VALUES, autostart: false },
+      confirmed: new Set(['jumpToTab']),
+      autostartAvailable: true,
+    }
+    const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: false })
+    expect(state.values.autostart).toBe(DEFAULT_SETTINGS.autostart)
+    expect(state.values.autostart).toBe(true)
+  })
+
+  it('shows the real OS autostart once it is confirmed', () => {
+    const snapshot: SettingsSnapshot = {
+      values: { ...VALUES, autostart: false },
+      confirmed: new Set(['autostart']),
+      autostartAvailable: true,
+    }
+    const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: true })
+    expect(state.values.autostart).toBe(false)
+  })
+
+  it('shows the snapshot value where autostart is unavailable', () => {
+    const snapshot: SettingsSnapshot = {
+      values: { ...VALUES, autostart: false },
+      confirmed: new Set(),
+      autostartAvailable: false,
+    }
+    const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: true })
+    expect(state.values.autostart).toBe(false)
   })
 
   it('never asks for autostart where it is unavailable, and never for the integration', () => {
