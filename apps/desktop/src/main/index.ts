@@ -400,6 +400,8 @@ switch (MODE) {
 }
 
 async function startApp(): Promise<void> {
+  // A quit that began during startup (an early `--quit`) must not be followed by a daemon and windows.
+  if (isQuitting()) return
   // A token tartós, a port rögzített: a telepített hookok ezeket kapják
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
@@ -424,6 +426,11 @@ async function startApp(): Promise<void> {
     token,
   })
   daemon = running
+  // A quit began while the daemon started: `before-quit` saw no daemon then, so stop this one here.
+  if (isQuitting()) {
+    await stopWithin(() => running.stop())
+    return
+  }
   await running.refresh()
 
   // Minden kezelő előbb a küldőt nézi (`fromOverlay`). Ahol a válasznak van hibát jelző alakja, azt
@@ -779,6 +786,10 @@ app.on('window-all-closed', () => {
  * `app.quit()`-ünké, vagy egy türelmetlen második kérés) már nem indít újabb leállást.
  */
 let quitting: 'no' | 'stopping' | 'done' = 'no'
+/** A function, so a check after an `await` is not narrowed away by the check before it. */
+function isQuitting(): boolean {
+  return quitting !== 'no'
+}
 app.on('before-quit', (event) => {
   if (quitting === 'done') return
   event.preventDefault()
