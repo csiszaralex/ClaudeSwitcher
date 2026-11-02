@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
-import { startDaemon, type Daemon } from '@claudeswitcher/daemon'
+import { startDaemon } from '@claudeswitcher/daemon'
 import {
   BrowserWindow,
   app,
@@ -39,6 +39,7 @@ import { createHandleFrom } from './ipc-handle.js'
 import { rendererLocation } from './ipc-sender.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
 import { createNativeProcessProbe } from './process-probe.js'
+import { createQuitSequence } from './quit-sequence.js'
 import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-limit.js'
 import { createSettingsService } from './settings-service.js'
 import { parseSaveRequest, saveSetup, setupState, type SaveResult } from './setup-ipc.js'
@@ -91,14 +92,11 @@ const LOGIN_ITEMS: LoginItems = {
  */
 const handleFrom = createHandleFrom(ipcMain)
 
-let daemon: Daemon | undefined
 let overlay: BrowserWindow | undefined
-/** A gyorsbillentyű és a tálcaikon elengedése kilépéskor; indulás után kap tartalmat. */
-let cleanup: () => void = () => undefined
 /**
- * Igaz, ha a Windows a munkamenetet zárja (leállítás, újraindítás, kijelentkezés). Ilyenkor a
- * `before-quit` a dokumentáció szerint nem fut le, tehát a `quitting` sem vált; az overlay
- * bezárását ekkor sem szabad visszatartani.
+ * True when Windows ends the session (shutdown, restart, sign-out). Electron's documentation says
+ * `before-quit` does not run then, so `quitSequence.isQuitting()` stays false; the overlay's close
+ * must not be held back in that case either.
  */
 let sessionEnding = false
 /** Az overlay renderer-újratöltéseinek korlátja, az újra létrehozott overlayen át is közös. */
@@ -148,10 +146,11 @@ function createOverlay(): BrowserWindow {
   // Az Alt+F4 a keret nélküli ablakot is bezárná, és vele az egyetlen ablakot végleg. Utána a
   // gyorsbillentyű és a tálca egy megsemmisült ablakot érne el („Object has been destroyed"),
   // miközben a hookok tovább élnek. Ezért a bezárás csak elrejt, amíg nem lépünk ki: így a
-  // renderer állapota és a WS kapcsolata is megmarad. Kilépéskor a `before-quit` a `quitting`-ot
-  // még az ablakok `close` eseménye előtt átállítja, tehát a valódi kilépést ez nem tartja vissza.
+  // renderer állapota és a WS kapcsolata is megmarad.
+  // On quit, `before-quit` starts the quit sequence before the windows' `close` events, so
+  // `isQuitting()` is already true here and a real quit is not held back.
   window.on('close', (event) => {
-    if (quitting !== 'no' || sessionEnding) return
+    if (quitSequence.isQuitting() || sessionEnding) return
     event.preventDefault()
     window.hide()
   })
@@ -199,6 +198,23 @@ async function openTabFocusUri(uri: string): Promise<void> {
   }
 }
 
+/** The `userData` directory this instance wrote its record to; the quit sequence removes it. */
+let recordedIn: string | undefined
+/**
+ * The `before-quit` sequence (see `QuitSequence`). Created before `MODE`, so every launch path
+ * below may read `isQuitting()` at once.
+ */
+const quitSequence = createQuitSequence({
+  quit: () => {
+    app.quit()
+  },
+  stopWithin,
+  // Never throws, and only removes a record that still names this process.
+  removeRecord: async () => {
+    if (recordedIn !== undefined) await removeInstanceRecord(recordedIn, process.pid)
+  },
+})
+
 /**
  * Egyszerre egy példány. Egy második példány a fix porton elbukna (hibadialógussal), és a
  * közös `userData` miatt a Chromium cache-t is összeakasztaná („Unable to move the cache:
@@ -213,8 +229,6 @@ const MODE = launchMode(process.argv)
 const LOCK_MESSAGE: InstanceMessage = MODE === 'normal' ? { kind: 'show', build: THIS_BUILD } : { kind: 'quit' }
 const isPrimaryInstance = app.requestSingleInstanceLock(LOCK_MESSAGE)
 
-/** The `userData` directory this instance wrote its record to; the `before-quit` sequence removes it. */
-let recordedIn: string | undefined
 /** Shows the overlay once `startApp` has created it; until then a `show` request is ignored. */
 let showOverlayWhenStarted: (() => void) | undefined
 
@@ -222,7 +236,7 @@ let showOverlayWhenStarted: (() => void) | undefined
  * Right after the lock is acquired, before `whenReady` and the startup: the record and the
  * `second-instance` handler exist from the first moment, so a `--quit` or a different build
  * arriving during the (slow) startup is not lost. A `quit` then runs the `before-quit` sequence,
- * which copes with a daemon not started yet (`daemon` undefined, `cleanup` still a no-op).
+ * which copes with a daemon not started yet (no daemon set, the cleanup still a no-op).
  */
 function becomePrimary(): void {
   void recordInstance()
@@ -230,7 +244,7 @@ function becomePrimary(): void {
     switch (instanceAction(parseInstanceMessage(additionalData), THIS_BUILD)) {
       case 'quit':
         // A waiting helper repeats the request until it gets the lock (`closeRunningApp`): log once.
-        if (quitting === 'no') console.log('[claudeswitcher] another instance asked this one to quit')
+        if (!quitSequence.isQuitting()) console.log('[claudeswitcher] another instance asked this one to quit')
         app.quit()
         break
       case 'show':
@@ -384,7 +398,7 @@ switch (MODE) {
 
 async function startApp(): Promise<void> {
   // A quit that began during startup (an early `--quit`) must not be followed by a daemon and windows.
-  if (isQuitting()) return
+  if (quitSequence.isQuitting()) return
   // A token tartós, a port rögzített: a telepített hookok ezeket kapják
   // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
   // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
@@ -397,9 +411,9 @@ async function startApp(): Promise<void> {
     persist: (patch, confirm) => saveSettings(userData, patch, confirm),
   })
   const token = await loadOrCreateToken(userData)
-  // Egy helyi, nem-null konstans: a kezelők ezt fogják be, így nincs szükség `!`-re, és a típus
-  // garantálja, hogy indulás után minden kezelő ugyanazt a futó daemont látja. A modulszintű
-  // `daemon` csak a `before-quit`-nek kell.
+  // A local, non-null constant: the handlers capture it, so no `!` is needed, and the type
+  // guarantees that every handler sees the same running daemon after startup. The quit sequence
+  // gets it through `setDaemon`.
   // A natív probe az elsődleges; a PowerShell csak tartalék, ha a koffi nem tölthető be.
   const nativeProbe = createNativeProcessProbe()
   const running = await startDaemon({
@@ -408,9 +422,9 @@ async function startApp(): Promise<void> {
     port: DAEMON_PORT,
     token,
   })
-  daemon = running
+  quitSequence.setDaemon(running)
   // A quit began while the daemon started: `before-quit` saw no daemon then, so stop this one here.
-  if (isQuitting()) {
+  if (quitSequence.isQuitting()) {
     await stopWithin(() => running.stop())
     return
   }
@@ -516,14 +530,14 @@ async function startApp(): Promise<void> {
       showOverlay()
     },
     onSettings: () => {
-      if (quitting === 'no') setupWindow.open({ showAll: true })
+      if (!quitSequence.isQuitting()) setupWindow.open({ showAll: true })
     },
     onQuit: () => {
       app.quit()
     },
     // The integration is handled in the setup window only; the notice line leads there.
     onNotice: () => {
-      if (quitting === 'no') setupWindow.open({ showAll: true })
+      if (!quitSequence.isQuitting()) setupWindow.open({ showAll: true })
     },
   })
 
@@ -595,7 +609,7 @@ async function startApp(): Promise<void> {
 
   function showOverlay(): void {
     // Kilépés közben nem hozunk létre új ablakot, és nem mutatjuk a régit.
-    if (quitting !== 'no') return
+    if (quitSequence.isQuitting()) return
     // A `close` kezelő óta az overlay csak kilépéskor semmisül meg. Ha mégis megsemmisült (egy
     // ismeretlen út), egy új ablak jobb, mint egy „Object has been destroyed" kivétel.
     if (overlay === undefined || overlay.isDestroyed()) overlay = createOverlay()
@@ -743,16 +757,16 @@ async function startApp(): Promise<void> {
   const trayTimer = setInterval(syncTray, 1000)
   trayTimer.unref()
 
-  // A kilépéskori takarítás a lenti, egyetlen `before-quit` kezelőé, az fut le pontosan egyszer.
-  // Az időzítőt a tálca ELŐTT állítjuk le: a kilépés még legfeljebb STOP_TIMEOUT_MS-ig vár a
-  // daemonra, és egy közben lefutó `syncTray` egy megsemmisült tálcaikont érne el.
-  cleanup = () => {
+  // The quit cleanup belongs to the quit sequence's single `before-quit` handler, which runs it once.
+  // The timer stops BEFORE the tray: the quit still waits up to STOP_TIMEOUT_MS for the daemon, and
+  // a `syncTray` running meanwhile would reach a destroyed tray icon.
+  quitSequence.setCleanup(() => {
     clearInterval(trayTimer)
     // A capture still running holds temporary shortcuts; end it before everything is released.
     endCapture()
     globalShortcut.unregisterAll()
     tray.destroy()
-  }
+  })
 }
 
 function startupFailed(error: unknown): void {
@@ -772,36 +786,5 @@ app.on('window-all-closed', () => {
   // Tálcaikonos app: az ablak bezárása nem lépteti ki.
 })
 
-/**
- * Kilépés: az Electron nem várja meg az aszinkron `stop()`-ot, így a tartott kérések üres 200-ai
- * kimenet nélkül halhatnának el. Ezért az első `before-quit`-et megállítjuk, legfeljebb
- * STOP_TIMEOUT_MS-ig várunk a daemonra, aztán valóban kilépünk. A második `before-quit` (a saját
- * `app.quit()`-ünké, vagy egy türelmetlen második kérés) már nem indít újabb leállást.
- */
-let quitting: 'no' | 'stopping' | 'done' = 'no'
-/** A function, so a check after an `await` is not narrowed away by the check before it. */
-function isQuitting(): boolean {
-  return quitting !== 'no'
-}
-app.on('before-quit', (event) => {
-  if (quitting === 'done') return
-  event.preventDefault()
-  if (quitting === 'stopping') return
-  quitting = 'stopping'
-  // Egy takarítási hiba ne akassza meg a kilépést: a daemon leállása és a quit ettől még fut.
-  try {
-    cleanup()
-  } catch (error) {
-    console.error('[claudeswitcher] cleanup failed', error)
-  }
-  const running = daemon
-  const stopped = running === undefined ? Promise.resolve(true) : stopWithin(() => running.stop())
-  void stopped.then(async (inTime) => {
-    if (!inTime) console.error('[claudeswitcher] daemon did not stop in time; quitting anyway')
-    // After the daemon released the port: a build waiting for this pid may start once it is gone.
-    // Never throws, and only removes a record that still names this process.
-    if (recordedIn !== undefined) await removeInstanceRecord(recordedIn, process.pid)
-    quitting = 'done'
-    app.quit()
-  })
-})
+// The single `before-quit` handler: the quit sequence (`createQuitSequence`).
+app.on('before-quit', quitSequence.onBeforeQuit)
