@@ -51,6 +51,9 @@ export const DEFAULT_SETTINGS: SettingValues = {
   hotkey: DEFAULT_HOTKEY,
 }
 
+/** Why the autostart row is read-only in a repo build; the tray and the setup window both show it. */
+export const AUTOSTART_UNAVAILABLE_NOTE = 'csak a telepített appban'
+
 const KEYS: ReadonlySet<string> = new Set(SETTINGS.map((setting) => setting.key))
 
 export function isSettingKey(value: unknown): value is SettingKey {

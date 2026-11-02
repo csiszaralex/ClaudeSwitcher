@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState, type JSX } from 'react'
 import type { SetupApi } from '../preload/setup-api.js'
 import { hotkeyLabel } from '../shared/hotkey-status.js'
-import { SETTINGS, type SettingDefinition, type SettingKey, type SettingValues } from '../shared/settings.js'
+import {
+  AUTOSTART_UNAVAILABLE_NOTE,
+  SETTINGS,
+  type SettingDefinition,
+  type SettingKey,
+  type SettingValues,
+} from '../shared/settings.js'
 import {
   integrationActions,
   integrationLabel,
@@ -182,7 +188,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
           }}
         />
         <span className="setup-label">{setting.label}</span>
-        {unavailable ? <span className="setup-note">csak a telepített appban</span> : undefined}
+        {unavailable ? <span className="setup-note">{AUTOSTART_UNAVAILABLE_NOTE}</span> : undefined}
       </label>
     )
   }

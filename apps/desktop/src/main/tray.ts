@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Menu, Tray, app, nativeImage, type MenuItemConstructorOptions } from 'electron'
-import { SETTINGS, type BooleanSettingKey, type SettingDefinition } from '../shared/settings.js'
+import { AUTOSTART_UNAVAILABLE_NOTE, SETTINGS, type BooleanSettingKey, type SettingDefinition } from '../shared/settings.js'
 import { hotkeyLabel, type HotkeyRegistration } from '../shared/hotkey-status.js'
 import { resourcesDir } from './resources.js'
 import type { SettingsSnapshot } from './settings-service.js'
@@ -21,7 +21,7 @@ export interface TrayHandle {
 }
 
 /** Shown after the autostart label in a repo build, where the checkbox is read-only. */
-const AUTOSTART_UNAVAILABLE_SUFFIX = ' (csak a telepített appban)'
+const AUTOSTART_UNAVAILABLE_SUFFIX = ` (${AUTOSTART_UNAVAILABLE_NOTE})`
 
 function isBooleanSetting(setting: SettingDefinition): setting is SettingDefinition & { key: BooleanSettingKey } {
   return setting.kind === 'boolean' && setting.key !== 'hotkey'
