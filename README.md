@@ -42,7 +42,23 @@ A `start` az `electron-vite preview`, a lefordított appot indítja. Fejlesztés
 pnpm --filter @claudeswitcher/desktop dev
 ```
 
-Egyszerre egy példány fut. A daemon a `127.0.0.1:47821` porton figyel (`apps/desktop/src/main/daemon-port.ts` `DAEMON_PORT`). Az alapértelmezett gyorsbillentyű a `Shift+Alt+Space`.
+Egyszerre egy ClaudeSwitcher fut, akár telepített, akár a repóból indított. Ha ugyanaz a build indul újra, az új példány csendben kilép. Ha egy másik build fut (például a telepített app, és a repóból indul a `start`), az új példány megkérdezi, bezárja-e a futót és induljon-e helyette. Igen válasznál a futó app a rendes kilépési útján áll le, a függő engedélykéréseket elengedi. A daemon a `127.0.0.1:47821` porton figyel (`apps/desktop/src/main/daemon-port.ts` `DAEMON_PORT`). Az alapértelmezett gyorsbillentyű a `Shift+Alt+Space`.
+
+## A telepítő
+
+A Windows telepítő elkészítése:
+
+```sh
+pnpm --filter @claudeswitcher/desktop dist
+```
+
+Az eredmény az `apps/desktop/release/ClaudeSwitcher Setup <verzió>.exe` (a verzió a desktop `package.json`-jából jön). A telepítő NSIS alapú, a beállítása az `apps/desktop/electron-builder.yml`, a saját oldala és lépései az `apps/desktop/resources/installer.nsh`.
+
+**Telepítés:** felhasználónként, rendszergazdai jog nélkül, a `%LOCALAPPDATA%\Programs\ClaudeSwitcher` alá. A telepítő nincs aláírva, ezért a SmartScreen az első futtatáskor figyelmeztet: „További információ” (More info), aztán „Futtatás mindenképp” (Run anyway). A telepítő egy oldalon megkérdezi, legyen-e Start menü parancsikon (alapból igen) és asztali parancsikon (alapból nem). A választást megjegyzi (`HKCU\Software\ClaudeSwitcher\Installer`), és egy későbbi telepítés vagy frissítés ezzel kezdi. Csendes telepítésnél (`/S`) egy megjegyzett Start menü vagy asztali parancsikont, amelynek a fájlját közben kézzel törölted, a telepítő nem hozza létre újra, és kikapcsoltnak jegyzi meg; a párbeszédes oldal a megjegyzett választást változatlanul mutatja. Ha közben fut egy telepített ClaudeSwitcher, a telepítő a rendes kilépési útján bezárja (`--quit`), soha nem lövi le. Ha ez nem sikerül, megkéri, hogy zárd be a tálcáról. A végén elindíthatod az új verziót.
+
+**Eltávolítás** (Gépház, Alkalmazások): leveszi a programfájlokat, a parancsikonokat és a megjegyzett választást, és az app maga (`--uninstall`) kikapcsolja az automatikus indítást és kiveszi a Claude Code integrációt a `settings.json`-ból. Ha az integrációt nem tudja kivenni, szól, és folytatja. A `userData` könyvtárat (config és token) megtartja, kivéve ha az eltávolítót kézzel a `--delete-app-data` kapcsolóval indítják. Egy frissítés (új telepítés a régi fölé) a régi verzió eltávolítóját futtatja, de az integrációhoz, az automatikus indításhoz és a parancsikonokhoz nem nyúl.
+
+**Közös `userData`:** a telepített app és a repóból indított buildek ugyanazt a könyvtárat használják, `%APPDATA%\@claudeswitcher\desktop` (`apps/desktop/src/main/user-data.ts` `userDataDir`). Ezért a token és vele a már telepített Claude Code hookok, valamint a beállítások túlélik a telepítést, a frissítést és a buildek közti váltást.
 
 ## A Claude Code integráció
 

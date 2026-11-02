@@ -26,3 +26,9 @@ nsis:
   allowElevation: false
   allowToChangeInstallationDirectory: false
   deleteAppDataOnUninstall: false
+  # The shortcut page, the shortcuts themselves and the clean quit live here.
+  include: resources/installer.nsh
+  # installer.nsh creates the shortcuts the user chose, so the template must not.
+  createDesktopShortcut: false
+  createStartMenuShortcut: false
+  runAfterFinish: true
