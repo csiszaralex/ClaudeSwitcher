@@ -563,7 +563,7 @@ async function startApp(): Promise<void> {
   syncIntegrationNotice()
 
   /**
-   * Installs the Claude Code integration for the tray item and the setup window alike: shows the
+   * Installs the Claude Code integration for the setup window (the tray has no install item): shows the
    * dialogs, resyncs the tray notice, and answers the window with a short text. Never rejects.
    */
   function installFromUi(): Promise<{ ok: boolean; message: string }> {
