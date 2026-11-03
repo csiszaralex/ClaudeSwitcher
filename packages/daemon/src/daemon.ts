@@ -117,37 +117,19 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   sessions.onChange(broadcast)
 
-  /**
-   * Annak a sessionnek az azonosítója, amelynek a döntését az app ÉPP most zárja le. A broker
-   * a `decide`-on belül pontosan egyszer jelez, és csak sikeres döntésnél, így a jelzésből
-   * tudjuk, hogy ezt a változást az app okozta, és a store a függést meg a Notification-
-   * várakozást egy lépésben, egyetlen broadcasttal törölheti.
-   */
-  let resolvingFor: string | undefined
-  decisions.onChange(({ abortedSessionId }) => {
+  // `resolvedSessionId` marks a change the app itself caused (a successful decide), so the store
+  // can clear the pending state and the Notification wait in one step, with a single broadcast.
+  decisions.onChange(({ abortedSessionId, resolvedSessionId }) => {
     // Sessionönként a legrégebbi függő döntés: amíg az tart, a session várakozó. A store
     // emittál, az pedig broadcastol: a döntések listája is ezzel megy ki.
-    const pendingSince = new Map<string, number>()
-    for (const view of decisions.views()) {
-      const earlier = pendingSince.get(view.sessionId)
-      if (earlier === undefined || view.createdAt < earlier) pendingSince.set(view.sessionId, view.createdAt)
-    }
+    const pendingSince = decisions.pendingSinceBySession()
     // A kliens bontotta a kapcsolatot (natív Nem vagy Esc): a Notification-várakozást csak akkor
     // töröljük, ha a sessionnek nem maradt másik tartott kérése. Ha maradt, a prompt még nyitva
     // lehet, és a várakozást annak a lezárása viszi el.
     const abortedByClient =
       abortedSessionId !== undefined && !pendingSince.has(abortedSessionId) ? abortedSessionId : undefined
-    sessions.applyPending(pendingSince, Date.now(), resolvingFor, abortedByClient)
+    sessions.applyPending(pendingSince, Date.now(), resolvedSessionId, abortedByClient)
   })
-
-  function decide(id: string, decision: UserDecision): DecideResult {
-    resolvingFor = decisions.views().find((view) => view.id === id)?.sessionId
-    try {
-      return decisions.decide(id, decision)
-    } finally {
-      resolvingFor = undefined
-    }
-  }
 
   let refreshing: Promise<void> | undefined
   async function refresh(): Promise<void> {
@@ -188,7 +170,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     token,
     state,
     refresh,
-    decide,
+    decide: (id, decision) => decisions.decide(id, decision),
     async stop() {
       if (timer !== undefined) clearInterval(timer)
       // A tartott kéréseket a szerver lezárása ELŐTT kell megválaszolni: a nyitott

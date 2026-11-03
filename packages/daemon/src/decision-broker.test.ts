@@ -442,6 +442,60 @@ describe('DecisionBroker', () => {
     expect(listener).toHaveBeenCalledTimes(2)
   })
 
+  it('reports resolvedSessionId when the app decides', () => {
+    const broker = new DecisionBroker(fakeClock())
+    const listener = vi.fn()
+    broker.onChange(listener)
+    void broker.hold(request('permissionRequest_bash'))
+    const [view] = broker.views()
+    expect(listener).toHaveBeenLastCalledWith({ abortedSessionId: undefined })
+    expect(listener.mock.calls[0]).toEqual([{ abortedSessionId: undefined }])
+    expect(listener.mock.calls[0]?.[0]).not.toHaveProperty('resolvedSessionId')
+
+    broker.decide(view!.id, { type: 'allow' })
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener).toHaveBeenLastCalledWith({
+      abortedSessionId: undefined,
+      resolvedSessionId: view!.sessionId,
+    })
+  })
+
+  it('does not report resolvedSessionId when a decision is refused or closed elsewhere', () => {
+    const broker = new DecisionBroker(fakeClock())
+    const listener = vi.fn()
+    broker.onChange(listener)
+    void broker.hold(request('permissionRequest_bash'))
+    const [view] = broker.views()
+    expect(broker.decide(view!.id, { type: 'answer', answers: {} }).ok).toBe(false)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    broker.sessionEnded(view!.sessionId)
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(listener.mock.calls[1]?.[0]).not.toHaveProperty('resolvedSessionId')
+  })
+
+  it('pendingSinceBySession gives the oldest pending per session', () => {
+    const clock = fakeClock()
+    const broker = new DecisionBroker(clock)
+    expect(broker.pendingSinceBySession()).toEqual(new Map())
+
+    const first = request('permissionRequest_bash')
+    void broker.hold(first)
+    const firstAt = clock.now()
+    clock.advance(5)
+    void broker.hold(first)
+    clock.advance(5)
+    void broker.hold({ ...first, sessionId: 'other-session' })
+    const otherAt = clock.now()
+
+    expect(broker.pendingSinceBySession()).toEqual(
+      new Map([
+        [first.sessionId, firstAt],
+        ['other-session', otherAt],
+      ]),
+    )
+  })
+
   it('reports no abort for the other ways a request closes', () => {
     const broker = new DecisionBroker(fakeClock())
     const listener = vi.fn()
@@ -454,7 +508,7 @@ describe('DecisionBroker', () => {
 
     // A döntés után a bontás figyelője már le van véve: egy késő abort nem jelez.
     client.abort()
-    for (const call of listener.mock.calls) expect(call).toEqual([{ abortedSessionId: undefined }])
+    for (const [change] of listener.mock.calls) expect(change).toMatchObject({ abortedSessionId: undefined })
     expect(listener).toHaveBeenCalledTimes(4)
   })
 })

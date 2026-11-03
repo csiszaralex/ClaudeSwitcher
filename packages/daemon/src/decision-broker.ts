@@ -49,6 +49,12 @@ export interface DecisionChange {
    * változásnál `undefined`.
    */
   readonly abortedSessionId: string | undefined
+  /**
+   * Set only by a successful `decide`: the session whose request the app just resolved. The broker
+   * emits exactly once, synchronously, inside `decide`, so a listener can tell this change apart
+   * from every other kind. Absent on all other changes.
+   */
+  readonly resolvedSessionId?: string
 }
 
 const NO_ABORT: DecisionChange = { abortedSessionId: undefined }
@@ -189,7 +195,7 @@ export class DecisionBroker {
     }
     const result = buildHookResponse(pending.view, decision)
     if (!result.ok) return result
-    this.#finish(id, result.body)
+    this.#finish(id, result.body, { abortedSessionId: undefined, resolvedSessionId: pending.view.sessionId })
     return { ok: true }
   }
 
@@ -272,6 +278,16 @@ export class DecisionBroker {
 
   views(): PendingDecisionView[] {
     return [...this.#pending.values()].map((pending) => pending.view).sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  /** For each session with a held request, the `createdAt` of its oldest one. */
+  pendingSinceBySession(): Map<string, number> {
+    const since = new Map<string, number>()
+    for (const { view } of this.#pending.values()) {
+      const earlier = since.get(view.sessionId)
+      if (earlier === undefined || view.createdAt < earlier) since.set(view.sessionId, view.createdAt)
+    }
+    return since
   }
 
   /**
