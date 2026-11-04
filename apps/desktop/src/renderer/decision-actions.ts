@@ -1,6 +1,7 @@
 import type { DecisionKind } from '@claudeswitcher/core'
 import { isRecord } from '@claudeswitcher/core/browser'
 import type { DecideOutcome } from '../shared/overlay-channels.js'
+import { DEFAULT_SETTINGS } from '../shared/settings.js'
 
 export type DecisionAction = 'allow' | 'deny' | 'rule-project' | 'rule-machine' | 'session-edits'
 
@@ -89,13 +90,13 @@ export interface OverlaySettings {
 }
 
 /**
- * A main processz beállításai, ellenőrizve. Bármi másra az alapérték (elrejtés) jön, ugyanaz,
- * amit a main config is ad, ha a kulcs hiányzik.
+ * The main process settings, checked. Anything else gets the default from `DEFAULT_SETTINGS`, the
+ * same value the main config uses when the key is missing.
  */
 export function readOverlaySettings(raw: unknown): OverlaySettings {
   if (isRecord(raw)) {
     const hideAfterLastDecision = raw['hideAfterLastDecision']
     if (typeof hideAfterLastDecision === 'boolean') return { hideAfterLastDecision }
   }
-  return { hideAfterLastDecision: true }
+  return { hideAfterLastDecision: DEFAULT_SETTINGS.hideAfterLastDecision }
 }
