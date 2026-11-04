@@ -1,6 +1,8 @@
 import { defineConfig } from 'eslint/config'
 import tseslint from 'typescript-eslint'
 
+// The test files: exempt from the sync-spawn ban, and given the test rules (both blocks below).
+const TEST_FILES = ['**/*.test.ts', '**/*.test.tsx']
 const SYNC_SPAWN_NAMES = ['execSync', 'execFileSync', 'spawnSync']
 const SYNC_SPAWN_PATTERN = `/^(${SYNC_SPAWN_NAMES.join('|')})$/`
 const SYNC_SPAWN_MESSAGE =
@@ -62,7 +64,7 @@ export default defineConfig(
     // A mag `no-restricted-imports` szabálya külön szabály a fenti typescript-eslint változattól,
     // így a renderer blokkja nem írja felül.
     files: ['packages/*/src/**/*.{ts,tsx}', 'apps/desktop/src/**/*.{ts,tsx}'],
-    ignores: ['**/*.test.ts', '**/*.test.tsx'],
+    ignores: TEST_FILES,
     rules: {
       'no-restricted-imports': [
         'error',
@@ -83,7 +85,7 @@ export default defineConfig(
     },
   },
   {
-    files: ['**/*.test.ts', '**/*.test.tsx'],
+    files: TEST_FILES,
     rules: {
       // Tesztben egy rossz `!` hangos tesztbukás, nem csendes termékhiba; a
       // `noUncheckedIndexedAccess` mellett a tesztek olvashatósága ezen múlik.
