@@ -4,6 +4,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   SETTINGS_BACKUP_SUFFIX,
+  isMissingPathError,
+  isNotFoundError,
   mergeSettings,
   transformSettingsFile,
   updateSettingsFile,
@@ -26,6 +28,18 @@ function fsWith(overrides: Partial<SettingsFs>): SettingsFs {
 function codedError(code: string): Error {
   return Object.assign(new Error(`${code}: simulated`), { code })
 }
+
+describe('file error checks', () => {
+  it('isNotFoundError takes only ENOENT, isMissingPathError also ENOTDIR', () => {
+    expect(isNotFoundError(codedError('ENOENT'))).toBe(true)
+    expect(isNotFoundError(codedError('ENOTDIR'))).toBe(false)
+    expect(isMissingPathError(codedError('ENOENT'))).toBe(true)
+    expect(isMissingPathError(codedError('ENOTDIR'))).toBe(true)
+    for (const error of [codedError('EACCES'), new Error('no code'), { code: 'ENOENT' }, undefined]) {
+      expect(isMissingPathError(error)).toBe(false)
+    }
+  })
+})
 
 describe('mergeSettings', () => {
   it('preserves unrelated keys', () => {

@@ -32,7 +32,7 @@ Minden érték egy helyen él, mindenhol máshol arra hivatkozunk. A közös mod
 - `timings.ts`: a több modul által használt időzítések (`POLL_INTERVAL_MS`, `PROBE_TTL_MS`).
 - `protocol.ts`: a daemon és a renderer közti szerződés, vagyis a protokollverzió (`DAEMON_PROTOCOL`) és a daemon címe (`DAEMON_HOST`, `DAEMON_WS_PATH`, `DAEMON_WS_TOKEN_PARAM`, `daemonWsUrl`). A renderer CSP-je (`renderer-csp.ts`) a hostot saját literálként tartja, a tesztje köti a `DAEMON_HOST`-hoz.
 - `guards.ts`: bemenet-őrök (`isRecord` stb.), a szöveg egy sorba lapítása és vágása (`flatText`, `truncate`).
-- `tool-names.ts`: eszköznév-halmazok (szerkesztő és parancs eszközök). A döntésfajták (`DecisionKind`) a `decision.ts`-ben.
+- `tool-names.ts`: eszköznév-halmazok (szerkesztő és parancs eszközök), ezekből választja a `decision.ts` is a kötelező mezőt (`requiredField`). A döntésfajták (`DecisionKind`) a `decision.ts`-ben.
 
 ## Claude Code csatolási pontok
 Nem dokumentált belsők, és hol olvassuk őket. Ha a Claude Code változik, itt kell kezdeni:

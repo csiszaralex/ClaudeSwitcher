@@ -49,6 +49,15 @@ export function isNotFoundError(error: unknown): boolean {
 }
 
 /**
+ * True if the path is missing: the file itself (`ENOENT`), or a parent that is a file, not a
+ * directory (`ENOTDIR`). For optional files, where both mean "not there".
+ */
+export function isMissingPathError(error: unknown): boolean {
+  const code = errorCode(error)
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+/**
  * Rekurzív merge. Objektumokat mélyen egyesít, tömböket és skalárokat cserél.
  * A tömb-csere szándékos: a hook-konfigot idempotensen akarjuk újraírni, nem
  * duplikálni minden telepítéskor.

@@ -1,5 +1,6 @@
 import { open, readdir } from 'node:fs/promises'
 import path from 'node:path'
+import { isRecord } from './guards.js'
 import { projectsDir } from './paths.js'
 import { toolDetail } from './tool-detail.js'
 import type { SessionActivity } from './types.js'
@@ -13,8 +14,8 @@ interface ContentBlock {
 
 function blocks(rec: Record<string, unknown>): ContentBlock[] {
   const message = rec['message']
-  if (typeof message !== 'object' || message === null) return []
-  const content = (message as Record<string, unknown>)['content']
+  if (!isRecord(message)) return []
+  const content = message['content']
   if (!Array.isArray(content)) return []
   // A nem-objektum elemeket itt dobjuk el, nem a hívóban. Egy `null` blokk
   // valid JSON, és a `.type` olvasása rajta TypeError-t dobna, pontosan az a
@@ -39,8 +40,8 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
     let rec: Record<string, unknown>
     try {
       const parsed: unknown = JSON.parse(trimmed)
-      if (typeof parsed !== 'object' || parsed === null) continue
-      rec = parsed as Record<string, unknown>
+      if (!isRecord(parsed)) continue
+      rec = parsed
     } catch {
       continue
     }

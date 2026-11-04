@@ -7,7 +7,7 @@
  */
 
 import { flatText, isRecord, nonEmptyString } from './guards.js'
-import { isEditTool } from './tool-names.js'
+import { isCommandTool, isEditTool } from './tool-names.js'
 
 /** Egy jogosultsági szabály, ahogy a Claude Code `permission_suggestions`-ben adja. */
 export interface PermissionRule {
@@ -88,20 +88,20 @@ export interface PermissionRequestInfo {
  * mezőnév a Claude Code NotebookEdit bemenete, és a `toolDetail` (tool-detail.ts) is ezt olvassa.
  * Ami itt nincs, az olvashatónak számít: egy MCP-toolnak vagy egy ismeretlen eszköznek nincs
  * kötelező mezője, a nyers bemenete a részletekben látszik.
+ *
+ * The tool sets come from `tool-names.ts`, so a new command or edit tool gets the check by itself.
  */
-const REQUIRED_FIELD: Readonly<Record<string, string>> = {
-  Bash: 'command',
-  PowerShell: 'command',
-  Write: 'file_path',
-  Edit: 'file_path',
-  MultiEdit: 'file_path',
-  NotebookEdit: 'notebook_path',
-  WebFetch: 'url',
+function requiredField(toolName: string): string | undefined {
+  if (isCommandTool(toolName)) return 'command'
+  if (toolName === 'NotebookEdit') return 'notebook_path'
+  if (isEditTool(toolName)) return 'file_path'
+  if (toolName === 'WebFetch') return 'url'
+  return undefined
 }
 
 /** A kötelező mező egy nem üres szöveg; csupa szóköz nem az, abból sem látszana semmi. */
 function isReadable(toolName: string, input: Record<string, unknown>): boolean {
-  const field = REQUIRED_FIELD[toolName]
+  const field = requiredField(toolName)
   if (field === undefined) return true
   const value = input[field]
   return typeof value === 'string' && value.trim() !== ''
