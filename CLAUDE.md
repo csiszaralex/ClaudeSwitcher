@@ -30,7 +30,7 @@ Futtatás, telepítés, env változók: `README.md`. Terv és mért Claude Code 
 Minden érték egy helyen él, mindenhol máshol arra hivatkozunk. A közös modulok a core-ban (a `/browser` is exportálja őket):
 - `hook-contract.ts`: a telepített hookok (`HOOK_CONTRACT`), route-jaik, timeoutjuk, a 600 s-ból számolt elengedési idő (`PERMISSION_RELEASE_AFTER_MS`), a kivezetett hookok.
 - `timings.ts`: a több modul által használt időzítések (`POLL_INTERVAL_MS`, `PROBE_TTL_MS`).
-- `guards.ts`: bemenet-őrök (`isRecord` stb.).
+- `guards.ts`: bemenet-őrök (`isRecord` stb.), a szöveg egy sorba lapítása és vágása (`flatText`, `truncate`).
 - `tool-names.ts`: eszköznév-halmazok (szerkesztő és parancs eszközök). A döntésfajták (`DecisionKind`) a `decision.ts`-ben.
 
 ## Claude Code csatolási pontok

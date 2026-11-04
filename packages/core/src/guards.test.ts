@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flatText, isRecord, lastPathSegment, nonEmptyString } from './guards.js'
+import { flatText, isRecord, lastPathSegment, nonEmptyString, truncate } from './guards.js'
 
 describe('guards', () => {
   it('isRecord accepts plain objects and rejects arrays, null and primitives', () => {
@@ -18,6 +18,12 @@ describe('guards', () => {
     expect(flatText('  a\n\tb  ')).toBe('a b')
     expect(flatText(' \n ')).toBeUndefined()
     expect(flatText(3)).toBeUndefined()
+  })
+
+  it('truncate keeps a short text and cuts a long one to max with an ellipsis', () => {
+    expect(truncate('abc', 3)).toBe('abc')
+    expect(truncate('abcd', 3)).toBe('ab…')
+    expect(truncate('', 3)).toBe('')
   })
 
   it('lastPathSegment takes the last segment on either separator', () => {

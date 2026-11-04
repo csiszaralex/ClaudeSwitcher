@@ -6,7 +6,7 @@
  * használják.
  */
 
-import { isRecord, nonEmptyString } from './guards.js'
+import { flatText, isRecord, nonEmptyString } from './guards.js'
 import { isEditTool } from './tool-names.js'
 
 /** Egy jogosultsági szabály, ahogy a Claude Code `permission_suggestions`-ben adja. */
@@ -114,10 +114,6 @@ function kindOf(toolName: string): DecisionKind {
   return 'tool'
 }
 
-function oneLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
-}
-
 function parseOptions(raw: unknown): AskOption[] {
   if (!Array.isArray(raw)) return []
   const options: AskOption[] = []
@@ -185,7 +181,7 @@ function metaField(meta: string, field: string): string | undefined {
   const match = new RegExp(String.raw`\b${field}\s*:\s*${QUOTED}`).exec(meta)
   const raw = match?.[2]
   if (raw === undefined) return undefined
-  return nonEmptyString(oneLine(raw.replace(/\\(.)/g, '$1')))
+  return flatText(raw.replace(/\\(.)/g, '$1'))
 }
 
 /**
@@ -219,7 +215,8 @@ function summarize(
     const title = nonEmptyString(input['plan'])
       ?.split('\n')
       .find((line) => line.trim() !== '')
-    return title === undefined ? toolName : oneLine(title.replace(/^#+\s*/, ''))
+    // A heading-only line (`##`) gives an empty title, not the tool name.
+    return title === undefined ? toolName : (flatText(title.replace(/^#+\s*/, '')) ?? '')
   }
   if (toolName === 'Workflow') return workflowMeta(input).name ?? toolName
   // A parancs sortörései jelentést hordoznak (többsoros szkript, heredoc): laposítva a panel
@@ -227,15 +224,15 @@ function summarize(
   const command = nonEmptyString(input['command'])
   if (command !== undefined) return command.replace(/\r\n?/g, '\n').trim()
   const target = nonEmptyString(input['file_path']) ?? nonEmptyString(input['notebook_path']) ?? nonEmptyString(input['url'])
-  return target === undefined ? toolName : oneLine(target)
+  // A whitespace-only target gives an empty summary, not the tool name.
+  return target === undefined ? toolName : (flatText(target) ?? '')
 }
 
 /** Csak `tool` fajtánál: a fájlírásnak, a kérdésnek és a tervnek nincs ilyen leírása. */
 function describeTool(kind: DecisionKind, toolName: string, input: Record<string, unknown>): string | undefined {
   if (kind !== 'tool') return undefined
   if (toolName === 'Workflow') return workflowMeta(input).description
-  const description = nonEmptyString(input['description'])
-  return description === undefined ? undefined : nonEmptyString(oneLine(description))
+  return flatText(input['description'])
 }
 
 /** A PermissionRequest hook törzse, értelmezve; `undefined`, ha nem használható. Soha nem dob. */

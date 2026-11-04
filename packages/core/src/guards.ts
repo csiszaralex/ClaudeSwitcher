@@ -20,6 +20,11 @@ export function flatText(value: unknown): string | undefined {
   return flat === '' ? undefined : flat
 }
 
+/** The text cut to at most `max` characters: a longer one keeps `max - 1` and ends in `…`. */
+export function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
 /** Egy útvonal utolsó nem üres tagja, `/` és `\` mentén is. Ha nincs ilyen, `undefined`. */
 export function lastPathSegment(path: string): string | undefined {
   const parts = path.split(/[\\/]/).filter((part) => part !== '')

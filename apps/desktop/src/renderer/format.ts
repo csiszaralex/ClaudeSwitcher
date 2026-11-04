@@ -1,5 +1,5 @@
 import type { SessionActivity, SessionStatus, SubagentView } from '@claudeswitcher/core'
-import { isCommandTool } from '@claudeswitcher/core/browser'
+import { flatText, isCommandTool, truncate } from '@claudeswitcher/core/browser'
 
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
@@ -39,9 +39,11 @@ export function subagentTooltip(subagents: readonly SubagentView[] | undefined):
   return subagents.map((subagent) => `↳ ${subagentWork(subagent)}`).join('\n')
 }
 
+/** The longest a row text may be; core `TOOL_DETAIL_MAX` is sized against it. */
+const ROW_TEXT_MAX = 80
+
 function clip(raw: string): string {
-  const flat = raw.replace(/\s+/g, ' ').trim()
-  return flat.length > 80 ? `${flat.slice(0, 79)}…` : flat
+  return truncate(flatText(raw) ?? '', ROW_TEXT_MAX)
 }
 
 /**

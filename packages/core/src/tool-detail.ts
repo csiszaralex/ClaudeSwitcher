@@ -1,8 +1,8 @@
-import { flatText, isRecord, lastPathSegment } from './guards.js'
+import { flatText, isRecord, lastPathSegment, truncate } from './guards.js'
 
 /**
- * Ennyi karakter lehet legfeljebb egy futó tool részlete. A sor összefoglalója úgyis 80
- * karakterben áll meg, és a részlet előtt még a tool (és a subagent) neve is ott van.
+ * The longest a running tool's detail may be. The row summary stops at `ROW_TEXT_MAX` (renderer
+ * `format.ts`) anyway, and the tool's (and the subagent's) name comes before the detail.
  */
 export const TOOL_DETAIL_MAX = 60
 
@@ -25,6 +25,5 @@ export function toolDetail(input: unknown): string | undefined {
     flatText(input['query']) ??
     flatText(input['description']) ??
     flatText(input['skill'])
-  if (raw === undefined) return undefined
-  return raw.length > TOOL_DETAIL_MAX ? `${raw.slice(0, TOOL_DETAIL_MAX - 1)}…` : raw
+  return raw === undefined ? undefined : truncate(raw, TOOL_DETAIL_MAX)
 }
