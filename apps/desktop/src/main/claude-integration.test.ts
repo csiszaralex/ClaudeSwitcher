@@ -10,7 +10,7 @@ import {
   readHookInstallState,
   removeIntegration,
   uninstallIntegration,
-} from './setup.js'
+} from './claude-integration.js'
 
 function without<T>(source: Record<string, T>, keys: readonly string[]): Record<string, T> {
   return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))

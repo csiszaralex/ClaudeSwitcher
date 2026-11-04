@@ -96,9 +96,9 @@ Az M1 implementálásakor és átnézésekor „minor (deferred)” jelzéssel f
 - `focus-window.ts`: a user32 deklarációkon nincs `__stdcall`. A koffi x64-en figyelmen kívül hagyja, csak 32 biten számítana.
 - `index.ts` `syncTray`: a tálca másodpercenként lekérdezi az állapotot (`setInterval(syncTray, 1000)`), ahelyett hogy feliratkozna a változásra.
 - ~~`tray.ts`: az ikonok útja `../../resources`. Dev és preview módban jó, egy csomagolt appban nem (a telepítő a fenti ütemezésben a 8-as tétel).~~ Kész (8/1. hullám): az utat a `resources.ts` `resourcesDir` adja. Csomagolva az `electron-builder.yml` `extraResources` a `resources/icons` alá másolja az ikonokat, a repóból a forrásmappát használja.
-- `setup.ts` `removeIntegration`: egy már meglévő, de üres `hooks: {}` vagy `env: {}` eltávolításkor törlődik, így az oda-vissza út erre az alakra nem bájtazonos. Szándékos: a tiszta függvény nem tudja, hogy a tároló korábban is létezett, és a fordított döntés minden hook nélküli felhasználónál `hooks: {}`-t hagyna maga után.
-- `setup.ts` `applyIntegration`: a megtartott idegen bejegyzéseket referenciaként osztja meg a bemenettel. Ma semmi nem dolgozza utólag fel az eredményt; ha valami egyszer fogja, a hívó objektumát mutálná.
-- `setup.ts` `isOurStatusLine`: egy saját status line-wrapper, amelynek a parancsa tartalmazza a `--claudeswitcher` jelölőt, a mienknek számít, és a telepítés vagy az eltávolítás kiveszi.
+- `claude-integration.ts` `removeIntegration`: egy már meglévő, de üres `hooks: {}` vagy `env: {}` eltávolításkor törlődik, így az oda-vissza út erre az alakra nem bájtazonos. Szándékos: a tiszta függvény nem tudja, hogy a tároló korábban is létezett, és a fordított döntés minden hook nélküli felhasználónál `hooks: {}`-t hagyna maga után.
+- `claude-integration.ts` `applyIntegration`: a megtartott idegen bejegyzéseket referenciaként osztja meg a bemenettel. Ma semmi nem dolgozza utólag fel az eredményt; ha valami egyszer fogja, a hívó objektumát mutálná.
+- `claude-integration.ts` `isOurStatusLine`: egy saját status line-wrapper, amelynek a parancsa tartalmazza a `--claudeswitcher` jelölőt, a mienknek számít, és a telepítés vagy az eltávolítás kiveszi.
 
 **Eszközlánc**
 - ~~`pnpm-workspace.yaml` `allowBuilds`: az `electron`, `esbuild`, `koffi` és `nx` engedélyének nincs indoklása.~~ Kész (7/3. hullám): minden kulcs mellett ott az ok, a `pnpm-workspace.yaml`-ban.

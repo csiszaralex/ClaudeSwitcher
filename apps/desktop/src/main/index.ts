@@ -47,7 +47,7 @@ import {
   integrationNotice,
   readHookInstallState,
   uninstallIntegration,
-} from './setup.js'
+} from './claude-integration.js'
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'

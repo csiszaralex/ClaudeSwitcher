@@ -186,7 +186,7 @@ csak azt korlátozza, meddig dönthet az app — azt nem, meddig dönthet a felh
 > mutatott. Egy olyan funkcióért írt a felhasználó globális konfigurációjába, amely a fő
 > platformon nem működik. Kikerült a `packages/statusline`, a daemon `/statusline` route-ja és a
 > renderer limitkijelzése. A telepítés és az eltávolítás a régi, `--claudeswitcher` jelölős
-> statusLine-t és az `env.CLAUDESWITCHER_PORT`-ot felismeri és kiveszi (`setup.ts`
+> statusLine-t és az `env.CLAUDESWITCHER_PORT`-ot felismeri és kiveszi (`claude-integration.ts`
 > `withoutOurStatusLine`), egy idegen statusLine-hoz nem nyúl. A lenti mérés a döntés alapja,
 > ezért marad.
 
@@ -440,7 +440,7 @@ pontos daemon-portra (`DAEMON_PORT`, 47821) szűkül, `object-src`, `base-uri` �
 `'none'`, az `'unsafe-inline'` csak a dev szerveren.
 
 **Elavult telepítés.** Indításkor és minden telepítés vagy eltávolítás után a main összeveti a
-`settings.json` hookjait a `HOOK_CONTRACT`-tal (`setup.ts` `hookInstallState`). Ha hiányzik egy
+`settings.json` hookjait a `HOOK_CONTRACT`-tal (`claude-integration.ts` `hookInstallState`). Ha hiányzik egy
 hook, a tálcamenü figyelmeztet: „Integráció elavult, telepítsd újra”. A fájlt ez csak olvassa.
 
 ### Tabfókusz (M3) — saját bővítmény nélkül
