@@ -2,6 +2,7 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
+import { JumpButton } from './JumpButton.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
@@ -21,14 +22,11 @@ function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): J
       <div className="decision-actions">
         <div className="decision-row">
           <span className="muted">{text}</span>
-          <button
-            type="button"
-            onClick={() => {
+          <JumpButton
+            onJump={() => {
               void window.claudeswitcher.focusSession(sessionId)
             }}
-          >
-            Ugrás a VSCode-ba
-          </button>
+          />
         </div>
       </div>
     </section>

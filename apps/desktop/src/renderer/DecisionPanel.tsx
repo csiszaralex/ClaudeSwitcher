@@ -4,21 +4,28 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
 import { errorMessage } from '../shared/error-message.js'
 import {
+  ACTION_BUTTONS,
+  DENY_BUTTON,
   isTypingTarget,
   isUnreadableQuestion,
   readDecideResult,
   shortcutFor,
+  type ActionButton,
   type DecisionAction,
 } from './decision-actions.js'
+import { DecisionContent } from './DecisionContent.js'
+import { JumpButton } from './JumpButton.js'
 import { armUntil, isArmed, shortcutAllowed, type KeyHistory } from './key-guard.js'
 import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
-import { LINE_MARK, panelContent } from './edit-preview.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
 import { releasedMessage } from './session-marker.js'
 import { summaryView } from './summary-view.js'
-import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
+
+function isRuleAction(action: DecisionAction): boolean {
+  return action === 'rule-project' || action === 'rule-machine'
+}
 
 const KIND_LABEL = {
   tool: 'Engedélyt kér',
@@ -27,7 +34,7 @@ const KIND_LABEL = {
   plan: 'Tervet hagyatna jóvá',
 } as const
 
-type Mode = 'buttons' | 'deny' | 'rule-project' | 'rule-machine'
+type Mode = 'buttons' | Extract<DecisionAction, 'deny' | 'rule-project' | 'rule-machine'>
 
 interface Props {
   decision: PendingDecisionView
@@ -140,10 +147,29 @@ export function DecisionPanel({
     return (
       <div className="decision-row">
         <span className="muted">{text}</span>
-        <button type="button" onClick={onJump}>
-          Ugrás a VSCode-ba
-        </button>
+        <JumpButton onJump={onJump} />
       </div>
+    )
+  }
+
+  /**
+   * One button of the table (decision-actions.ts `ACTION_BUTTONS`). `title` and `kbdClass` are for
+   * the rule buttons' suggestion mark.
+   */
+  function actionButton(button: ActionButton, title?: string, kbdClass?: string): JSX.Element {
+    return (
+      <button
+        key={button.action}
+        type="button"
+        disabled={busy || (button.needsArming && !armed)}
+        title={title}
+        onClick={() => {
+          run(button.action)
+        }}
+      >
+        <kbd className={kbdClass}>{button.key.toUpperCase()}</kbd>
+        {` ${button.label}`}
+      </button>
     )
   }
 
@@ -214,12 +240,8 @@ export function DecisionPanel({
       return (
         <div className="decision-row">
           <span className="muted">{UNREADABLE_REQUEST}</span>
-          <button type="button" disabled={busy} onClick={() => { run('deny') }}>
-            <kbd>D</kbd> Tilt…
-          </button>
-          <button type="button" onClick={onJump}>
-            Ugrás a VSCode-ba
-          </button>
+          {actionButton(DENY_BUTTON)}
+          <JumpButton onJump={onJump} />
         </div>
       )
     }
@@ -232,35 +254,14 @@ export function DecisionPanel({
         const ruleKey = suggestion === undefined ? undefined : 'suggested'
         return (
           <div className="decision-row">
-            <button type="button" disabled={busy || !armed} onClick={() => { run('allow') }}>
-              <kbd>A</kbd> Engedélyez
-            </button>
-            <button type="button" disabled={busy} onClick={() => { run('deny') }}>
-              <kbd>D</kbd> Tilt…
-            </button>
-            <button type="button" disabled={busy || !armed} title={suggestion} onClick={() => { run('rule-project') }}>
-              <kbd className={ruleKey}>P</kbd> Projekt-szabály…
-            </button>
-            <button type="button" disabled={busy || !armed} title={suggestion} onClick={() => { run('rule-machine') }}>
-              <kbd className={ruleKey}>G</kbd> Gépszintű szabály…
-            </button>
+            {ACTION_BUTTONS.tool.map((button) =>
+              isRuleAction(button.action) ? actionButton(button, suggestion, ruleKey) : actionButton(button),
+            )}
           </div>
         )
       }
       case 'edit':
-        return (
-          <div className="decision-row">
-            <button type="button" disabled={busy || !armed} onClick={() => { run('allow') }}>
-              <kbd>A</kbd> Engedélyez
-            </button>
-            <button type="button" disabled={busy} onClick={() => { run('deny') }}>
-              <kbd>D</kbd> Tilt…
-            </button>
-            <button type="button" disabled={busy || !armed} onClick={() => { run('session-edits') }}>
-              <kbd>S</kbd> Erre a sessionre automatikusan
-            </button>
-          </div>
-        )
+        return <div className="decision-row">{ACTION_BUTTONS.edit.map((button) => actionButton(button))}</div>
       case 'question':
         // Kiolvashatatlan kérdésre nem lehet válaszolni (a daemon el is utasítaná), de a sor ne
         // legyen zsákutca: a natív prompt a VSCode-ban ott van, vagy a session tiltást kap üzenettel.
@@ -271,9 +272,7 @@ export function DecisionPanel({
               <button type="button" disabled={busy} onClick={() => { setMode('deny') }}>
                 Tilt…
               </button>
-              <button type="button" onClick={onJump}>
-                Ugrás a VSCode-ba
-              </button>
+              <JumpButton onJump={onJump} />
             </div>
           )
         }
@@ -300,16 +299,9 @@ export function DecisionPanel({
     }
   }
 
-  // Az App másodpercenként újrarenderel (az órák miatt); egy nagy szkript formázása vagy egy
-  // fájl soronkénti összevetése ne fusson le minden tikkre.
-  const { preview, details } = useMemo(() => panelContent(decision), [decision])
+  // Memoised on the request, so the App's re-render every second (for its clocks) does not format
+  // it again. The header shows its line count, `DecisionContent` its text.
   const summary = useMemo(() => summaryView(decision.summary), [decision])
-  const limitNote = (
-    <p className="muted">
-      Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik. A teljes
-      szöveg a VSCode-ban.
-    </p>
-  )
 
   // Kérdésnél és tervnél a művelet-terület maga is hosszú (kérdések, tervszöveg): ott a belseje
   // görget, a küldő gombok pedig alul maradnak.
@@ -329,69 +321,7 @@ export function DecisionPanel({
           </span>
         )}
       </header>
-      <div className="decision-scroll">
-        {sandboxDisabled(decision.toolInput) && (
-          <p className="decision-warning">Sandbox nélkül futna (dangerouslyDisableSandbox: true).</p>
-        )}
-        {/* A leírás a parancs fölött: egy hosszú parancs alatt görgetés nélkül nem látszana. */}
-        {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
-        <pre className="decision-summary">
-          {summary.segments.map((segment, index) =>
-            // A láthatatlan karakter escape-je kiemelve, hogy ne lehessen a parancs részének nézni.
-            segment.hidden ? (
-              <span key={index} className="invisible-char">
-                {segment.text}
-              </span>
-            ) : (
-              segment.text
-            ),
-          )}
-        </pre>
-        {summary.truncated && limitNote}
-        {preview !== undefined && (
-          // Alapból nyitva: ez maga a jóváhagyandó tartalom. Natív <details>, hogy összecsukható legyen.
-          <details className="decision-details edit-preview" open>
-            <summary>Előnézet</summary>
-            {preview.blocks.map((block) => (
-              <div key={block.title}>
-                <div className="muted">
-                  {block.title}
-                  {block.notes.length > 0 && ` · ${block.notes.join(' · ')}`}
-                </div>
-                {block.lines.length > 0 && (
-                  <pre>
-                    {block.lines.map((line, index) => (
-                      // A <pre> tartalma csak szövegszintű elem lehet: blokk-span, nem <div>.
-                      // Az előjel egy CSS pszeudo-elem (`data-mark`), nem szöveg: így a kimásolt
-                      // sorok pontosan a fájl tartalmát adják, előjel- és szóközoszlop nélkül.
-                      <span key={index} className={`diff-line diff-${line.sign}`} data-mark={LINE_MARK[line.sign]}>
-                        {line.text}
-                      </span>
-                    ))}
-                  </pre>
-                )}
-                {block.hiddenLines > 0 && (
-                  <p className="muted">… {block.hiddenLines.toLocaleString('hu-HU')} további sor</p>
-                )}
-              </div>
-            ))}
-            {preview.truncated && limitNote}
-          </details>
-        )}
-        {details !== undefined && details.blocks.length > 0 && (
-          // Natív <details>: billentyűzetről (Tab, Szóköz) saját kód nélkül nyitható.
-          <details className="decision-details">
-            <summary>Részletek</summary>
-            {details.blocks.map((block) => (
-              <div key={block.label === undefined ? 'json' : `field:${block.label}`}>
-                {block.label !== undefined && <div className="muted">{block.label}</div>}
-                <pre>{block.text}</pre>
-              </div>
-            ))}
-            {details.truncated && limitNote}
-          </details>
-        )}
-      </div>
+      <DecisionContent decision={decision} summary={summary} />
       <div className={fill ? 'decision-actions fill' : 'decision-actions'}>
         {body()}
         {error !== undefined && <p className="decision-error">{error}</p>}

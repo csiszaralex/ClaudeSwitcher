@@ -5,16 +5,38 @@ import { DEFAULT_SETTINGS } from '../shared/settings.js'
 
 export type DecisionAction = 'allow' | 'deny' | 'rule-project' | 'rule-machine' | 'session-edits'
 
+/** One button of a decision's button row, with its key letter. */
+export interface ActionButton {
+  action: DecisionAction
+  /** The key letter, lower case. The button shows it upper case. */
+  key: string
+  label: string
+  /** Disabled until the panel is armed (key-guard.ts `isArmed`): the buttons that allow something. */
+  needsArming: boolean
+}
+
+/** Deny is never armed-gated, and it is also the only button an unreadable request keeps. */
+export const DENY_BUTTON: ActionButton = { action: 'deny', key: 'd', label: 'Tilt…', needsArming: false }
+
 /**
- * Billentyű → művelet, fajtánként. Kérdésnél nincs: azt csak az űrlappal lehet megválaszolni
- * (válasz nélkül nem engedhető tovább). Tervnél sincs: jóváhagyni a hookból nem lehet, az
- * elutasításhoz pedig visszajelzés kell, és egy félreütött betű ne utasíthasson el egy tervet.
+ * The button row per kind, in display order; the keyboard shortcuts are the same table. A question
+ * has none: only its form can answer it (it may not pass unanswered). A plan has none either: the
+ * hook cannot approve it, rejecting it needs feedback, and a mistyped letter must not reject a plan.
  */
-const SHORTCUTS: Readonly<Record<DecisionKind, Readonly<Record<string, DecisionAction>>>> = {
-  tool: { a: 'allow', d: 'deny', p: 'rule-project', g: 'rule-machine' },
-  edit: { a: 'allow', d: 'deny', s: 'session-edits' },
-  question: {},
-  plan: {},
+export const ACTION_BUTTONS: Readonly<Record<DecisionKind, readonly ActionButton[]>> = {
+  tool: [
+    { action: 'allow', key: 'a', label: 'Engedélyez', needsArming: true },
+    DENY_BUTTON,
+    { action: 'rule-project', key: 'p', label: 'Projekt-szabály…', needsArming: true },
+    { action: 'rule-machine', key: 'g', label: 'Gépszintű szabály…', needsArming: true },
+  ],
+  edit: [
+    { action: 'allow', key: 'a', label: 'Engedélyez', needsArming: true },
+    DENY_BUTTON,
+    { action: 'session-edits', key: 's', label: 'Erre a sessionre automatikusan', needsArming: true },
+  ],
+  question: [],
+  plan: [],
 }
 
 /**
@@ -22,7 +44,8 @@ const SHORTCUTS: Readonly<Record<DecisionKind, Readonly<Record<string, DecisionA
  * `buildHookResponse` úgyis elutasítana.
  */
 export function shortcutFor(kind: DecisionKind, key: string, readable: boolean): DecisionAction | undefined {
-  const action = SHORTCUTS[kind][key.toLowerCase()]
+  const lower = key.toLowerCase()
+  const action = ACTION_BUTTONS[kind].find((button) => button.key === lower)?.action
   return readable || action === 'deny' ? action : undefined
 }
 

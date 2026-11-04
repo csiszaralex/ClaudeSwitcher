@@ -2,7 +2,7 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { SUBMIT_CHORD_LABEL } from './decision-actions.js'
+import { ACTION_BUTTONS, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
 import { DecisionPanel } from './DecisionPanel.js'
 import { RuleEditor } from './RuleEditor.js'
 
@@ -138,5 +138,38 @@ describe('arming a newly selected request', () => {
     // megjelenés régi élesítése nem élesíti az új kérést.
     const html = render(bashDecision(), Date.now() - 60_000)
     expect(allowButton(html)).toContain('disabled=""')
+  })
+})
+
+describe('decision buttons', () => {
+  const decisions = [
+    bashDecision(),
+    bashDecision({
+      kind: 'edit',
+      toolName: 'Write',
+      toolInput: { file_path: 'p:\\proj\\alpha\\a.txt', content: 'a' },
+      summary: 'p:\\proj\\alpha\\a.txt',
+      description: undefined,
+    }),
+  ]
+  const letters = Array.from({ length: 26 }, (_, index) => String.fromCharCode(97 + index))
+
+  /** The key letters on the rendered buttons, lower case and sorted. */
+  function buttonKeys(html: string): string[] {
+    return [...html.matchAll(/<button[^>]*><kbd[^>]*>([A-Z])<\/kbd>/g)].map((match) => match[1]!.toLowerCase()).sort()
+  }
+
+  it('every shortcut has a button with that key', () => {
+    for (const decision of decisions) {
+      for (const readable of [true, false]) {
+        const shortcuts = letters.filter((letter) => shortcutFor(decision.kind, letter, readable) !== undefined)
+        expect(buttonKeys(render({ ...decision, readable })), `${decision.kind}, readable: ${String(readable)}`).toEqual(
+          shortcuts,
+        )
+      }
+      for (const button of ACTION_BUTTONS[decision.kind]) {
+        expect(shortcutFor(decision.kind, button.key, true)).toBe(button.action)
+      }
+    }
   })
 })
