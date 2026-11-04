@@ -193,6 +193,14 @@ describe('POST /hooks/lifecycle/:kind', () => {
     expect(ev.onLifecycle).not.toHaveBeenCalled()
   })
 
+  it('answers an unknown lifecycle kind as today', async () => {
+    const ev = events()
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/lifecycle/bogus', { session_id: 's', cwd: 'c' })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('')
+    expect(ev.onLifecycle).not.toHaveBeenCalled()
+  })
+
   it('ignores the retired lifecycle/start: nothing installs it, only uninstall still recognises its path', async () => {
     const ev = events()
     const app = createHookApp(TOKEN, ev)
@@ -376,6 +384,22 @@ describe('hook contract coverage', () => {
       expect(res.status, hook.event).toBe(200)
       const calls = (Object.values(ev) as Mock[]).reduce((sum, handler) => sum + handler.mock.calls.length, 0)
       expect(calls, `${hook.event} -> ${hookPath(hook.route)}`).toBeGreaterThan(0)
+    }
+  })
+
+  it('answers a malformed body as today', async () => {
+    // Not JSON at all: every route still answers an empty 200 and calls no handler.
+    for (const hook of HOOK_CONTRACT) {
+      const ev = events()
+      const res = await createHookApp(TOKEN, ev).request(hookPath(hook.route), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+        body: '{not json',
+      })
+      expect(res.status, hook.event).toBe(200)
+      expect(await res.text(), hook.event).toBe('')
+      const calls = (Object.values(ev) as Mock[]).reduce((sum, handler) => sum + handler.mock.calls.length, 0)
+      expect(calls, hook.event).toBe(0)
     }
   })
 })

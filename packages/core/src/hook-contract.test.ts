@@ -7,6 +7,8 @@ import {
   PERMISSION_RELEASE_MARGIN_MS,
   PERMISSION_REQUEST_TIMEOUT_S,
   hookPath,
+  isLifecycleKind,
+  lifecyclePath,
 } from './hook-contract.js'
 
 describe('hook contract', () => {
@@ -35,5 +37,13 @@ describe('hook contract', () => {
     expect(OUR_HOOK_PATHS.has('/hooks/lifecycle/start')).toBe(true)
     expect(OUR_HOOK_PATHS.has('/hooks/other')).toBe(false)
     expect(OUR_HOOK_PATHS.has('/statusline')).toBe(false)
+  })
+
+  it('takes the lifecycle kinds from the installed lifecycle routes only', () => {
+    expect(isLifecycleKind('end')).toBe(true)
+    expect(isLifecycleKind('stop')).toBe(true)
+    expect(isLifecycleKind('start')).toBe(false)
+    expect(isLifecycleKind('bogus')).toBe(false)
+    expect(lifecyclePath('stop')).toBe(hookPath('lifecycle/stop'))
   })
 })

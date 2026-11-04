@@ -75,6 +75,33 @@ export function hookPath(route: HookRoute | LegacyHookRoute): string {
   return `${HOOK_PATH_PREFIX}${route}`
 }
 
+/** The `lifecycle/*` routes share one daemon route, keyed by the part after this segment. */
+const LIFECYCLE_SEGMENT = 'lifecycle/'
+
+type LifecycleKindOf<Route> = Route extends `${typeof LIFECYCLE_SEGMENT}${infer Kind}` ? Kind : never
+
+/** A lifecycle kind the daemon handles: the part after `lifecycle/` of a `HOOK_CONTRACT` route. */
+export type LifecycleKind = LifecycleKindOf<HookRoute>
+
+const LIFECYCLE_KINDS: ReadonlySet<string> = new Set(
+  HOOK_CONTRACT.flatMap(({ route }) =>
+    route.startsWith(LIFECYCLE_SEGMENT) ? [route.slice(LIFECYCLE_SEGMENT.length)] : [],
+  ),
+)
+
+/** True for a lifecycle kind of `HOOK_CONTRACT`. The retired `lifecycle/start` is not one. */
+export function isLifecycleKind(kind: string): kind is LifecycleKind {
+  return LIFECYCLE_KINDS.has(kind)
+}
+
+/**
+ * The URL path of a lifecycle route, e.g. `/hooks/lifecycle/stop`. With `:kind` it is the daemon's
+ * route pattern; the literal return type is what lets Hono type that parameter as present.
+ */
+export function lifecyclePath<Kind extends string>(kind: Kind): `${typeof HOOK_PATH_PREFIX}${typeof LIFECYCLE_SEGMENT}${Kind}` {
+  return `${HOOK_PATH_PREFIX}${LIFECYCLE_SEGMENT}${kind}`
+}
+
 /** A saját hook-végpontjaink útvonalai, a kivezetettekkel együtt: ezekről ismerjük fel a mieinket. */
 export const OUR_HOOK_PATHS: ReadonlySet<string> = new Set(
   [...HOOK_CONTRACT, ...LEGACY_HOOK_CONTRACT].map((hook) => hookPath(hook.route)),

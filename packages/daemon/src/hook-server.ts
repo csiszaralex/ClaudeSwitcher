@@ -1,10 +1,14 @@
 import { appendFile } from 'node:fs/promises'
 import {
   hookPath,
+  isLifecycleKind,
   isRecord,
+  lifecyclePath,
   nonEmptyString,
   parsePermissionRequest,
   type HookDecisionBody,
+  type HookRoute,
+  type LifecycleKind,
   type PermissionRequestInfo,
 } from '@claudeswitcher/core'
 import { Hono } from 'hono'
@@ -21,7 +25,7 @@ export interface NotificationEvent {
 export interface LifecycleEvent {
   sessionId: string
   cwd: string
-  kind: (typeof LIFECYCLE_KINDS)[number]
+  kind: LifecycleKind
 }
 
 export interface HookEvents {
@@ -51,16 +55,6 @@ function contain(result: void | Promise<void>, what: string): void {
   void Promise.resolve(result).catch((error: unknown) => {
     console.error(`[hook] ${what} handler failed`, error)
   })
-}
-
-/**
- * A daemon által fogadott `lifecycle/*` fajták. A kivezetett `lifecycle/start` nincs köztük: semmi
- * nem telepíti (lásd `LEGACY_HOOK_CONTRACT`), az útvonalát csak az eltávolítás ismeri fel.
- */
-const LIFECYCLE_KINDS = ['end', 'stop'] as const
-
-function isLifecycleKind(kind: string): kind is LifecycleEvent['kind'] {
-  return (LIFECYCLE_KINDS as readonly string[]).includes(kind)
 }
 
 function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
@@ -121,38 +115,48 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     }
   }
 
-  app.post(hookPath('notification'), async (c) => {
-    try {
-      const b = await body(c)
-      record(hookPath('notification'), b)
-      const sessionId = nonEmptyString(b['session_id'])
-      const type = nonEmptyString(b['notification_type'])
-      if (sessionId !== undefined && type !== undefined) {
-        contain(
-          events.onNotification({
-            sessionId,
-            cwd: nonEmptyString(b['cwd']) ?? '',
-            type,
-            // A Claude Code `message`-ben küldi, a CLAUDESWITCHER_HOOK_LOG nyers naplójából
-            // mérve. A `notification_text` csak tartalék, ha egy jövőbeli verzió átnevezné.
-            text: nonEmptyString(b['message']) ?? nonEmptyString(b['notification_text']),
-          }),
-          'notification',
-        )
+  /**
+   * A display-only route: reads and records the body, hands it to `handle`, and answers an empty
+   * 200 whatever happens. A throwing `handle` is logged under the route's name.
+   */
+  function displayRoute(route: HookRoute, handle: (b: Record<string, unknown>) => void): void {
+    const path = hookPath(route)
+    app.post(path, async (c) => {
+      try {
+        const b = await body(c)
+        record(path, b)
+        handle(b)
+      } catch (error) {
+        console.error(`[hook] ${route} handler failed`, error)
       }
-    } catch (error) {
-      console.error('[hook] notification handler failed', error)
-    }
-    return c.body(null, 200)
+      return c.body(null, 200)
+    })
+  }
+
+  displayRoute('notification', (b) => {
+    const sessionId = nonEmptyString(b['session_id'])
+    const type = nonEmptyString(b['notification_type'])
+    if (sessionId === undefined || type === undefined) return
+    contain(
+      events.onNotification({
+        sessionId,
+        cwd: nonEmptyString(b['cwd']) ?? '',
+        type,
+        // A Claude Code `message`-ben küldi, a CLAUDESWITCHER_HOOK_LOG nyers naplójából
+        // mérve. A `notification_text` csak tartalék, ha egy jövőbeli verzió átnevezné.
+        text: nonEmptyString(b['message']) ?? nonEmptyString(b['notification_text']),
+      }),
+      'notification',
+    )
   })
 
-  // A szerződés `lifecycle/*` route-jai egy paraméteres route-on (`LIFECYCLE_KINDS`). Hogy minden
-  // szerződésbeli útvonalnak van kezelője, azt a `hook contract coverage` teszt ellenőrzi.
-  app.post('/hooks/lifecycle/:kind', async (c) => {
+  // The contract's `lifecycle/*` routes share one route with a parameter (`isLifecycleKind`). The
+  // `hook contract coverage` test checks that every contract path has a handler.
+  app.post(lifecyclePath(':kind'), async (c) => {
     try {
       const kind = c.req.param('kind')
       const b = await body(c)
-      record(`/hooks/lifecycle/${kind}`, b)
+      record(lifecyclePath(kind), b)
       const sessionId = nonEmptyString(b['session_id'])
       if (sessionId !== undefined && isLifecycleKind(kind)) {
         contain(
@@ -189,42 +193,21 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
     }
   })
 
-  app.post(hookPath('pre-tool-use'), async (c) => {
-    try {
-      const b = await body(c)
-      record(hookPath('pre-tool-use'), b)
-      const event = toolUseEvent(b)
-      if (event !== undefined) events.onPreToolUse(event)
-    } catch (error) {
-      console.error('[hook] pre-tool-use handler failed', error)
-    }
-    return c.body(null, 200)
+  displayRoute('pre-tool-use', (b) => {
+    const event = toolUseEvent(b)
+    if (event !== undefined) events.onPreToolUse(event)
   })
 
-  app.post(hookPath('post-tool-use'), async (c) => {
-    try {
-      const b = await body(c)
-      record(hookPath('post-tool-use'), b)
-      const sessionId = nonEmptyString(b['session_id'])
-      const toolUseId = nonEmptyString(b['tool_use_id'])
-      if (sessionId !== undefined && toolUseId !== undefined) events.onPostToolUse({ sessionId, toolUseId })
-    } catch (error) {
-      console.error('[hook] post-tool-use handler failed', error)
-    }
-    return c.body(null, 200)
+  displayRoute('post-tool-use', (b) => {
+    const sessionId = nonEmptyString(b['session_id'])
+    const toolUseId = nonEmptyString(b['tool_use_id'])
+    if (sessionId !== undefined && toolUseId !== undefined) events.onPostToolUse({ sessionId, toolUseId })
   })
 
-  app.post(hookPath('subagent-stop'), async (c) => {
-    try {
-      const b = await body(c)
-      record(hookPath('subagent-stop'), b)
-      const sessionId = nonEmptyString(b['session_id'])
-      const agentId = nonEmptyString(b['agent_id'])
-      if (sessionId !== undefined && agentId !== undefined) events.onSubagentStop({ sessionId, agentId })
-    } catch (error) {
-      console.error('[hook] subagent-stop handler failed', error)
-    }
-    return c.body(null, 200)
+  displayRoute('subagent-stop', (b) => {
+    const sessionId = nonEmptyString(b['session_id'])
+    const agentId = nonEmptyString(b['agent_id'])
+    if (sessionId !== undefined && agentId !== undefined) events.onSubagentStop({ sessionId, agentId })
   })
 
   return app
