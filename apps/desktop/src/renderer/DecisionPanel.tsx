@@ -2,6 +2,7 @@ import type { UserDecision } from '@claudeswitcher/core'
 import { UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
+import { errorMessage } from '../shared/error-message.js'
 import {
   isTypingTarget,
   isUnreadableQuestion,
@@ -67,7 +68,7 @@ export function DecisionPanel({
       if (result.ok) onDecided()
       else setError(result.reason)
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : String(caught))
+      setError(errorMessage(caught))
     } finally {
       setBusy(false)
     }

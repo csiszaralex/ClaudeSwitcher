@@ -13,6 +13,7 @@ import {
 import { createAutostart, type LoginItems } from './autostart.js'
 import { loadConfig, saveSettings } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
+import { errorMessage } from '../shared/error-message.js'
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
 import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
@@ -405,9 +406,6 @@ async function startApp(): Promise<void> {
     isQuitting: quitSequence.isQuitting,
   })
 
-  const describeError = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error)
-
   // The hotkey is registered BEFORE the tray, because the menu shows the result. An invalid
   // (mistyped) value does not stop the startup: the default holds instead, and the tray says what
   // to fix.
@@ -504,8 +502,8 @@ async function startApp(): Promise<void> {
         return { ok: conflicts.length === 0, message }
       })
       .catch((error: unknown) => {
-        dialog.showErrorBox('A telepítés nem sikerült', describeError(error))
-        return { ok: false, message: `A telepítés nem sikerült: ${describeError(error)}` }
+        dialog.showErrorBox('A telepítés nem sikerült', errorMessage(error))
+        return { ok: false, message: `A telepítés nem sikerült: ${errorMessage(error)}` }
       })
       .finally(syncIntegrationNotice)
   }
@@ -519,8 +517,8 @@ async function startApp(): Promise<void> {
         return { ok: true, message }
       })
       .catch((error: unknown) => {
-        dialog.showErrorBox('Az eltávolítás nem sikerült', describeError(error))
-        return { ok: false, message: `Az eltávolítás nem sikerült: ${describeError(error)}` }
+        dialog.showErrorBox('Az eltávolítás nem sikerült', errorMessage(error))
+        return { ok: false, message: `Az eltávolítás nem sikerült: ${errorMessage(error)}` }
       })
       .finally(syncIntegrationNotice)
   }
@@ -611,7 +609,7 @@ function startupFailed(error: unknown): void {
   console.error('[claudeswitcher] startup failed', error)
   dialog.showErrorBox(
     'A ClaudeSwitcher nem tudott elindulni',
-    error instanceof Error ? error.message : String(error),
+    errorMessage(error),
   )
   app.quit()
 }

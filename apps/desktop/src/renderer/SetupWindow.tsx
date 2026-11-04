@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type JSX } from 'react'
 import type { SetupApi } from '../preload/setup-api.js'
+import { errorMessage } from '../shared/error-message.js'
 import { hotkeyLabel } from '../shared/hotkey-status.js'
 import {
   AUTOSTART_UNAVAILABLE_NOTE,
@@ -25,8 +26,6 @@ interface Form {
   values: SettingValues
   dirty: ReadonlySet<SettingKey>
 }
-
-const describeError = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 function definitionOf(key: SettingKey): SettingDefinition | undefined {
   return SETTINGS.find((setting) => setting.key === key)
@@ -54,7 +53,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
     try {
       next = readSetupState(await api.load())
     } catch (loadError) {
-      setError(`A beállítások nem tölthetők be: ${describeError(loadError)}`)
+      setError(`A beállítások nem tölthetők be: ${errorMessage(loadError)}`)
       return
     }
     if (next === undefined) {
@@ -116,7 +115,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
     setCapturing(active)
     api.setCapture(active).catch((captureError: unknown) => {
       setCapturing(false)
-      setError(`A gyorsbillentyű felvétele nem indult el: ${describeError(captureError)}`)
+      setError(`A gyorsbillentyű felvétele nem indult el: ${errorMessage(captureError)}`)
     })
   }
 
@@ -131,7 +130,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
       }
       setError(reply.reason)
     } catch (saveError) {
-      setError(`A mentés nem sikerült: ${describeError(saveError)}`)
+      setError(`A mentés nem sikerült: ${errorMessage(saveError)}`)
     } finally {
       setBusy(undefined)
     }
@@ -145,7 +144,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
       setInstallMessage(readInstallReply(raw).message)
     } catch (actionError) {
       const what = action === 'install' ? 'A telepítés' : 'Az eltávolítás'
-      setInstallMessage(`${what} nem sikerült: ${describeError(actionError)}`)
+      setInstallMessage(`${what} nem sikerült: ${errorMessage(actionError)}`)
     } finally {
       setBusy(undefined)
     }

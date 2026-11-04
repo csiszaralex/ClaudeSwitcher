@@ -1,3 +1,5 @@
+import { errorMessage } from '../shared/error-message.js'
+
 /**
  * Az `ErrorBoundary` állapota és a visszaállás döntése, React nélkül, hogy tesztelhető legyen.
  *
@@ -11,7 +13,7 @@ export interface BoundaryState {
 
 /** A hibát követő állapot. A kulcsot a következő `nextBoundaryState` jegyzi fel. */
 export function failedState(error: unknown): BoundaryState {
-  return { message: error instanceof Error ? error.message : String(error), failedAt: undefined }
+  return { message: errorMessage(error), failedAt: undefined }
 }
 
 /**
