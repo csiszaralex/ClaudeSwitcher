@@ -13,6 +13,7 @@ import {
   SUBAGENT_TAIL_BYTES,
   findTranscriptPath,
   ideDir,
+  isMissingPathError,
   parseIdeLock,
   parseSessionRecord,
   parseSubagentMeta,
@@ -93,19 +94,13 @@ function reportOnce(filePath: string, what: string, error: unknown): void {
   console.error(`[scan] ${what} failed for ${filePath}`, error)
 }
 
-/** Nincs ilyen fájl vagy könyvtár: subagenteknél ez a normális eset, nem hiba. */
-function isMissing(error: unknown): boolean {
-  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined
-  return code === 'ENOENT' || code === 'ENOTDIR'
-}
-
 async function readSubagentMeta(metaPath: string): Promise<SubagentMeta> {
   let raw: string
   try {
     raw = await readFile(metaPath, 'utf8')
   } catch (error) {
     // Hiányzó meta: nincs címke, de a subagent attól még futhat, az elavulási ablak határolja.
-    if (!isMissing(error)) reportOnce(metaPath, 'subagent meta read', error)
+    if (!isMissingPathError(error)) reportOnce(metaPath, 'subagent meta read', error)
     return { finished: false }
   }
   try {
@@ -137,7 +132,8 @@ async function readSubagents(
   try {
     names = await readdir(dir)
   } catch (error) {
-    if (!isMissing(error)) reportOnce(dir, 'subagent listing', error)
+    // A missing subagents directory is the normal case, not an error.
+    if (!isMissingPathError(error)) reportOnce(dir, 'subagent listing', error)
     return []
   }
 
@@ -151,7 +147,7 @@ async function readSubagents(
         return info.isFile() ? { agentId, mtimeMs: info.mtimeMs, file } : undefined
       } catch (error) {
         // A readdir és a stat között törölt fájl normális; minden más egyszer a logba.
-        if (!isMissing(error)) reportOnce(file, 'subagent stat', error)
+        if (!isMissingPathError(error)) reportOnce(file, 'subagent stat', error)
         return undefined
       }
     }),
