@@ -1,20 +1,10 @@
-import { readFileSync } from 'node:fs'
-import { buildHookResponse, parsePermissionRequest, type PermissionRequestInfo } from '@claudeswitcher/core/browser'
+import { buildHookResponse } from '@claudeswitcher/core/browser'
+import { parsedPayload } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import { buildAnswers, initialFormState, isComplete, setOtherText, toggleOption } from './question-form.js'
 
-const fixtures = JSON.parse(
-  readFileSync(new URL('../../../../packages/core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
-) as Record<string, unknown>
-
-function request(name: string): PermissionRequestInfo {
-  const info = parsePermissionRequest(fixtures[name])
-  if (info === undefined) throw new Error(`fixture did not parse: ${name}`)
-  return info
-}
-
 // A spike valódi kérdései: egy többválasztós (gyümölcsök) és egy egyválasztós (szín).
-const ask = request('permissionRequest_askMulti')
+const ask = parsedPayload('permissionRequest_askMulti')
 const [fruits, colour] = ask.questions
 if (fruits === undefined || colour === undefined) throw new Error('fixture has two questions')
 

@@ -2,54 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HotkeyRegistration } from '../shared/hotkey-status.js'
 import { DEFAULT_HOTKEY } from '../shared/settings.js'
 import { createHotkeyController, type HotkeyChange } from './hotkey-controller.js'
-
-/**
- * A fake `globalShortcut`, as in `hotkey-capture.test.ts`, plus `invalid` (Electron throws on an
- * accelerator it cannot parse) and `take` (another application grabs a free accelerator).
- */
-function fakeShortcuts(options: { taken?: string[]; invalid?: string[] } = {}): {
-  deps: { register: (accelerator: string, handler: () => void) => boolean; unregister: (accelerator: string) => void }
-  registered: Set<string>
-  calls: string[]
-  press: (accelerator: string) => void
-  take: (accelerator: string) => void
-} {
-  const registered = new Set<string>()
-  const taken = new Set<string>(options.taken)
-  const handlers = new Map<string, () => void>()
-  const calls: string[] = []
-  return {
-    deps: {
-      register: (accelerator, handler) => {
-        calls.push(`register ${accelerator}`)
-        if (options.invalid?.includes(accelerator) === true) throw new Error(`cannot parse ${accelerator}`)
-        if (taken.has(accelerator)) return false
-        registered.add(accelerator)
-        handlers.set(accelerator, handler)
-        return true
-      },
-      unregister: (accelerator) => {
-        calls.push(`unregister ${accelerator}`)
-        registered.delete(accelerator)
-      },
-    },
-    registered,
-    calls,
-    press: (accelerator) => {
-      if (registered.has(accelerator)) handlers.get(accelerator)?.()
-    },
-    take: (accelerator) => {
-      taken.add(accelerator)
-    },
-  }
-}
+import { fakeShortcuts, type FakeShortcuts } from './test-helpers.js'
 
 const noop = (): void => undefined
 
 function setup(
   options: { configured?: string; taken?: string[]; invalid?: string[]; defer?: (fn: () => void) => void } = {},
 ): {
-  shortcuts: ReturnType<typeof fakeShortcuts>
+  shortcuts: FakeShortcuts
   controller: ReturnType<typeof createHotkeyController>
   changes: { registration: HotkeyRegistration; change: HotkeyChange }[]
   captured: string[]

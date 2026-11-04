@@ -1,8 +1,8 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import { loadOrCreateToken } from './token.js'
-import { tempDir } from './test-helpers.js'
 
 describe('loadOrCreateToken', () => {
   it('throws on a read error other than a missing file, instead of rotating the token', async () => {

@@ -1,9 +1,9 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import type { InstanceRecord } from './instance.js'
 import { INSTANCE_FILE, readInstanceRecord, removeInstanceRecord, writeInstanceRecord } from './instance-file.js'
-import { tempDir } from './test-helpers.js'
 
 const record: InstanceRecord = {
   pid: 4242,

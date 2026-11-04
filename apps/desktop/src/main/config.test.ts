@@ -1,9 +1,9 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_HOTKEY } from '../shared/settings.js'
 import { configPath, loadConfig, saveSettings } from './config.js'
-import { tempDir } from './test-helpers.js'
 
 const freshDir = (): Promise<string> => tempDir('cs-config-')
 

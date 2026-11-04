@@ -1,25 +1,15 @@
-import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { serve } from '@hono/node-server'
 import { HOOK_CONTRACT, hookPath } from '@claudeswitcher/core'
+import { hookPayload, tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import { createHookApp, type HookEvents } from './hook-server.js'
-import { tempDir, waitFor } from './test-helpers.js'
+import { waitFor } from './test-helpers.js'
 
 const TOKEN = 'test-token'
-
-const fixtures = JSON.parse(
-  readFileSync(new URL('../../core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
-) as Record<string, unknown>
-
-function payload(name: string): unknown {
-  const value = fixtures[name]
-  if (value === undefined) throw new Error(`missing fixture: ${name}`)
-  return value
-}
 
 function events(): HookEvents {
   return {
@@ -222,7 +212,7 @@ describe('M2 decision routes — measured payloads', () => {
 
   it('answers a PermissionRequest with the handler\'s decision', async () => {
     const ev = { ...events(), onPermissionRequest: vi.fn(() => Promise.resolve(ALLOW)) }
-    const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', payload('permissionRequest_bash'))
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', hookPayload('permissionRequest_bash'))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual(ALLOW)
     expect(ev.onPermissionRequest).toHaveBeenCalledWith(
@@ -232,7 +222,7 @@ describe('M2 decision routes — measured payloads', () => {
   })
 
   it('answers an empty 200 when there is no decision', async () => {
-    const res = await post(createHookApp(TOKEN, events()), '/hooks/permission-request', payload('permissionRequest_bash'))
+    const res = await post(createHookApp(TOKEN, events()), '/hooks/permission-request', hookPayload('permissionRequest_bash'))
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('')
   })
@@ -240,7 +230,7 @@ describe('M2 decision routes — measured payloads', () => {
   it('answers an empty 200 when the handler fails — never a denial', async () => {
     // Mérve (R3, R4): egy hibás hookot a Claude Code „nincs döntés"-nek vesz, a natív prompt marad.
     const ev = { ...events(), onPermissionRequest: vi.fn(() => Promise.reject(new Error('boom'))) }
-    const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', payload('permissionRequest_bash'))
+    const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', hookPayload('permissionRequest_bash'))
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('')
   })
@@ -254,7 +244,7 @@ describe('M2 decision routes — measured payloads', () => {
 
   it('forwards a PreToolUse with its tool_use_id', async () => {
     const ev = events()
-    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', payload('preToolUse_bash'))
+    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', hookPayload('preToolUse_bash'))
     expect(ev.onPreToolUse).toHaveBeenCalledWith({
       sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
       toolName: 'Bash',
@@ -265,23 +255,23 @@ describe('M2 decision routes — measured payloads', () => {
 
   it('forwards the agent_id of a subagent\'s PreToolUse', async () => {
     // A mezőnév a mért subagent-fixture-ökből (permissionRequest_subagent, subagentStop).
-    const agentId = (payload('permissionRequest_subagent') as Record<string, unknown>)['agent_id']
+    const agentId = hookPayload('permissionRequest_subagent')['agent_id']
     expect(agentId).toBe('ad0b11acf46ef176e')
     const ev = events()
-    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', { ...(payload('preToolUse_bash') as object), agent_id: agentId })
+    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', { ...hookPayload('preToolUse_bash'), agent_id: agentId })
     expect(ev.onPreToolUse).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'ad0b11acf46ef176e' }))
   })
 
   it('leaves agentId out of a main-agent PreToolUse', async () => {
     const ev = events()
-    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', payload('preToolUse_bash'))
+    await post(createHookApp(TOKEN, ev), '/hooks/pre-tool-use', hookPayload('preToolUse_bash'))
     const [event] = vi.mocked(ev.onPreToolUse).mock.calls[0] ?? []
     expect(event !== undefined && 'agentId' in event).toBe(false)
   })
 
   it('forwards a PostToolUse with the same tool_use_id', async () => {
     const ev = events()
-    await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', payload('postToolUse_bash'))
+    await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', hookPayload('postToolUse_bash'))
     expect(ev.onPostToolUse).toHaveBeenCalledWith({
       sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
       toolUseId: 'toolu_014XMiXFVTin7eyaeqBvxbLQ',
@@ -291,7 +281,7 @@ describe('M2 decision routes — measured payloads', () => {
   it('forwards a PostToolUseFailure on the PostToolUse route like a finished tool', async () => {
     // A konstruált payload extra mezői (error, is_interrupt, duration_ms) nem számítanak.
     const ev = events()
-    await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', payload('postToolUseFailure_bash_constructed'))
+    await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', hookPayload('postToolUseFailure_bash_constructed'))
     expect(ev.onPostToolUse).toHaveBeenCalledWith({
       sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
       toolUseId: 'toolu_014XMiXFVTin7eyaeqBvxbLQ',
@@ -300,7 +290,7 @@ describe('M2 decision routes — measured payloads', () => {
 
   it('forwards a StopFailure on the Stop route as the end of the main turn', async () => {
     const ev = events()
-    await post(createHookApp(TOKEN, ev), '/hooks/lifecycle/stop', payload('stopFailure_rateLimit_constructed'))
+    await post(createHookApp(TOKEN, ev), '/hooks/lifecycle/stop', hookPayload('stopFailure_rateLimit_constructed'))
     expect(ev.onLifecycle).toHaveBeenCalledWith({
       sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
       cwd: 'P:\\08_Apps\\cs-spike',
@@ -310,7 +300,7 @@ describe('M2 decision routes — measured payloads', () => {
 
   it('forwards a SubagentStop with its agent_id', async () => {
     const ev = events()
-    await post(createHookApp(TOKEN, ev), '/hooks/subagent-stop', payload('subagentStop'))
+    await post(createHookApp(TOKEN, ev), '/hooks/subagent-stop', hookPayload('subagentStop'))
     expect(ev.onSubagentStop).toHaveBeenCalledWith({
       sessionId: '2160705c-b755-4914-b3cb-d4a8047bdacb',
       agentId: 'ad0b11acf46ef176e',
@@ -342,7 +332,7 @@ describe('M2 decision routes — measured payloads', () => {
       const response = fetch(`http://127.0.0.1:${String(port)}/hooks/permission-request`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
-        body: JSON.stringify(payload('permissionRequest_bash')),
+        body: JSON.stringify(hookPayload('permissionRequest_bash')),
         signal: client.signal,
       })
       const signal = await received
@@ -374,7 +364,7 @@ describe('hook contract coverage', () => {
   it('has a handler for every installed hook path', async () => {
     // Minden mező, amit bármelyik route olvas: így a kezelő akkor is lefut, ha a route csak egy részét nézi.
     const body = {
-      ...(payload('permissionRequest_bash') as Record<string, unknown>),
+      ...hookPayload('permissionRequest_bash'),
       notification_type: 'permission_prompt',
       tool_use_id: 'toolu_contract',
       agent_id: 'agent-contract',

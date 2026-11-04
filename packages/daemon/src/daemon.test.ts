@@ -1,19 +1,14 @@
-import { readFileSync } from 'node:fs'
 import { mkdir, utimes, writeFile } from 'node:fs/promises'
 import { connect } from 'node:net'
 import path from 'node:path'
-import { DAEMON_PROTOCOL, type ProcessProbe } from '@claudeswitcher/core'
+import { DAEMON_PROTOCOL } from '@claudeswitcher/core'
+import { fakeProbe, hookPayload, tempDir, writeSessionRecord } from '@claudeswitcher/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
 import { startDaemon, type Daemon } from './daemon.js'
-import { tempDir, waitFor } from './test-helpers.js'
+import { waitFor } from './test-helpers.js'
 
-const aliveProbe: ProcessProbe = {
-  isAlive: () => true,
-  imageName: () => 'Code',
-  startedAtMs: () => undefined,
-  refresh: () => Promise.resolve(),
-}
+const aliveProbe = fakeProbe()
 let running: Daemon | undefined
 
 afterEach(async () => {
@@ -23,14 +18,7 @@ afterEach(async () => {
 
 async function fixture(): Promise<string> {
   const dir = await tempDir('cs-daemon-')
-  await mkdir(path.join(dir, 'sessions'), { recursive: true })
-  await writeFile(
-    path.join(dir, 'sessions', '100.json'),
-    JSON.stringify({
-      pid: 100, sessionId: 'sid-100', cwd: 'p:\\proj\\alpha',
-      startedAt: 1, procStart: 'ps-100', name: 'alpha-01',
-    }),
-  )
+  await writeSessionRecord(dir)
   return dir
 }
 
@@ -208,16 +196,6 @@ describe('startDaemon', () => {
   })
 })
 
-const payloads = JSON.parse(
-  readFileSync(new URL('../../core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
-) as Record<string, Record<string, unknown>>
-
-function payload(name: string): Record<string, unknown> {
-  const value = payloads[name]
-  if (value === undefined) throw new Error(`missing fixture: ${name}`)
-  return value
-}
-
 function postHook(daemon: Daemon, route: string, body: unknown): Promise<Response> {
   return fetch(`http://127.0.0.1:${daemon.port}${route}`, {
     method: 'POST',
@@ -230,7 +208,7 @@ describe('startDaemon — held decisions', () => {
   it('holds a PermissionRequest until the user decides, then answers with the decision', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
-    const response = postHook(daemon, '/hooks/permission-request', payload('permissionRequest_bash'))
+    const response = postHook(daemon, '/hooks/permission-request', hookPayload('permissionRequest_bash'))
 
     const [pending] = await waitFor(() => daemon.state().decisions)
     expect(daemon.decide(pending!.id, { type: 'allow' })).toEqual({ ok: true })
@@ -244,11 +222,11 @@ describe('startDaemon — held decisions', () => {
   it('closes a held request with an empty 200 when VS Code answers first', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
-    await postHook(daemon, '/hooks/pre-tool-use', payload('preToolUse_bash'))
-    const response = postHook(daemon, '/hooks/permission-request', payload('permissionRequest_bashCorrelated'))
+    await postHook(daemon, '/hooks/pre-tool-use', hookPayload('preToolUse_bash'))
+    const response = postHook(daemon, '/hooks/permission-request', hookPayload('permissionRequest_bashCorrelated'))
     await waitFor(() => daemon.state().decisions)
 
-    await postHook(daemon, '/hooks/post-tool-use', payload('postToolUse_bash'))
+    await postHook(daemon, '/hooks/post-tool-use', hookPayload('postToolUse_bash'))
     const res = await response
     expect(res.status).toBe(200)
     expect(await res.text()).toBe('')
@@ -260,7 +238,7 @@ describe('startDaemon — held decisions', () => {
     const daemon = running
     await daemon.refresh()
     // Valódi payload, a fixture-registry sessionjéhez igazítva.
-    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    void postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
 
     await waitFor(() => daemon.state().decisions)
     expect(daemon.state().sessions[0]?.status).toBe('waiting')
@@ -272,8 +250,8 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    const request = { ...payload('permissionRequest_bash'), session_id: 'sid-100' }
-    const prompt = { ...payload('notification_permissionPrompt'), session_id: 'sid-100' }
+    const request = { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' }
+    const prompt = { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' }
     const response = postHook(daemon, '/hooks/permission-request', request)
     const [pending] = await waitFor(() => daemon.state().decisions)
     await postHook(daemon, '/hooks/notification', prompt)
@@ -294,9 +272,9 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    void postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
     const [pending] = await waitFor(() => daemon.state().decisions)
-    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
 
     const socket = new WebSocket(`ws://127.0.0.1:${daemon.port}/ws?token=${daemon.token}`)
     const states: Array<{ sessions: Array<{ status: string }>; decisions: unknown[] }> = []
@@ -322,10 +300,10 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
     expect(daemon.state().sessions[0]?.status).toBe('waiting')
 
-    await postHook(daemon, '/hooks/post-tool-use', { ...payload('postToolUse_bash'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/post-tool-use', { ...hookPayload('postToolUse_bash'), session_id: 'sid-100' })
     expect(daemon.state().sessions[0]?.status).toBe('idle')
   })
 
@@ -334,16 +312,16 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    await postHook(daemon, '/hooks/pre-tool-use', { ...payload('preToolUse_bash'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/pre-tool-use', { ...hookPayload('preToolUse_bash'), session_id: 'sid-100' })
     const response = postHook(daemon, '/hooks/permission-request', {
-      ...payload('permissionRequest_bashCorrelated'),
+      ...hookPayload('permissionRequest_bashCorrelated'),
       session_id: 'sid-100',
     })
     await waitFor(() => daemon.state().decisions)
-    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
     expect(daemon.state().sessions[0]?.status).toBe('waiting')
 
-    await postHook(daemon, '/hooks/post-tool-use', { ...payload('postToolUseFailure_bash_constructed'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/post-tool-use', { ...hookPayload('postToolUseFailure_bash_constructed'), session_id: 'sid-100' })
     expect(await (await response).text()).toBe('')
     expect(daemon.state().decisions).toEqual([])
     expect(daemon.state().sessions[0]?.status).toBe('idle')
@@ -353,12 +331,12 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    const response = postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    const response = postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
     await waitFor(() => daemon.state().decisions)
-    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
 
     const before = Date.now()
-    await postHook(daemon, '/hooks/lifecycle/stop', { ...payload('stopFailure_rateLimit_constructed'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/lifecycle/stop', { ...hookPayload('stopFailure_rateLimit_constructed'), session_id: 'sid-100' })
     expect(await (await response).text()).toBe('')
     expect(daemon.state().decisions).toEqual([])
     expect(daemon.state().sessions[0]?.status).toBe('idle')
@@ -370,12 +348,12 @@ describe('startDaemon — held decisions', () => {
     const daemon = running
     await daemon.refresh()
     const before = Date.now()
-    await postHook(daemon, '/hooks/lifecycle/stop', { ...payload('stop'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/lifecycle/stop', { ...hookPayload('stop'), session_id: 'sid-100' })
     const stoppedAt = daemon.state().sessions[0]?.stoppedAt
     expect(stoppedAt).toBeGreaterThanOrEqual(before)
     expect(daemon.state().sessions[0]?.status).toBe('idle')
 
-    await postHook(daemon, '/hooks/pre-tool-use', { ...payload('preToolUse_bash'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/pre-tool-use', { ...hookPayload('preToolUse_bash'), session_id: 'sid-100' })
     expect(daemon.state().sessions[0]?.stoppedAt).toBeUndefined()
   })
 
@@ -383,16 +361,16 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    const main = postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
-    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_subagent'), session_id: 'sid-100' })
+    const main = postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
+    void postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_subagent'), session_id: 'sid-100' })
     await waitFor(() => (daemon.state().decisions.length === 2 ? daemon.state().decisions : []))
 
-    await postHook(daemon, '/hooks/lifecycle/stop', { ...payload('stop'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/lifecycle/stop', { ...hookPayload('stop'), session_id: 'sid-100' })
     expect(await (await main).text()).toBe('')
     expect(daemon.state().decisions.map((d) => d.agentId)).toEqual(['ad0b11acf46ef176e'])
     expect(daemon.state().sessions[0]?.status).toBe('waiting')
 
-    await postHook(daemon, '/hooks/subagent-stop', { ...payload('subagentStop'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/subagent-stop', { ...hookPayload('subagentStop'), session_id: 'sid-100' })
     expect(daemon.state().decisions).toEqual([])
     expect(daemon.state().sessions[0]?.status).toBe('idle')
   })
@@ -400,7 +378,7 @@ describe('startDaemon — held decisions', () => {
   it('keeps the label of a subagent that waits on a held decision longer than the staleness window', async () => {
     // Konstruált subagent-fájlok a mért elrendezésben (lásd core subagent.ts), nem valódi tartalom.
     const dir = await fixture()
-    const agentId = String(payload('permissionRequest_subagent')['agent_id'])
+    const agentId = String(hookPayload('permissionRequest_subagent')['agent_id'])
     const project = path.join(dir, 'projects', 'encoded-alpha')
     const subagents = path.join(project, 'sid-100', 'subagents')
     await mkdir(subagents, { recursive: true })
@@ -419,7 +397,7 @@ describe('startDaemon — held decisions', () => {
     await daemon.refresh()
     expect(daemon.state().sessions[0]?.subagents).toBeUndefined()
 
-    void postHook(daemon, '/hooks/permission-request', { ...payload('permissionRequest_subagent'), session_id: 'sid-100' })
+    void postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_subagent'), session_id: 'sid-100' })
     await waitFor(() => daemon.state().decisions)
     await daemon.refresh()
     expect(daemon.state().sessions[0]?.subagents?.map((s) => [s.agentId, s.description])).toEqual([
@@ -436,7 +414,7 @@ describe('startDaemon — held decisions', () => {
     const response = fetch(`http://127.0.0.1:${daemon.port}/hooks/permission-request`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${daemon.token}` },
-      body: JSON.stringify(payload('permissionRequest_bash')),
+      body: JSON.stringify(hookPayload('permissionRequest_bash')),
       signal: client.signal,
     })
     await waitFor(() => daemon.state().decisions)
@@ -471,9 +449,9 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    const held = abortableRequest(daemon, { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    const held = abortableRequest(daemon, { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
     await waitFor(() => daemon.state().decisions)
-    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
     expect(daemon.state().sessions[0]?.notificationText).toBe('Claude needs your permission to use Write')
 
     const socket = new WebSocket(`ws://127.0.0.1:${daemon.port}/ws?token=${daemon.token}`)
@@ -503,11 +481,11 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    const first = abortableRequest(daemon, { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    const first = abortableRequest(daemon, { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
     await waitFor(() => daemon.state().decisions)
-    const second = abortableRequest(daemon, { ...payload('permissionRequest_subagent'), session_id: 'sid-100' })
+    const second = abortableRequest(daemon, { ...hookPayload('permissionRequest_subagent'), session_id: 'sid-100' })
     await waitFor(() => (daemon.state().decisions.length === 2 ? [true] : []))
-    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
 
     await first.abort()
     await waitFor(() => (daemon.state().decisions.length === 1 ? [true] : []))
@@ -525,19 +503,19 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    const held = abortableRequest(daemon, { ...payload('permissionRequest_bash'), session_id: 'sid-100' })
+    const held = abortableRequest(daemon, { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
     await waitFor(() => daemon.state().decisions)
     await held.abort()
     await waitFor(() => (daemon.state().decisions.length === 0 ? [true] : []))
 
-    await postHook(daemon, '/hooks/notification', { ...payload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
     expect(daemon.state().sessions[0]?.status).toBe('waiting')
   })
 
   it('answers held requests on stop instead of hanging the shutdown', async () => {
     // A tartott kapcsolatok miatt a server.close() különben soha nem térne vissza.
     const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
-    const response = postHook(daemon, '/hooks/permission-request', payload('permissionRequest_bash'))
+    const response = postHook(daemon, '/hooks/permission-request', hookPayload('permissionRequest_bash'))
     await waitFor(() => daemon.state().decisions)
 
     await daemon.stop()
@@ -556,7 +534,7 @@ describe('startDaemon — held decisions', () => {
     await new Promise((resolve) => silent.on('connect', resolve))
     // Egy teljes kérés egy MÁSIK kapcsolaton: a szerver a beérkezés sorrendjében fogadja a
     // kapcsolatokat, így a válasz idejére a néma kapcsolatot is elfogadta.
-    expect((await postHook(daemon, '/hooks/notification', payload('notification_permissionPrompt'))).status).toBe(200)
+    expect((await postHook(daemon, '/hooks/notification', hookPayload('notification_permissionPrompt'))).status).toBe(200)
 
     await daemon.stop()
     await closed

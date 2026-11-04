@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { tempDir } from './test-helpers.js'
+import { tempDir } from './testing.js'
 import { findTranscriptPath, readActivityFromLines, tailLines } from './transcript.js'
 
 const assistantText = JSON.stringify({

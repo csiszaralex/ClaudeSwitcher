@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import {
   applyIntegration,
@@ -10,7 +11,6 @@ import {
   removeIntegration,
   uninstallIntegration,
 } from './setup.js'
-import { tempDir } from './test-helpers.js'
 
 function without<T>(source: Record<string, T>, keys: readonly string[]): Record<string, T> {
   return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))

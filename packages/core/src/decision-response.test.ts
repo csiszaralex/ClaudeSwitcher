@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { parsePermissionRequest, type PermissionRequestInfo } from './decision.js'
+import { parsePermissionRequest } from './decision.js'
 import {
   buildHookResponse,
   joinAnswerLabels,
@@ -10,27 +9,18 @@ import {
   type DecisionResult,
   type UserDecision,
 } from './decision-response.js'
-
-const fixtures = JSON.parse(
-  readFileSync(new URL('../fixtures/hook-payloads.json', import.meta.url), 'utf8'),
-) as Record<string, unknown>
-
-function parsed(name: string): PermissionRequestInfo {
-  const info = parsePermissionRequest(fixtures[name])
-  if (info === undefined) throw new Error(`fixture did not parse: ${name}`)
-  return info
-}
+import { hookPayload, parsedPayload } from './testing.js'
 
 function decisionOf(result: DecisionResult): Record<string, unknown> {
   if (!result.ok) throw new Error(`expected ok, got: ${result.reason}`)
   return result.body.hookSpecificOutput.decision
 }
 
-const bash = parsed('permissionRequest_bash')
-const write = parsed('permissionRequest_write')
-const mcp = parsed('permissionRequest_mcp')
-const askMulti = parsed('permissionRequest_askMulti')
-const plan = parsed('permissionRequest_plan')
+const bash = parsedPayload('permissionRequest_bash')
+const write = parsedPayload('permissionRequest_write')
+const mcp = parsedPayload('permissionRequest_mcp')
+const askMulti = parsedPayload('permissionRequest_askMulti')
+const plan = parsedPayload('permissionRequest_plan')
 
 describe('buildHookResponse', () => {
   it('wraps every decision in the measured PermissionRequest envelope', () => {
@@ -130,7 +120,7 @@ describe('buildHookResponse', () => {
   it('refuses any answer when the questions could not be read — never an allow with no answers', () => {
     // Ha a `tool_input.questions` alakja megváltozik, a parser mindent eldob, és a lista üres.
     // A kérdésenkénti ellenőrzés ilyenkor semmit nem utasítana el.
-    const raw = fixtures['permissionRequest_askMulti'] as Record<string, unknown>
+    const raw = hookPayload('permissionRequest_askMulti')
     const unknownShape = parsePermissionRequest({
       ...raw,
       tool_input: { questions: [{ prompt: 'Milyen gyümölcsöket szeretsz?', choices: ['Alma'] }] },

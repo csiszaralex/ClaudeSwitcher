@@ -1,17 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { parseDaemonMessage, parseStateMessage, sanitizeState } from './state-message.js'
-import { readFileSync } from 'node:fs'
-import { DAEMON_PROTOCOL, parsePermissionRequest } from '@claudeswitcher/core/browser'
-
-const fixtures = JSON.parse(
-  readFileSync(new URL('../../../../packages/core/fixtures/hook-payloads.json', import.meta.url), 'utf8'),
-) as Record<string, unknown>
+import { DAEMON_PROTOCOL } from '@claudeswitcher/core/browser'
+import { parsedPayload } from '@claudeswitcher/core/testing'
 
 /** Egy függő döntés úgy, ahogy a daemon küldi: a valódi payload értelmezve, broker-mezőkkel. */
 function decisionFrom(name: string): Record<string, unknown> {
-  const info = parsePermissionRequest(fixtures[name])
-  if (info === undefined) throw new Error(`fixture did not parse: ${name}`)
-  return { ...info, id: `id-${name}`, createdAt: 1, released: false }
+  return { ...parsedPayload(name), id: `id-${name}`, createdAt: 1, released: false }
 }
 
 describe('parseStateMessage', () => {

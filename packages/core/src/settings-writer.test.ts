@@ -9,7 +9,7 @@ import {
   updateSettingsFile,
   type SettingsFs,
 } from './settings-writer.js'
-import { tempDir } from './test-helpers.js'
+import { tempDir } from './testing.js'
 
 /** A valódi fájlrendszer, amelynek egyes műveleteit a teszt felülírja. */
 function fsWith(overrides: Partial<SettingsFs>): SettingsFs {

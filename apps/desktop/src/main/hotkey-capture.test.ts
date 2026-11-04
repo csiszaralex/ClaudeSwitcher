@@ -1,39 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { acceleratorFromKey } from '../shared/accelerator.js'
 import { CAPTURE_SHORTCUTS, captureStep, createHotkeyCapture } from './hotkey-capture.js'
+import { fakeShortcuts, type FakeShortcuts } from './test-helpers.js'
 
-/** A fake `globalShortcut` that tracks what is registered and logs every call. */
-function fakeShortcuts(options: { taken?: string[]; failUnregister?: boolean } = {}): {
-  deps: { register: (accelerator: string, handler: () => void) => boolean; unregister: (accelerator: string) => void }
-  registered: Set<string>
-  calls: string[]
-  /** Fires a registered shortcut, as Windows would. */
-  press: (accelerator: string) => void
-} {
-  const registered = new Set<string>(['F8'])
-  const handlers = new Map<string, () => void>()
-  const calls: string[] = []
-  return {
-    deps: {
-      register: (accelerator, handler) => {
-        calls.push(`register ${accelerator}`)
-        if (options.taken?.includes(accelerator) === true) return false
-        registered.add(accelerator)
-        handlers.set(accelerator, handler)
-        return true
-      },
-      unregister: (accelerator) => {
-        calls.push(`unregister ${accelerator}`)
-        if (options.failUnregister === true) throw new Error('unregister failed')
-        registered.delete(accelerator)
-      },
-    },
-    registered,
-    calls,
-    press: (accelerator) => {
-      if (registered.has(accelerator)) handlers.get(accelerator)?.()
-    },
-  }
+/** The fake `globalShortcut` with the held hotkey `F8` already registered. */
+function heldShortcuts(options: { taken?: string[]; failUnregister?: boolean } = {}): FakeShortcuts {
+  return fakeShortcuts({ ...options, registered: ['F8'] })
 }
 
 const noop = (): void => undefined
@@ -45,7 +17,7 @@ describe('createHotkeyCapture', () => {
   })
 
   it('suspends the held hotkey while capturing and registers it again on stop', () => {
-    const { deps, registered, calls } = fakeShortcuts()
+    const { deps, registered, calls } = heldShortcuts()
     const capture = createHotkeyCapture({ ...deps, ...NO_TEMPORARIES, held: () => 'F8', handler: noop })
     capture.start()
     expect(capture.active()).toBe(true)
@@ -57,7 +29,7 @@ describe('createHotkeyCapture', () => {
   })
 
   it('a second start or a stop without start changes nothing', () => {
-    const { deps, calls } = fakeShortcuts()
+    const { deps, calls } = heldShortcuts()
     const capture = createHotkeyCapture({ ...deps, ...NO_TEMPORARIES, held: () => 'F8', handler: noop })
     expect(capture.stop()).toBeUndefined()
     capture.start()
@@ -68,7 +40,7 @@ describe('createHotkeyCapture', () => {
   })
 
   it('never leaves the hotkey unregistered after any start and stop sequence', () => {
-    const { deps, registered } = fakeShortcuts()
+    const { deps, registered } = heldShortcuts()
     const capture = createHotkeyCapture({ ...deps, ...NO_TEMPORARIES, held: () => 'F8', handler: noop })
     for (const step of ['start', 'stop', 'start', 'start', 'stop', 'stop', 'start', 'stop'] as const) {
       if (step === 'start') capture.start()
@@ -78,7 +50,7 @@ describe('createHotkeyCapture', () => {
   })
 
   it('registers whatever is held at stop time', () => {
-    const { deps, registered } = fakeShortcuts()
+    const { deps, registered } = heldShortcuts()
     let held = 'F8'
     const capture = createHotkeyCapture({ ...deps, ...NO_TEMPORARIES, held: () => held, handler: noop })
     capture.start()
@@ -89,7 +61,7 @@ describe('createHotkeyCapture', () => {
 
   it('still registers again on stop when unregistering threw', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const { deps, calls } = fakeShortcuts({ failUnregister: true })
+    const { deps, calls } = heldShortcuts({ failUnregister: true })
     const capture = createHotkeyCapture({ ...deps, ...NO_TEMPORARIES, held: () => 'F8', handler: noop })
     capture.start()
     expect(capture.active()).toBe(true)
@@ -98,7 +70,7 @@ describe('createHotkeyCapture', () => {
   })
 
   it('reports when the held hotkey was taken meanwhile', () => {
-    const { deps } = fakeShortcuts({ taken: ['F8'] })
+    const { deps } = heldShortcuts({ taken: ['F8'] })
     const capture = createHotkeyCapture({ ...deps, ...NO_TEMPORARIES, held: () => 'F8', handler: noop })
     capture.start()
     expect(capture.stop()).toBe('taken')
@@ -110,7 +82,7 @@ describe('createHotkeyCapture temporaries', () => {
   const TEMPS = ['Alt+Space', 'Shift+Alt+Space', 'Control+Alt+Space']
 
   it('registers the temporaries after suspending the held hotkey, and unregisters them all on stop', () => {
-    const { deps, registered, calls } = fakeShortcuts()
+    const { deps, registered, calls } = heldShortcuts()
     const capture = createHotkeyCapture({ ...deps, temporaries: TEMPS, onTemporary: noop, held: () => 'F8', handler: noop })
     capture.start()
     expect(calls).toEqual(['unregister F8', 'register Alt+Space', 'register Shift+Alt+Space', 'register Control+Alt+Space'])
@@ -120,7 +92,7 @@ describe('createHotkeyCapture temporaries', () => {
   })
 
   it('a temporary that fires yields its accelerator', () => {
-    const { deps, press } = fakeShortcuts()
+    const { deps, press } = heldShortcuts()
     const fired: string[] = []
     const capture = createHotkeyCapture({
       ...deps,
@@ -135,7 +107,7 @@ describe('createHotkeyCapture temporaries', () => {
   })
 
   it('does not unregister a temporary that failed to register', () => {
-    const { deps, calls } = fakeShortcuts({ taken: ['Control+Alt+Space'] })
+    const { deps, calls } = heldShortcuts({ taken: ['Control+Alt+Space'] })
     const capture = createHotkeyCapture({ ...deps, temporaries: TEMPS, onTemporary: noop, held: () => 'F8', handler: noop })
     capture.start()
     calls.length = 0
@@ -144,7 +116,7 @@ describe('createHotkeyCapture temporaries', () => {
   })
 
   it('registers the held hotkey last, even when it is one of the temporaries', () => {
-    const { deps, registered, calls } = fakeShortcuts()
+    const { deps, registered, calls } = heldShortcuts()
     const capture = createHotkeyCapture({
       ...deps,
       temporaries: TEMPS,

@@ -1,46 +1,29 @@
 import { mkdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { ProcessProbe } from '@claudeswitcher/core'
+import { ideDir, sessionsDir } from '@claudeswitcher/core'
+import { fakeProbe, tempDir, writeSessionRecord } from '@claudeswitcher/core/testing'
 import { describe, expect, it, vi } from 'vitest'
 import { scanSessions } from './scanner.js'
-import { tempDir } from './test-helpers.js'
 
 // A lock fájlok nem tárolnak `procStart`-ot, ezért a ProcessProbe `imageName`-je és
 // `startedAtMs`-e árulja el, ha egy elárvult lock pidjét időközben egy másik processz
 // kapta meg. Az ismeretlen indulási idő (`undefined`) nem dob el lockot.
-const aliveProbe: ProcessProbe = {
-  isAlive: () => true,
-  imageName: () => 'Code',
-  startedAtMs: () => undefined,
-  refresh: () => Promise.resolve(),
-}
-const deadProbe: ProcessProbe = {
-  isAlive: () => false,
-  imageName: () => undefined,
-  startedAtMs: () => undefined,
-  refresh: () => Promise.resolve(),
-}
+const aliveProbe = fakeProbe()
+const deadProbe = fakeProbe({ isAlive: () => false, imageName: () => undefined })
 
 async function fixture(): Promise<string> {
   const dir = await tempDir('cs-scan-')
-  await mkdir(path.join(dir, 'sessions'), { recursive: true })
-  await mkdir(path.join(dir, 'ide'), { recursive: true })
+  await writeSessionRecord(dir)
+  await mkdir(ideDir(dir), { recursive: true })
   await mkdir(path.join(dir, 'projects', 'encoded-alpha'), { recursive: true })
 
-  await writeFile(
-    path.join(dir, 'sessions', '100.json'),
-    JSON.stringify({
-      pid: 100, sessionId: 'sid-100', cwd: 'p:\\proj\\alpha',
-      startedAt: 1, procStart: 'ps-100', name: 'alpha-01',
-    }),
-  )
   // Szemét, ami nem session fájl — nem szabad elszállni rajta.
-  await writeFile(path.join(dir, 'sessions', '100.abc123'), JSON.stringify({ peerToken: 'x' }))
-  await writeFile(path.join(dir, 'sessions', 'broken.json'), '{ not json')
+  await writeFile(path.join(sessionsDir(dir), '100.abc123'), JSON.stringify({ peerToken: 'x' }))
+  await writeFile(path.join(sessionsDir(dir), 'broken.json'), '{ not json')
 
   await writeFile(
-    path.join(dir, 'ide', '50269.lock'),
+    path.join(ideDir(dir), '50269.lock'),
     JSON.stringify({ pid: 900, workspaceFolders: ['p:\\proj\\alpha'], transport: 'ws' }),
   )
 
@@ -74,12 +57,11 @@ describe('scanSessions', () => {
       fresh = true
       return Promise.resolve()
     })
-    const probe: ProcessProbe = {
+    const probe = fakeProbe({
       isAlive: () => fresh,
       imageName: () => (fresh ? 'Code' : undefined),
-      startedAtMs: () => undefined,
       refresh,
-    }
+    })
     const { sessions } = await scanSessions(dir, probe)
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(sessions).toHaveLength(1)
@@ -110,7 +92,7 @@ describe('scanSessions', () => {
   it('records when each lock file was last written', async () => {
     const dir = await fixture()
     const written = new Date('2026-10-01T08:00:00.000Z')
-    await utimes(path.join(dir, 'ide', '50269.lock'), written, written)
+    await utimes(path.join(ideDir(dir), '50269.lock'), written, written)
     const { sessions } = await scanSessions(dir, aliveProbe)
     expect(sessions[0]!.window?.mtimeMs).toBe(written.getTime())
   })
@@ -119,8 +101,8 @@ describe('scanSessions', () => {
     // Pid-újrahasznosítás: a lock egy azóta kilépett VS Code-é, a pidet egy később indult Code.exe kapta.
     const dir = await fixture()
     const written = new Date('2026-10-01T08:00:00.000Z')
-    await utimes(path.join(dir, 'ide', '50269.lock'), written, written)
-    const recycled: ProcessProbe = { ...aliveProbe, startedAtMs: () => written.getTime() + 3_600_000 }
+    await utimes(path.join(ideDir(dir), '50269.lock'), written, written)
+    const recycled = fakeProbe({ startedAtMs: () => written.getTime() + 3_600_000 })
     const { sessions } = await scanSessions(dir, recycled)
     expect(sessions).toHaveLength(1)
     expect(sessions[0]!.window).toBeUndefined()

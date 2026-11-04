@@ -7,7 +7,8 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./browser": { "types": "./dist/browser.d.ts", "default": "./dist/browser.js" }
+    "./browser": { "types": "./dist/browser.d.ts", "default": "./dist/browser.js" },
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

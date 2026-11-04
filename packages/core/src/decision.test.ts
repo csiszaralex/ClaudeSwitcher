@@ -1,23 +1,6 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { parsePermissionRequest, type PermissionRequestInfo } from './decision.js'
-
-const fixtures = JSON.parse(
-  readFileSync(new URL('../fixtures/hook-payloads.json', import.meta.url), 'utf8'),
-) as Record<string, unknown>
-
-/** A spike-ban rögzített valódi törzs. Hiányzó névnél dob, hogy egy elgépelés ne csússzon át. */
-function fixture(name: string): unknown {
-  const value = fixtures[name]
-  if (value === undefined) throw new Error(`missing fixture: ${name}`)
-  return value
-}
-
-function parsed(name: string): PermissionRequestInfo {
-  const info = parsePermissionRequest(fixture(name))
-  if (info === undefined) throw new Error(`fixture did not parse: ${name}`)
-  return info
-}
+import { parsedPayload } from './testing.js'
 
 describe('parsePermissionRequest — a spike valódi payloadjai', () => {
   it.each([
@@ -30,7 +13,7 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
     ['permissionRequest_plan', 'ExitPlanMode', 'plan', 'Terv: c.txt létrehozása'],
     ['permissionRequest_workflow', 'Workflow', 'tool', 'acceptance-probe'],
   ] as const)('%s → %s, %s', (name, toolName, kind, summary) => {
-    const info = parsed(name)
+    const info = parsedPayload(name)
     expect(info.toolName).toBe(toolName)
     expect(info.kind).toBe(kind)
     expect(info.summary).toBe(summary)
@@ -39,8 +22,8 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
 
   it('identifies a subagent by agent_id, since it shares the parent session_id', () => {
     // Mérve: a subagent kérése a SZÜLŐ session_id-jával jön, csak ez különbözteti meg.
-    const subagent = parsed('permissionRequest_subagent')
-    const parent = parsed('permissionRequest_bash')
+    const subagent = parsedPayload('permissionRequest_subagent')
+    const parent = parsedPayload('permissionRequest_bash')
     expect(subagent.sessionId).toBe(parent.sessionId)
     expect(subagent.agentId).toBe('ad0b11acf46ef176e')
     expect(subagent.agentType).toBe('general-purpose')
@@ -48,27 +31,27 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
   })
 
   it('flattens Claude Code\'s own rule suggestions and ignores everything but addRules', () => {
-    expect(parsed('permissionRequest_bash').suggestedRules).toEqual([
+    expect(parsedPayload('permissionRequest_bash').suggestedRules).toEqual([
       { toolName: 'Bash', ruleContent: 'echo spike-a *' },
     ])
-    expect(parsed('permissionRequest_webFetch').suggestedRules).toEqual([
+    expect(parsedPayload('permissionRequest_webFetch').suggestedRules).toEqual([
       { toolName: 'WebFetch', ruleContent: 'domain:example.com' },
     ])
   })
 
   it('keeps an MCP suggestion without ruleContent — the rule is the tool name itself', () => {
-    const [rule] = parsed('permissionRequest_mcp').suggestedRules
+    const [rule] = parsedPayload('permissionRequest_mcp').suggestedRules
     expect(rule?.toolName).toBe('mcp__claude-vscode__getDiagnostics')
     expect(rule?.ruleContent).toBeUndefined()
   })
 
   it('offers no rule for a file write, whose suggestion is a mode change', () => {
     // A Write/Edit javaslata `setMode: acceptEdits` a sessionre, nem fájlba írható szabály.
-    expect(parsed('permissionRequest_write').suggestedRules).toEqual([])
+    expect(parsedPayload('permissionRequest_write').suggestedRules).toEqual([])
   })
 
   it('parses single- and multi-select questions with their options', () => {
-    const { questions } = parsed('permissionRequest_askMulti')
+    const { questions } = parsedPayload('permissionRequest_askMulti')
     expect(questions.map((q) => [q.question, q.multiSelect, q.options.map((o) => o.label)])).toEqual([
       ['Milyen gyümölcsöket szeretsz?', true, ['Alma', 'Banán', 'Eper', 'Narancs']],
       ['Mi a kedvenc színed?', false, ['Piros', 'Kék', 'Zöld']],
@@ -76,9 +59,9 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
   })
 
   it('carries the plan text only for ExitPlanMode', () => {
-    expect(parsed('permissionRequest_plan').plan?.startsWith('# Terv: c.txt létrehozása')).toBe(true)
-    expect(parsed('permissionRequest_bash').plan).toBeUndefined()
-    expect(parsed('permissionRequest_bash').questions).toEqual([])
+    expect(parsedPayload('permissionRequest_plan').plan?.startsWith('# Terv: c.txt létrehozása')).toBe(true)
+    expect(parsedPayload('permissionRequest_bash').plan).toBeUndefined()
+    expect(parsedPayload('permissionRequest_bash').questions).toEqual([])
   })
 
   it('returns undefined for anything that is not a usable request, and never throws', () => {
@@ -115,13 +98,13 @@ describe('parsePermissionRequest — a parancs sortörései és a leírás', () 
   })
 
   it('carries the tool\'s own description of a command', () => {
-    expect(parsed('permissionRequest_bash').description).toBe('Write spike-a to a.txt')
+    expect(parsedPayload('permissionRequest_bash').description).toBe('Write spike-a to a.txt')
     expect(bash({ command: 'ls', description: '  List\nfiles ' })?.description).toBe('List files')
   })
 
   it('has no description where the tool gives none', () => {
-    expect(parsed('permissionRequest_write').description).toBeUndefined()
-    expect(parsed('permissionRequest_mcp').description).toBeUndefined()
+    expect(parsedPayload('permissionRequest_write').description).toBeUndefined()
+    expect(parsedPayload('permissionRequest_mcp').description).toBeUndefined()
     expect(bash({ command: 'ls', description: 42 })?.description).toBeUndefined()
   })
 })
@@ -132,7 +115,7 @@ describe('parsePermissionRequest — Workflow', () => {
   }
 
   it('summarises with the script\'s meta name and describes with its meta description', () => {
-    const info = parsed('permissionRequest_workflow')
+    const info = parsedPayload('permissionRequest_workflow')
     expect(info.summary).toBe('acceptance-probe')
     expect(info.description).toBe('Run the acceptance probe in every package and summarise the results')
     expect(info.suggestedRules).toEqual([])
@@ -182,7 +165,7 @@ describe('parsePermissionRequest — olvasható-e a kérés', () => {
       'permissionRequest_subagent',
       'permissionRequest_workflow',
     ]) {
-      expect(parsed(name).readable, name).toBe(true)
+      expect(parsedPayload(name).readable, name).toBe(true)
     }
   })
 
