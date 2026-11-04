@@ -5,7 +5,7 @@ import { DAEMON_PROTOCOL } from '@claudeswitcher/core'
 import { fakeProbe, hookPayload, tempDir, writeSessionRecord } from '@claudeswitcher/core/testing'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
-import { startDaemon, type Daemon } from './daemon.js'
+import { isToken, startDaemon, type Daemon } from './daemon.js'
 import { waitFor } from './test-helpers.js'
 
 const aliveProbe = fakeProbe()
@@ -37,7 +37,7 @@ describe('startDaemon', () => {
   it('binds to loopback on an ephemeral port and exposes a token', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     expect(running.port).toBeGreaterThan(0)
-    expect(running.token).toMatch(/^[0-9a-f]{32}$/)
+    expect(isToken(running.token)).toBe(true)
   })
 
   it('serves the scanned sessions', async () => {

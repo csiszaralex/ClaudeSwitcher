@@ -1,9 +1,7 @@
-import { randomBytes } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isNotFoundError, writeFileAtomic } from '@claudeswitcher/core'
-
-const TOKEN_PATTERN = /^[0-9a-f]{32}$/
+import { createToken, isToken } from '@claudeswitcher/daemon'
 
 /**
  * Tartós daemon-token. A telepített hookok a settings.json `env` blokkjából
@@ -22,9 +20,9 @@ export async function loadOrCreateToken(dir: string): Promise<string> {
   } catch (error) {
     if (!isNotFoundError(error)) throw error
   }
-  if (existing !== undefined && TOKEN_PATTERN.test(existing)) return existing
+  if (existing !== undefined && isToken(existing)) return existing
 
-  const token = randomBytes(16).toString('hex')
+  const token = createToken()
   await mkdir(dir, { recursive: true })
   await writeFileAtomic(file, token)
   return token

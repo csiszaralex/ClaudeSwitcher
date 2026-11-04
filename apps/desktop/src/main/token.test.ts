@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tempDir } from '@claudeswitcher/core/testing'
+import { isToken } from '@claudeswitcher/daemon'
 import { describe, expect, it } from 'vitest'
 import { loadOrCreateToken } from './token.js'
 
@@ -15,9 +16,9 @@ describe('loadOrCreateToken', () => {
     expect(await readdir(dir)).toEqual(['daemon-token'])
   })
 
-  it('creates a 32-hex-character token when none exists', async () => {
+  it('creates a daemon token when none exists', async () => {
     const dir = await tempDir('cs-token-')
-    expect(await loadOrCreateToken(dir)).toMatch(/^[0-9a-f]{32}$/)
+    expect(isToken(await loadOrCreateToken(dir))).toBe(true)
   })
 
   it('returns the same token on every later call', async () => {
@@ -32,7 +33,7 @@ describe('loadOrCreateToken', () => {
     const dir = await tempDir('cs-token-')
     await writeFile(path.join(dir, 'daemon-token'), 'not a token')
     const token = await loadOrCreateToken(dir)
-    expect(token).toMatch(/^[0-9a-f]{32}$/)
+    expect(isToken(token)).toBe(true)
     expect((await readFile(path.join(dir, 'daemon-token'), 'utf8')).trim()).toBe(token)
   })
 })

@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
@@ -8,8 +7,10 @@ import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
 import { scanSessions } from './scanner.js'
 import { SessionStore } from './session-store.js'
+import { createToken } from './token.js'
 
 export type { PendingDecisionView } from './decision-broker.js'
+export { createToken, isToken } from './token.js'
 
 export interface DaemonState {
   sessions: SessionView[]
@@ -42,7 +43,7 @@ export interface DaemonOptions {
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   const { claudeDir, probe, pollMs = POLL_INTERVAL_MS, port: requestedPort = 0 } = options
-  const token = options.token ?? randomBytes(16).toString('hex')
+  const token = options.token ?? createToken()
 
   const sessions = new SessionStore()
   const decisions = new DecisionBroker()
