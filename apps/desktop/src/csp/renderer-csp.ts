@@ -25,6 +25,7 @@ export function rendererCsp({ daemonPort, dev }: CspOptions): string {
     "default-src 'self'",
     `script-src 'self'${inline}`,
     `style-src 'self'${inline}`,
+    // The host is core `DAEMON_HOST`; this module cannot import core, a test ties the two.
     `connect-src 'self' ws://127.0.0.1:${daemonPort}`,
     // Az alábbiak közül a `base-uri` és a `form-action` nem esik vissza a `default-src`-re.
     "object-src 'none'",

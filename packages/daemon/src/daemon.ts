@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
-import { DAEMON_PROTOCOL, POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
+import { DAEMON_HOST, DAEMON_PROTOCOL, POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
 import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
 import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
@@ -84,7 +84,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   )
 
   const server: ServerType = await new Promise((resolve, reject) => {
-    const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: requestedPort }, () => {
+    const s = serve({ fetch: app.fetch, hostname: DAEMON_HOST, port: requestedPort }, () => {
       resolve(s)
     })
     // Foglalt porton a listen `error` eseményt emittál. Kezelő nélkül ez elkapatlan kivétel

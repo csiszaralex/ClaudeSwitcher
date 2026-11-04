@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
+import { DAEMON_HOST, createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
 import { startDaemon } from '@claudeswitcher/daemon'
 import {
   app,
@@ -390,7 +390,7 @@ async function startApp(): Promise<void> {
   // automatizálhatóvá: nem kell DevTools-konzolba gépelni ahhoz, hogy lássuk,
   // a daemon elindult és tényleg megtalálta a futó sessionöket.
   console.log(
-    `[claudeswitcher] daemon on 127.0.0.1:${running.port}, ` +
+    `[claudeswitcher] daemon on ${DAEMON_HOST}:${running.port}, ` +
       `${running.state().sessions.length} session(s) discovered, ` +
       `fast focus ${isFastFocusAvailable() ? 'available' : 'UNAVAILABLE'}, ` +
       `process probe ${nativeProbe === undefined ? 'PowerShell (fallback)' : 'native'}`,

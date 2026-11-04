@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import {
+  DAEMON_HOST,
   HOOK_CONTRACT,
   LEGACY_HOOK_CONTRACT,
   OUR_HOOK_PATHS,
@@ -74,7 +75,7 @@ function isOurHook(hook: unknown): boolean {
     const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:'
     return (
       isHttp &&
-      parsed.hostname === '127.0.0.1' &&
+      parsed.hostname === DAEMON_HOST &&
       parsed.port === String(DAEMON_PORT) &&
       OUR_HOOK_PATHS.has(parsed.pathname)
     )
@@ -136,7 +137,7 @@ function isOurStatusLine(statusLine: unknown): boolean {
 
 /** A hook URL-je. A telepítés és az elavultság-ellenőrzés is innen veszi. */
 function hookUrl(port: number, { route }: HookContractEntry): string {
-  return `http://127.0.0.1:${String(port)}${hookPath(route)}`
+  return `http://${DAEMON_HOST}:${String(port)}${hookPath(route)}`
 }
 
 function ourHookEntry(port: number, hook: HookContractEntry): Record<string, unknown> {

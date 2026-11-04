@@ -1,4 +1,5 @@
 import type { Server } from 'node:http'
+import { DAEMON_WS_PATH, DAEMON_WS_TOKEN_PARAM } from '@claudeswitcher/core'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { matchesSecret } from './token-compare.js'
 
@@ -10,13 +11,13 @@ export class Hub {
   constructor(server: Server, token: string) {
     this.#wss = new WebSocketServer({
       server,
-      path: '/ws',
+      path: DAEMON_WS_PATH,
       // A hitelesítés a kézfogás ELŐTT: egy token nélküli kérés 401-et kap, és soha nem lesz
       // belőle WebSocket. A kézfogás utáni bezárás (1008) mellett egy idegen kliens előbb egy
       // teljes kapcsolatot kapott volna.
       verifyClient: (info, callback) => {
         const url = new URL(info.req.url ?? '/', 'http://127.0.0.1')
-        if (matchesSecret(url.searchParams.get('token'), token)) callback(true)
+        if (matchesSecret(url.searchParams.get(DAEMON_WS_TOKEN_PARAM), token)) callback(true)
         else callback(false, 401, 'Unauthorized')
       },
     })

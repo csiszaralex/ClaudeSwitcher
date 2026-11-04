@@ -1,3 +1,4 @@
+import { daemonWsUrl } from '@claudeswitcher/core/browser'
 import type { DaemonState } from '@claudeswitcher/daemon'
 import { useEffect, useState } from 'react'
 import { parseDaemonMessage, sanitizeState } from './state-message.js'
@@ -66,7 +67,7 @@ export function useDaemonState(): OverlayState {
       // fordító a korábbi `if (closed)` után végleg hamisnak vegye.
       if (isClosed() || myGeneration !== generation) return
 
-      const next = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`)
+      const next = new WebSocket(daemonWsUrl(port, token))
       socket = next
 
       next.onopen = () => {

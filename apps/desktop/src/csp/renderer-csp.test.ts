@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { DAEMON_HOST } from '@claudeswitcher/core'
 import { describe, expect, it } from 'vitest'
 import { DAEMON_PORT } from '../main/daemon-port.js'
 import { CSP_PLACEHOLDER, injectCsp, rendererCsp } from './renderer-csp.js'
@@ -15,8 +16,10 @@ function directives(policy: string): Map<string, string> {
 describe('rendererCsp', () => {
   const built = directives(rendererCsp({ daemonPort: DAEMON_PORT, dev: false }))
 
-  it('pins the websocket to the exact daemon port', () => {
-    expect(built.get('connect-src')).toBe(`'self' ws://127.0.0.1:${DAEMON_PORT}`)
+  it('pins the websocket to the exact daemon host and port', () => {
+    // The CSP keeps its own host literal: the vite config that builds it cannot load core
+    // (see `daemon-port.ts`). This test is what ties the literal to `DAEMON_HOST`.
+    expect(built.get('connect-src')).toBe(`'self' ws://${DAEMON_HOST}:${DAEMON_PORT}`)
   })
 
   it('closes the directives that do not fall back to default-src, and plugins', () => {
@@ -41,7 +44,7 @@ describe('rendererCsp', () => {
     const devPolicy = directives(rendererCsp({ daemonPort: DAEMON_PORT, dev: true }))
     expect(devPolicy.get('script-src')).toBe("'self' 'unsafe-inline'")
     expect(devPolicy.get('style-src')).toBe("'self' 'unsafe-inline'")
-    expect(devPolicy.get('connect-src')).toBe(`'self' ws://127.0.0.1:${DAEMON_PORT}`)
+    expect(devPolicy.get('connect-src')).toBe(`'self' ws://${DAEMON_HOST}:${DAEMON_PORT}`)
     expect(devPolicy.get('object-src')).toBe("'none'")
   })
 })
