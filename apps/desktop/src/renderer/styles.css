@@ -1,10 +1,34 @@
-:root { color-scheme: dark; }
+:root {
+  color-scheme: dark;
+  /* The overlay and setup window palette. `setup-window.ts` repeats `--bg` as the window's
+     `backgroundColor`, which shows before this sheet paints. */
+  --bg: #1c1b1a; /* window, code and input background */
+  --panel: #242321; /* decision panel and setup sections */
+  --raised: #2f2e2c; /* selected row, buttons, status bar border */
+  --border: #3a3836; /* panel and fieldset borders */
+  --control-border: #4a4845; /* button and input borders */
+  --kbd-border: #5a5855; /* key-letter borders */
+  --text: #e8e6e3; /* main text */
+  --text-dim: #a8a6a2; /* secondary text */
+  --text-soft: #8a8885; /* the command description */
+  --text-faint: #6b6a67; /* muted text */
+  --accent: #d97757; /* waiting, key letters, focus, primary button */
+  --accent-tint: #d977572e; /* the pending-count badge */
+  --danger: #e0796b; /* warnings, errors, removed diff lines */
+  --danger-tint: #e0796b1a; /* removed diff lines */
+  --danger-tint-strong: #e0796b33; /* escaped invisible characters */
+  --warning: #e3b341; /* released marker, line count, setup warnings */
+  --info: #7aa2c4; /* working marker, subagent description */
+  --success: #8fbf7a; /* done marker, added diff lines */
+  --success-tint: #8fbf7a1a; /* added diff lines */
+  --link: #5fa8e8; /* Remote Control dot, setup link */
+}
 
 body {
   margin: 0;
   font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
-  color: #e8e6e3;
-  background: #1c1b1a;
+  color: var(--text);
+  background: var(--bg);
 }
 
 .overlay { display: flex; flex-direction: column; height: 100vh; }
@@ -21,45 +45,45 @@ body {
   cursor: pointer;
 }
 
-.session.selected { background: #2f2e2c; }
+.session.selected { background: var(--raised); }
 /* Az állapotjel (session-marker.ts): a szín mellett az alak is más. */
 .marker { cursor: default; }
-.marker.tone-waiting { color: #d97757; }
-.marker.tone-released { color: #e3b341; }
-.marker.tone-working { color: #7aa2c4; }
-.marker.tone-done { color: #8fbf7a; }
-.marker.tone-idle { color: #6b6a67; }
+.marker.tone-waiting { color: var(--accent); }
+.marker.tone-released { color: var(--warning); }
+.marker.tone-working { color: var(--info); }
+.marker.tone-done { color: var(--success); }
+.marker.tone-idle { color: var(--text-faint); }
 
 /* Flex, hogy csak a szöveg csonkolódjon (…), a Remote Control-pötty soha ne. */
 .name { display: flex; align-items: baseline; min-width: 0; font-weight: 600; }
 .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.remote { flex: none; margin-left: 4px; color: #5fa8e8; font-size: 9px; font-weight: 400; cursor: default; }
+.remote { flex: none; margin-left: 4px; color: var(--link); font-size: 9px; font-weight: 400; cursor: default; }
 /* „2 vár" (rows.ts `pendingBadge`): a név csonkolódik helyette, a szám mindig látszik. */
 .pending-count {
   flex: none;
   margin-left: 4px;
   padding: 0 4px;
   border-radius: 3px;
-  background: #d977572e;
-  color: #d97757;
+  background: var(--accent-tint);
+  color: var(--accent);
   font-size: 10px;
   font-weight: 400;
   cursor: default;
 }
-.summary { color: #a8a6a2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.age { color: #6b6a67; text-align: right; font-variant-numeric: tabular-nums; }
-.empty { padding: 24px; text-align: center; color: #6b6a67; }
+.summary { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.age { color: var(--text-faint); text-align: right; font-variant-numeric: tabular-nums; }
+.empty { padding: 24px; text-align: center; color: var(--text-faint); }
 
 .status-bar {
   display: flex;
   gap: 16px;
   padding: 8px 14px;
-  border-top: 1px solid #2f2e2c;
-  color: #a8a6a2;
+  border-top: 1px solid var(--raised);
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
-.muted { color: #6b6a67; }
+.muted { color: var(--text-faint); }
 
 /*
  * A panel oszlop: fejléc felül, művelet-terület alul (flex: none), köztük a görgethető
@@ -76,18 +100,18 @@ body {
   overflow-y: auto;
   margin: 0 6px 6px;
   padding: 10px 12px;
-  border: 1px solid #3a3836;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #242321;
+  background: var(--panel);
 }
 .decision-head { flex: none; display: flex; gap: 10px; align-items: baseline; }
 .decision-scroll { flex: 0 1 auto; min-height: 2.5em; overflow-y: auto; }
 .decision-actions { flex: none; }
 /* Kérdésnél és tervnél a művelet-terület is hosszú: ott a belseje görget, a gombsor alul marad. */
 .decision-actions.fill { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.decision-kind { color: #d97757; font-weight: 600; }
-.decision-tool { color: #a8a6a2; }
-.decision-lines { flex: none; color: #e3b341; font-size: 11px; }
+.decision-kind { color: var(--accent); font-weight: 600; }
+.decision-tool { color: var(--text-dim); }
+.decision-lines { flex: none; color: var(--warning); font-size: 11px; }
 /* A subagent feladatleírása hosszú lehet: egy sorban, csonkolva; a teljes szöveg a tooltipben. */
 .decision-agent {
   min-width: 0;
@@ -95,28 +119,28 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #7aa2c4;
+  color: var(--info);
 }
-.decision-warning { margin: 8px 0 0; color: #e0796b; font-weight: 600; }
+.decision-warning { margin: 8px 0 0; color: var(--danger); font-weight: 600; }
 /* Egy láthatatlan karakter escape-je (summary-view.ts): elüt a parancs szövegétől. */
-.invisible-char { padding: 0 1px; border-radius: 2px; background: #e0796b33; color: #e0796b; }
+.invisible-char { padding: 0 1px; border-radius: 2px; background: var(--danger-tint-strong); color: var(--danger); }
 .decision-summary {
   margin: 8px 0;
   white-space: pre-wrap;
   word-break: break-word;
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
-  color: #e8e6e3;
+  color: var(--text);
 }
 /* A parancs fölött áll (DecisionPanel): a térközt alatta a parancs felső margója adja. */
-.decision-description { margin: 8px 0 0; color: #8a8885; }
+.decision-description { margin: 8px 0 0; color: var(--text-soft); }
 .decision-details { margin: 0 0 6px; }
-.decision-details summary { color: #a8a6a2; cursor: pointer; }
-.decision-details summary:focus-visible { outline: 2px solid #d97757; outline-offset: 1px; }
+.decision-details summary { color: var(--text-dim); cursor: pointer; }
+.decision-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .decision-details pre {
   margin: 4px 0 8px;
   padding: 6px 8px;
   border-radius: 4px;
-  background: #1c1b1a;
+  background: var(--bg);
   white-space: pre-wrap;
   word-break: break-word;
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
@@ -126,48 +150,48 @@ body {
 /* Az előjel és az utána álló szóköz nem része a kijelölhető szövegnek: a pszeudo-elem tartalma
    nem kerül a vágólapra, így a másolás a fájl pontos tartalmát adja. */
 .edit-preview .diff-line::before { content: attr(data-mark) " "; user-select: none; }
-.edit-preview .diff-add { color: #8fbf7a; background: #8fbf7a1a; }
-.edit-preview .diff-remove { color: #e0796b; background: #e0796b1a; }
-.edit-preview .diff-same { color: #a8a6a2; }
+.edit-preview .diff-add { color: var(--success); background: var(--success-tint); }
+.edit-preview .diff-remove { color: var(--danger); background: var(--danger-tint); }
+.edit-preview .diff-same { color: var(--text-dim); }
 .edit-preview p { margin: 0 0 8px; }
 .decision-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
-.decision-error { margin: 6px 0 0; color: #e0796b; }
+.decision-error { margin: 6px 0 0; color: var(--danger); }
 .decision button {
   padding: 4px 10px;
-  border: 1px solid #4a4845;
+  border: 1px solid var(--control-border);
   border-radius: 4px;
-  background: #2f2e2c;
-  color: #e8e6e3;
+  background: var(--raised);
+  color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 .decision button:disabled { opacity: 0.45; cursor: default; }
-.decision button:focus-visible { outline: 2px solid #d97757; outline-offset: 1px; }
+.decision button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .decision kbd {
   padding: 0 4px;
-  border: 1px solid #5a5855;
+  border: 1px solid var(--kbd-border);
   border-radius: 3px;
   font: 11px Consolas, monospace;
-  color: #d97757;
+  color: var(--accent);
 }
 /* A szabálygomb billentyűjele inverzben, ha a Claude Code szabályt javasol (rule-editor.ts `suggestionTooltip`). */
-.decision kbd.suggested { border-color: #d97757; background: #d97757; color: #1c1b1a; }
+.decision kbd.suggested { border-color: var(--accent); background: var(--accent); color: var(--bg); }
 .decision input, .decision textarea {
   box-sizing: border-box;
   padding: 5px 7px;
-  border: 1px solid #4a4845;
+  border: 1px solid var(--control-border);
   border-radius: 4px;
-  background: #1c1b1a;
-  color: #e8e6e3;
+  background: var(--bg);
+  color: var(--text);
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
 }
 .decision .grow { flex: 1; min-width: 200px; }
 .rule-editor textarea { width: 100%; resize: vertical; }
-.rule-editor .confirm { display: block; margin-top: 6px; color: #e0796b; }
+.rule-editor .confirm { display: block; margin-top: 6px; color: var(--danger); }
 .question-form { display: flex; flex-direction: column; min-height: 0; }
 .question-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
-.question-form fieldset { margin: 6px 0; padding: 6px 10px; border: 1px solid #3a3836; border-radius: 5px; }
-.question-form legend { padding: 0 4px; color: #e8e6e3; font-weight: 600; }
+.question-form fieldset { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 5px; }
+.question-form legend { padding: 0 4px; color: var(--text); font-weight: 600; }
 .question-form .option { display: block; padding: 2px 0; cursor: pointer; }
 .question-form .other { width: 100%; margin-top: 4px; }
 .plan-panel { display: flex; flex-direction: column; min-height: 0; }
@@ -179,7 +203,7 @@ body {
   margin: 0 0 8px;
   padding: 8px;
   border-radius: 4px;
-  background: #1c1b1a;
+  background: var(--bg);
   white-space: pre-wrap;
   word-break: break-word;
   font: 12px/1.45 Consolas, "Cascadia Mono", monospace;
@@ -192,28 +216,28 @@ body {
  */
 .setup { max-width: 520px; padding: 14px 18px 18px; }
 .setup h1 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
-.setup h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #a8a6a2; }
+.setup h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text-dim); }
 .setup-intro { margin: 0 0 10px; }
-.setup-section { margin: 0 0 10px; padding: 8px 12px; border: 1px solid #3a3836; border-radius: 6px; background: #242321; }
+.setup-section { margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
 .setup-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 5px 0; }
 .setup-label { flex: 1; min-width: 160px; }
-.setup-note { flex-basis: 100%; margin: 0; color: #6b6a67; font-size: 12px; }
+.setup-note { flex-basis: 100%; margin: 0; color: var(--text-faint); font-size: 12px; }
 .setup-row input[type="checkbox"] + .setup-label + .setup-note { padding-left: 24px; }
-.setup-note.warning { color: #e3b341; }
-.setup-error { margin: 0 0 10px; color: #e0796b; font-weight: 600; }
+.setup-note.warning { color: var(--warning); }
+.setup-error { margin: 0 0 10px; color: var(--danger); font-weight: 600; }
 .setup button {
   padding: 4px 12px;
-  border: 1px solid #4a4845;
+  border: 1px solid var(--control-border);
   border-radius: 4px;
-  background: #2f2e2c;
-  color: #e8e6e3;
+  background: var(--raised);
+  color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 .setup button:disabled { opacity: 0.45; cursor: default; }
-.setup button:focus-visible, .setup input:focus-visible { outline: 2px solid #d97757; outline-offset: 1px; }
+.setup button:focus-visible, .setup input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .setup .hotkey-capture { min-width: 180px; font: 12px/1.4 Consolas, "Cascadia Mono", monospace; }
-.setup .hotkey-capture.capturing { border-color: #d97757; color: #d97757; }
-.setup .setup-link { margin: 0 0 10px; padding: 0; border: none; background: none; color: #5fa8e8; text-decoration: underline; }
+.setup .hotkey-capture.capturing { border-color: var(--accent); color: var(--accent); }
+.setup .setup-link { margin: 0 0 10px; padding: 0; border: none; background: none; color: var(--link); text-decoration: underline; }
 .setup-footer { display: flex; justify-content: flex-end; }
-.setup button.primary { border-color: #d97757; background: #d97757; color: #1c1b1a; font-weight: 600; }
+.setup button.primary { border-color: var(--accent); background: var(--accent); color: var(--bg); font-weight: 600; }

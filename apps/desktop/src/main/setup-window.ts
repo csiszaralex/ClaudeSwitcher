@@ -82,7 +82,7 @@ export function createSetupWindowController(options: {
       fullscreenable: false,
       show: false,
       // No `title` here: the page's `<title>` in `setup.html` names the window.
-      // Also in `styles.css` (`body` background), and needed here too: this colour shows before the
+      // Also in `styles.css` (`--bg`), and needed here too: this colour shows before the
       // page has painted, so the window does not flash white. Keep the two the same.
       backgroundColor: '#1c1b1a',
       webPreferences: secureWebPreferences(options.preload),
