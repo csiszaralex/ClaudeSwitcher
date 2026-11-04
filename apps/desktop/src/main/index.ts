@@ -20,6 +20,7 @@ import { hotkeyLogText } from './hotkey.js'
 import { createHotkeyController } from './hotkey-controller.js'
 import {
   HANDOVER_TIMEOUT_MS,
+  HELPER_FLAG,
   LAUNCH_EXIT_CODE,
   describeBuild,
   instanceAction,
@@ -184,7 +185,7 @@ async function recordInstance(): Promise<void> {
  * the same lock. Resolves once the helper is gone (or could not start).
  */
 function runQuitHelper(): Promise<void> {
-  const args = app.isPackaged ? ['--quit'] : [app.getAppPath(), '--quit']
+  const args = app.isPackaged ? [HELPER_FLAG.quit] : [app.getAppPath(), HELPER_FLAG.quit]
   const helper = spawn(process.execPath, args, { stdio: 'ignore', windowsHide: true })
   return new Promise((resolve) => {
     helper.on('error', (error) => {

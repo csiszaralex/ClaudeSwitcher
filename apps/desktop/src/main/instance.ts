@@ -22,6 +22,16 @@ export interface BuildIdentity {
 export type LaunchMode = 'normal' | 'quit' | 'uninstall'
 
 /**
+ * The command-line flags of the helper launch modes. `apps/desktop/resources/installer.nsh`
+ * `csRunHelper` passes them as literals (NSIS cannot import this file); `instance.test.ts` checks
+ * that the two agree.
+ */
+export const HELPER_FLAG: { readonly quit: '--quit'; readonly uninstall: '--uninstall' } = {
+  quit: '--quit',
+  uninstall: '--uninstall',
+}
+
+/**
  * Exit codes of the `--quit` and `--uninstall` launch modes. The NSIS macros rely on them:
  * - `ok` (0): nothing was running, or the running app quit (and, for `--uninstall`, the autostart
  *   entry and the Claude Code integration were removed);
@@ -43,8 +53,8 @@ export const HANDOVER_TIMEOUT_MS = STOP_TIMEOUT_MS + 8000
 
 /** `--uninstall` wins over `--quit`: it does everything `--quit` does, and more. */
 export function launchMode(argv: readonly string[]): LaunchMode {
-  if (argv.includes('--uninstall')) return 'uninstall'
-  if (argv.includes('--quit')) return 'quit'
+  if (argv.includes(HELPER_FLAG.uninstall)) return 'uninstall'
+  if (argv.includes(HELPER_FLAG.quit)) return 'quit'
   return 'normal'
 }
 

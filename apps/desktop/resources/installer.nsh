@@ -50,7 +50,7 @@
 # and DesktopShortcut (default 0).
 !define CS_INSTALLER_KEY "Software\ClaudeSwitcher\Installer"
 !define CS_HELPER_EXE "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
-# instance.ts LAUNCH_EXIT_CODE
+# instance.ts LAUNCH_EXIT_CODE; instance.test.ts checks that the two agree.
 !define CS_EXIT_OK 0
 !define CS_EXIT_INTEGRATION_FAILED 2
 
@@ -59,7 +59,8 @@
 # tray and retries; Cancel (and any silent run) quits the installer or uninstaller, as the
 # template's own check does. ACCEPTED is one more exit code, besides ok, that ends the loop. If the
 # exe does not exist (a first install) or cannot be started, nothing can be asked to quit, so it
-# goes on. It never kills a process.
+# goes on. It never kills a process. The flags are instance.ts HELPER_FLAG; instance.test.ts
+# checks every csRunHelper call against it.
 !macro csRunHelper FLAG ACCEPTED
   StrCpy $0 ${CS_EXIT_OK}
   ${If} ${FileExists} "${CS_HELPER_EXE}"

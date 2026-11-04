@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   HANDOVER_TIMEOUT_MS,
+  HELPER_FLAG,
   LAUNCH_EXIT_CODE,
   describeBuild,
   instanceAction,
@@ -136,5 +140,30 @@ describe('HANDOVER_TIMEOUT_MS', () => {
 describe('LAUNCH_EXIT_CODE', () => {
   it('keeps the codes the NSIS macros rely on', () => {
     expect(LAUNCH_EXIT_CODE).toEqual({ ok: 0, notClosed: 1, integrationFailed: 2 })
+  })
+})
+
+describe('installer.nsh', () => {
+  // NSIS cannot import TypeScript, so the installer restates the exit codes and the helper flags.
+  // It is only read as text here; nothing runs it.
+  const installer = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../../resources/installer.nsh'),
+    'utf8',
+  )
+  const camelCase = (name: string): string =>
+    name.toLowerCase().replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase())
+
+  it('defines every CS_EXIT_* code with the value of LAUNCH_EXIT_CODE', () => {
+    const defines = [...installer.matchAll(/^!define CS_EXIT_([A-Z_]+) (\S+)\r?$/gm)].map(([, name, value]) => [
+      camelCase(name!),
+      Number(value),
+    ])
+    expect(defines.length).toBeGreaterThan(0)
+    for (const define of defines) expect(Object.entries(LAUNCH_EXIT_CODE)).toContainEqual(define)
+  })
+
+  it('runs the helper only with the HELPER_FLAG flags, and with each of them', () => {
+    const flags = [...installer.matchAll(/csRunHelper "([^"]*)"/g)].map(([, flag]) => flag)
+    expect(new Set(flags)).toEqual(new Set(Object.values(HELPER_FLAG)))
   })
 })
