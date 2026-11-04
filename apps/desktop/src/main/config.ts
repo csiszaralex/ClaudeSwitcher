@@ -1,7 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isNotFoundError, isRecord, transformSettingsFile } from '@claudeswitcher/core'
-import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isSettingKey } from '../shared/settings.js'
+import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isHotkeyValue, isSettingKey } from '../shared/settings.js'
 import type { SettingKey, SettingValues } from '../shared/settings.js'
 
 export type StoredValues = Omit<SettingValues, 'autostart'>
@@ -111,7 +111,7 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
     const { hotkey, hideAfterLastDecision, jumpToTab, confirmed } = parsed
     return {
       values: {
-        hotkey: typeof hotkey === 'string' && hotkey.trim() !== '' ? hotkey : DEFAULT_HOTKEY,
+        hotkey: isHotkeyValue(hotkey) ? hotkey : DEFAULT_HOTKEY,
         hideAfterLastDecision: booleanOr(hideAfterLastDecision, DEFAULT_VALUES.hideAfterLastDecision),
         jumpToTab: booleanOr(jumpToTab, DEFAULT_VALUES.jumpToTab),
       },

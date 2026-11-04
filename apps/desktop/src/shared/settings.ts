@@ -4,6 +4,8 @@
  * Compiled by both the main and the renderer projects, so it imports no `node:` module.
  */
 
+import { isRecord } from '@claudeswitcher/core/browser'
+
 /**
  * Az overlay gyorsbillentyűjének alapértéke.
  *
@@ -60,16 +62,20 @@ export function isSettingKey(value: unknown): value is SettingKey {
   return typeof value === 'string' && KEYS.has(value)
 }
 
+/** A usable hotkey value: a non-blank string. The config file and the setup window both apply it. */
+export function isHotkeyValue(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
 /** Exactly the four setting values: no missing key, no extra key, a non-blank hotkey. */
 export function parseSettingValues(raw: unknown): SettingValues | undefined {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
-  const record: Record<string, unknown> = { ...raw }
-  if (Object.keys(record).length !== SETTINGS.length) return undefined
-  const { autostart, hideAfterLastDecision, jumpToTab, hotkey } = record
+  if (!isRecord(raw)) return undefined
+  if (Object.keys(raw).length !== SETTINGS.length) return undefined
+  const { autostart, hideAfterLastDecision, jumpToTab, hotkey } = raw
   if (typeof autostart !== 'boolean' || typeof hideAfterLastDecision !== 'boolean' || typeof jumpToTab !== 'boolean') {
     return undefined
   }
-  if (typeof hotkey !== 'string' || hotkey.trim() === '') return undefined
+  if (!isHotkeyValue(hotkey)) return undefined
   return { autostart, hideAfterLastDecision, jumpToTab, hotkey }
 }
 

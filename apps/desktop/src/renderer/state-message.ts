@@ -22,14 +22,13 @@ function isDecision(value: unknown): value is PendingDecisionView {
   if (!isRecord(value)) return false
   const questions = value['questions']
   const rules = value['suggestedRules']
-  const description = value['description']
   return (
     typeof value['id'] === 'string' &&
     typeof value['sessionId'] === 'string' &&
     typeof value['toolName'] === 'string' &&
     typeof value['summary'] === 'string' &&
     // Opcionális a `PermissionRequestInfo`-ban: nincs, ha az eszköz nem ad leírást. Ha jön, szövegnek kell lennie, a panel annak rendereli.
-    (description === undefined || typeof description === 'string') &&
+    optionalString(value['description']) &&
     typeof value['released'] === 'boolean' &&
     // Kötelező: ebből dönti el a panel, kínál-e engedélyezést. Hiányzó jelző nem számíthat olvashatónak.
     typeof value['readable'] === 'boolean' &&
@@ -89,7 +88,7 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
         // Opcionális a `SessionView`-ban: csak az „épp végzett" sessionnél van. Ha jön, számnak kell lennie, időt számolnak belőle.
         (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number') &&
         // Opcionális: a registry rekordjából jön, ha ott van. Ha jön, szöveg, a nyers `entrypoint` érték.
-        (view['entrypoint'] === undefined || typeof view['entrypoint'] === 'string') &&
+        optionalString(view['entrypoint']) &&
         // Opcionális: csak aktív subagent mellett van. Ha jön, minden eleme olyan alakú, amit a sor összefoglalója olvas.
         (view['subagents'] === undefined || (Array.isArray(view['subagents']) && view['subagents'].every(isSubagent))),
     ),
