@@ -6,9 +6,10 @@
  */
 
 /**
- * A daemon ilyen gyakran olvassa újra a registryt és a transcripteket (`startDaemon` `pollMs`
- * alapértéke). Erre épül a session-store `UNMATCHED_WAIT_GRACE_MS`-e és a DecisionBroker
- * `ABSENT_SESSION_GRACE_MS`-e. Mért alapja nincs: a commitok és a kommentek nem rögzítenek mérést.
+ * How often the daemon re-reads the registry and the transcripts (the default of `startDaemon`'s
+ * `pollMs`). The DecisionBroker's `ABSENT_SESSION_GRACE_MS` is derived from it. The session store's
+ * `UNMATCHED_WAIT_GRACE_MS` is not: it is a fixed value, well over one poll. No measurement behind
+ * this value: no commit or comment records one.
  */
 export const POLL_INTERVAL_MS = 3000
 

@@ -102,12 +102,10 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     return { sessions: sessions.views(), decisions: decisions.views() }
   }
 
-  // A SessionStore minden `apply*` híváskor jelez, akkor is, ha az állapot nem
-  // változott, a másodperces poll így percenként hússzor küldene azonos
-  // pillanatképet. A szűrés szándékosan itt van, nem a store-ban: a store dolga
-  // annyi, hogy „történt valami", a hubé, hogy mit érdemes elküldeni. A
-  // szerializált alak összehasonlítása pontos, ellentétben egy mezőnkénti
-  // diffel, amit el lehet rontani.
+  // The SessionStore signals on every `apply*` call, also when the state did not change, so every
+  // poll (`POLL_INTERVAL_MS`) would send the same snapshot again. The filter is here on purpose, not
+  // in the store: the store only says "something happened", the hub decides what is worth sending.
+  // Comparing the serialised form is exact, unlike a field-by-field diff, which can be got wrong.
   let lastBroadcast = ''
   function broadcast(): void {
     const message = JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: state() })
