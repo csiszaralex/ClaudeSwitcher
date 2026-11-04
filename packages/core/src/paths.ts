@@ -19,3 +19,16 @@ export function ideDir(claudeDir: string): string {
 export function userSettingsPath(claudeDir: string): string {
   return path.join(claudeDir, 'settings.json')
 }
+
+/** The session transcripts live under it, one directory per project (see `findTranscriptPath`). */
+export function projectsDir(claudeDir: string): string {
+  return path.join(claudeDir, 'projects')
+}
+
+/**
+ * A session's subagent files sit beside its transcript: `<sessionId>.jsonl` has them in
+ * `<sessionId>/subagents/` (the layout is described in `subagent.ts`).
+ */
+export function subagentsDirOf(transcriptPath: string): string {
+  return path.join(path.dirname(transcriptPath), path.basename(transcriptPath, '.jsonl'), 'subagents')
+}

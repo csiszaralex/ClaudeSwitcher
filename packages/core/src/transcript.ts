@@ -1,5 +1,6 @@
 import { open, readdir } from 'node:fs/promises'
 import path from 'node:path'
+import { projectsDir } from './paths.js'
 import { toolDetail } from './tool-detail.js'
 import type { SessionActivity } from './types.js'
 
@@ -78,7 +79,7 @@ export async function findTranscriptPath(
   claudeDir: string,
   sessionId: string,
 ): Promise<string | undefined> {
-  const projects = path.join(claudeDir, 'projects')
+  const projects = projectsDir(claudeDir)
   let entries: string[]
   try {
     entries = await readdir(projects)

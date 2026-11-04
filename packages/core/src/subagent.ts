@@ -61,6 +61,14 @@ export function parseSubagentMeta(raw: unknown): SubagentMeta {
   return meta
 }
 
+/**
+ * The meta file name of a subagent, `agent-<agentId>.meta.json`. The directory it sits in is
+ * `subagentsDirOf` in `paths.ts`, which needs `node:path` and so cannot live in this module.
+ */
+export function subagentMetaFile(agentId: string): string {
+  return `agent-${agentId}.meta.json`
+}
+
 /** `agent-<agentId>.jsonl` → `<agentId>`; minden más fájlnévre (a meta-ra is) `undefined`. */
 export function subagentIdFromFile(fileName: string): string | undefined {
   const match = /^agent-(.+)\.jsonl$/.exec(fileName)

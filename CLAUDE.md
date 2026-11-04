@@ -39,8 +39,8 @@ Nem dokumentált belsők, és hol olvassuk őket. Ha a Claude Code változik, it
 - `~/.claude/sessions/<pid>.json`: core `session-registry.ts` `parseSessionRecord`, beolvasás a daemon `scanner.ts`-ben. Hiányzó kötelező mezőnél a rekord csendben kiesik.
 - `procStart` (FILETIME decimális szövegként) és a pid-élet: core `liveness.ts` (`isAlive`, `parsePowerShellSnapshot`), desktop `process-probe.ts`.
 - `~/.claude/ide/<port>.lock` és a VS Code image nevek: `session-registry.ts` `parseIdeLock`, `liveness.ts` `VSCODE_IMAGE_NAMES`.
-- Transcript `projects/<kódolt cwd>/<sessionId>.jsonl` és a blokkok alakja: core `transcript.ts` (`findTranscriptPath`, `readActivityFromLines`), `tool-detail.ts`.
-- Subagent-fájlok (`subagents/agent-<id>.jsonl`, `.meta.json`): daemon `scanner.ts` `readSubagents`, core `subagent.ts`.
+- Transcript `projects/<kódolt cwd>/<sessionId>.jsonl` és a blokkok alakja: core `paths.ts` `projectsDir`, `transcript.ts` (`findTranscriptPath`, `readActivityFromLines`), `tool-detail.ts`.
+- Subagent-fájlok (`<sessionId>/subagents/agent-<id>.jsonl`, `.meta.json`): core `paths.ts` `subagentsDirOf`, `subagent.ts` (`subagentIdFromFile`, `subagentMetaFile`), beolvasás a daemon `scanner.ts` `readSubagents`-ben.
 - Hook payloadok: daemon `hook-server.ts`, core `decision.ts` `parsePermissionRequest`. A mért alakok: `packages/core/fixtures/hook-payloads.json`, `spikes/m2-permission/RESULTS.md`.
 - Hook válasz (`hookSpecificOutput`, `updatedPermissions`): core `decision-response.ts` `buildHookResponse`.
 - Hook-konfiguráció a `settings.json`-ban: desktop `setup.ts`, a lista a `hook-contract.ts`-ben.

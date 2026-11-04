@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ideDir, resolveClaudeDir, sessionsDir, userSettingsPath } from './paths.js'
+import { ideDir, projectsDir, resolveClaudeDir, sessionsDir, subagentsDirOf, userSettingsPath } from './paths.js'
 
 describe('resolveClaudeDir', () => {
   it('prefers CLAUDE_CONFIG_DIR when it is set', () => {
@@ -24,5 +24,11 @@ describe('directory helpers', () => {
     expect(sessionsDir('d:\\c')).toBe(path.join('d:\\c', 'sessions'))
     expect(ideDir('d:\\c')).toBe(path.join('d:\\c', 'ide'))
     expect(userSettingsPath('d:\\c')).toBe(path.join('d:\\c', 'settings.json'))
+    expect(projectsDir('d:\\c')).toBe(path.join('d:\\c', 'projects'))
+  })
+
+  it('puts the subagents directory beside the transcript, named after the session', () => {
+    const transcript = path.join('d:\\c', 'projects', 'p--proj-alpha', 'session-1.jsonl')
+    expect(subagentsDirOf(transcript)).toBe(path.join('d:\\c', 'projects', 'p--proj-alpha', 'session-1', 'subagents'))
   })
 })

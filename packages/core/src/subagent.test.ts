@@ -5,6 +5,7 @@ import {
   parseSubagentMeta,
   pickRecentSubagentFiles,
   subagentIdFromFile,
+  subagentMetaFile,
 } from './subagent.js'
 
 // Konstruált meta-fájlok a mért alakban (Claude Code 2.1.30x, 2026-10-21) — nem valódi tartalom.
@@ -43,6 +44,12 @@ describe('parseSubagentMeta', () => {
       expect(() => parseSubagentMeta(raw)).not.toThrow()
       expect(parseSubagentMeta(raw)).toEqual({ finished: false })
     }
+  })
+})
+
+describe('subagentMetaFile', () => {
+  it('names the meta file next to the transcript of the same subagent', () => {
+    expect(subagentMetaFile('a0123456789abcdef')).toBe('agent-a0123456789abcdef.meta.json')
   })
 })
 

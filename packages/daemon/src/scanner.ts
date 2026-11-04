@@ -21,6 +21,8 @@ import {
   resolveLiveSessions,
   sessionsDir,
   subagentIdFromFile,
+  subagentMetaFile,
+  subagentsDirOf,
   tailLines,
 } from '@claudeswitcher/core'
 
@@ -130,7 +132,7 @@ async function readSubagents(
   now: number,
   heldAgents: ReadonlySet<string>,
 ): Promise<SubagentView[]> {
-  const dir = path.join(path.dirname(transcript), path.basename(transcript, '.jsonl'), 'subagents')
+  const dir = subagentsDirOf(transcript)
   let names: string[]
   try {
     names = await readdir(dir)
@@ -162,7 +164,7 @@ async function readSubagents(
   const withMeta = await Promise.all(
     [...recent, ...held].map(async (candidate) => ({
       ...candidate,
-      meta: await readSubagentMeta(path.join(dir, `agent-${candidate.agentId}.meta.json`)),
+      meta: await readSubagentMeta(path.join(dir, subagentMetaFile(candidate.agentId))),
     })),
   )
   const unfinished = withMeta.filter(({ meta }) => !meta.finished)
