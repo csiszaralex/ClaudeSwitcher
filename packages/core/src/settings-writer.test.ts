@@ -18,7 +18,6 @@ function fsWith(overrides: Partial<SettingsFs>): SettingsFs {
     writeFile: (file, data, encoding) => realFs.writeFile(file, data, encoding),
     rename: (from, to) => realFs.rename(from, to),
     unlink: (file) => realFs.unlink(file),
-    stat: (file) => realFs.stat(file),
     copyFile: (from, to, mode) => realFs.copyFile(from, to, mode),
     ...overrides,
   }
@@ -264,7 +263,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
 
   it('redoes the write when another writer changed the file meanwhile, keeping its keys', async () => {
     // Claude Code vagy egy szerkesztő a mi olvasásunk és átnevezésünk között ír a fájlba.
-    // Az átnevezés előtti stat ezt észreveszi, és az ő tartalmára dolgozunk újra.
+    // Az átnevezés előtti tartalom-összevetés ezt észreveszi, és az ő tartalmára dolgozunk újra.
     const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
@@ -283,6 +282,27 @@ describe('transformSettingsFile never loses the existing settings', () => {
 
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ model: 'sonnet', theirs: true, ours: 1 })
     expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('redoes the write when another writer left a file of the same size within one mtime tick', async () => {
+    // A timestamp and a size cannot tell this change apart, so only the content can.
+    const dir = await tempDir('cs-writer-')
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, JSON.stringify({ effort: 'low' }))
+    let interfered = false
+    const fs = fsWith({
+      writeFile: async (target, data, encoding) => {
+        if (!interfered && target !== file) {
+          interfered = true
+          await realFs.writeFile(file, JSON.stringify({ effort: 'max' }), 'utf8')
+        }
+        await realFs.writeFile(target, data, encoding)
+      },
+    })
+
+    await updateSettingsFile(file, { ours: 1 }, { fs, backup: false })
+
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ effort: 'max', ours: 1 })
   })
 
   it('gives up after a bounded number of conflicting writes, leaving the other writer\'s file', async () => {

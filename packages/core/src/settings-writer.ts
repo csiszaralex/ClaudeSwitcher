@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { copyFile, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { copyFile, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isRecord } from './guards.js'
 
@@ -14,11 +14,10 @@ export interface SettingsFs {
   writeFile(file: string, data: string, encoding: 'utf8'): Promise<void>
   rename(from: string, to: string): Promise<void>
   unlink(file: string): Promise<void>
-  stat(file: string): Promise<{ mtimeMs: number; size: number }>
   copyFile(from: string, to: string, mode: number): Promise<void>
 }
 
-const nodeFs: SettingsFs = { readFile, writeFile, rename, unlink, stat, copyFile }
+const nodeFs: SettingsFs = { readFile, writeFile, rename, unlink, copyFile }
 
 export interface SettingsWriteOptions {
   /** Alapból a valódi `node:fs/promises`. */
@@ -150,29 +149,20 @@ export async function writeFileAtomic(
   }
 }
 
-/** A fájl állapota az olvasáskor: `undefined`, ha nem létezett. */
-type Fingerprint = { mtimeMs: number; size: number } | undefined
-
-async function fingerprint(fs: SettingsFs, filePath: string): Promise<Fingerprint> {
+/** The raw content, or `undefined` when the file does not exist. */
+async function readRaw(fs: SettingsFs, filePath: string): Promise<string | undefined> {
   try {
-    const { mtimeMs, size } = await fs.stat(filePath)
-    return { mtimeMs, size }
+    return await fs.readFile(filePath, 'utf8')
   } catch (error) {
     if (isNotFoundError(error)) return undefined
     throw error
   }
 }
 
-function sameFingerprint(a: Fingerprint, b: Fingerprint): boolean {
-  if (a === undefined || b === undefined) return a === b
-  return a.mtimeMs === b.mtimeMs && a.size === b.size
-}
-
 interface Snapshot {
   /** A nyers tartalom, vagy `undefined`, ha a fájl nem létezett. */
   raw: string | undefined
   existing: Record<string, unknown>
-  seen: Fingerprint
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -184,18 +174,14 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * telepítés csak a mi kulcsainkkal írta felül a felhasználó teljes beállítását. Egy meglévő, de
  * üres fájl tipikusan egy másik író csonkolása és írása közötti pillanat, ezért rövid szünetekkel
  * újraolvassuk. Ha üres marad, az írást elutasítjuk, nem `{}`-ként kezeljük.
- *
- * A stat az olvasás ELŐTT fut: ha a kettő között más ír, az átnevezés előtti stat eltérést lát,
- * és a kör újraindul. Fordított sorrendben egy közbeeső írás észrevétlen maradhatna.
  */
 async function readSnapshot(fs: SettingsFs, filePath: string): Promise<Snapshot> {
   for (let retry = 0; ; retry++) {
-    const seen = await fingerprint(fs, filePath)
     let raw: string
     try {
       raw = await fs.readFile(filePath, 'utf8')
     } catch (error) {
-      if (isNotFoundError(error)) return { raw: undefined, existing: {}, seen: undefined }
+      if (isNotFoundError(error)) return { raw: undefined, existing: {} }
       throw new Error(
         `Cannot read existing settings at ${filePath} (${errorCode(error) ?? 'unknown error'}); refusing to write`,
         { cause: error },
@@ -217,7 +203,7 @@ async function readSnapshot(fs: SettingsFs, filePath: string): Promise<Snapshot>
     if (!isRecord(parsed)) {
       throw new Error(`Settings at ${filePath} is not a JSON object; refusing to write`)
     }
-    return { raw, existing: parsed, seen }
+    return { raw, existing: parsed }
   }
 }
 
@@ -242,10 +228,12 @@ async function ensureBackup(fs: SettingsFs, filePath: string): Promise<void> {
  * hívja a transzformációt és nem ír. Inkább ne módosítsunk semmit, mint hogy elveszítsük a
  * felhasználó beállításait.
  *
- * Optimista párhuzamosság: ha a fájl az olvasás és az átnevezés között megváltozott (mtime vagy
- * méret), a tempet eldobjuk, és a teljes kört a friss tartalomra ismételjük, korlátos számban.
- * Zárfájl nem segítene, mert a Claude Code és a szerkesztők nem ismerik. A legutolsó stat és az
- * átnevezés közötti rés megmarad: ezt csak egy közös zár zárhatná be.
+ * Optimista párhuzamosság: ha a fájl tartalma az olvasás és az átnevezés között megváltozott, a
+ * tempet eldobjuk, és a teljes kört a friss tartalomra ismételjük, korlátos számban. A tartalmat
+ * vetjük össze, nem az mtime-ot és a méretet: egy ugyanakkora fájlt hagyó írás egy mtime-egységen
+ * belül azokon nem látszik. Zárfájl nem segítene, mert a Claude Code és a szerkesztők nem
+ * ismerik. Az utolsó összevetés és az átnevezés közötti rés megmarad: ezt csak egy közös zár
+ * zárhatná be.
  */
 async function writeTransformed(
   filePath: string,
@@ -261,7 +249,7 @@ async function writeTransformed(
     if (snapshot.raw !== undefined && options.backup !== false) await ensureBackup(fs, filePath)
     const written = await writeFileAtomic(filePath, data, {
       fs,
-      beforeRename: async () => sameFingerprint(snapshot.seen, await fingerprint(fs, filePath)),
+      beforeRename: async () => (await readRaw(fs, filePath)) === snapshot.raw,
     })
     if (written) return
   }
