@@ -1,86 +1,120 @@
 # ClaudeSwitcher
 
-Windowsos tálcaalkalmazás a párhuzamosan futó Claude Code sessionökhöz (főleg a VS Code bővítményben). Egy gyorsbillentyűre előjön egy lista: melyik session dolgozik, melyik vár, melyik tétlen. Egy gombbal a session VS Code ablakára és Claude-tabjára ugrik, és a függő engedélykéréseket az appból is el lehet dönteni: engedélyezés, tiltás indoklással, projekt- vagy gépszintű szabály, kérdés megválaszolása, terv elutasítása. A natív prompt közben a VS Code-ban is megmarad, az első döntés nyer.
+A Windows tray app that shows every running Claude Code session in one list and lets you answer their permission prompts without hunting for the right window.
 
-A részletes terv és a mért Claude Code viselkedés: [`docs/superpowers/specs/2026-09-04-claudeswitcher-design.md`](docs/superpowers/specs/2026-09-04-claudeswitcher-design.md).
+## Why
 
-## Követelmények
+If you run many Claude Code sessions at once, most of the time goes into window hunting: which one is waiting for approval, which one is still working, which one finished ten minutes ago. A session that waits for a "yes" just sits there until you happen to look at its window. If you are doing something else meanwhile, watching a film for example, you either keep switching windows or you miss it.
 
-- Windows 11 (az ablakfókusz Win32 hívásokat használ, a többi platform nem cél).
-- Node.js 24 vagy újabb (`package.json` `engines`). Ugyanez a főverzió fut az Electron 45-ben is.
-- pnpm a corepackon át: a pontos verziót a `package.json` `packageManager` mezője rögzíti. Egyszer: `corepack enable`.
-- VS Code a Claude Code bővítménnyel.
+ClaudeSwitcher keeps an eye on the sessions for you. The tray icon changes when a session waits for you, a hotkey brings up a compact list of all sessions, and a pending permission request can be decided right in that list. One key jumps to the session's VS Code window, and to its Claude Code tab.
 
-## Telepítés és ellenőrzés
+<!-- TODO(screenshot): overlay with a pending permission decision -->
+*Screenshot of the overlay: coming soon.*
 
-```sh
-pnpm install
-```
+## What it does
 
-A `prepare` szkript a `simple-git-hooks`-szal két hookot telepít:
-- **pre-commit:** `pnpm verify:commit`, gyors. A típusellenőrzés és a lint csak a változás által érintett csomagokra fut (`nx affected --uncommitted`), utána a `knip`.
-- **pre-push:** a teljes `pnpm verify`. Amíg a repónak nincs remote-ja, ez nem fut le, ezért a teljes ellenőrzés a merge előtt kézzel kötelező (`CLAUDE.md`).
+- **One list of all sessions**, each with its state: waiting for you, working, just finished, idle.
+- **Permission decisions from the list.** Allow or deny a tool call (with an optional reason for the session), allow it with a project-level or machine-level rule, let file edits through for the rest of the session, answer a question Claude asks, or reject a plan with feedback.
+- **The native prompt stays.** The prompt in VS Code (and on your phone, with Remote Control) stays open the whole time. Whichever answer comes first wins; the app is a second place to decide, not a replacement.
+- **Jump to the session.** Brings the session's VS Code window to the front, and then its exact Claude Code tab.
 
-Az Electron binárisa nem jön le a `pnpm install`-lal: a 42-es főverzió óta az `electron` csomag telepítéskor nem tölti le (Electron breaking changes, 42.0), és az electron-vite 6.0.0 a hiányzó binárist nem tölti le magától, hanem „Electron uninstall” hibával megáll. Ezért a desktop `predev` és `prestart` szkriptje az indítás előtt lefuttatja az `install-electron`-t. Ha a bináris már a helyén van, nem tölt le semmit. A buildhez és a `pnpm verify`-hoz nem kell.
+It never starts, stops or prompts a session, and it writes no permission rules itself: when you allow with a rule, Claude Code writes the rule.
 
-```sh
-pnpm verify
-```
+## Requirements
 
-Ez minden csomagra lefuttatja a típusellenőrzést, a lintet, a teszteket és a buildet (Nx), utána a gyökér config fájlok ellenőrzését és a `knip`-et. A Windows-only élő tesztek más platformon, illetve futó VS Code nélkül láthatóan kihagyódnak.
+- **Windows.** Window focusing uses Win32 calls; no other platform is supported.
+- **Claude Code in the VS Code extension.** That is what the app is built for and tested with. Sessions started another way (for example `claude` in a terminal) are not filtered out, and their hooks do reach the app, but the app is not tested with them, and the jump can only bring up a VS Code window that has the session's folder open, never a terminal window.
+- **The GUI is in Hungarian.** The labels below are quoted as the app shows them, with an English gloss.
 
-## Az app futtatása
+## Install
 
-```sh
-pnpm --filter @claudeswitcher/desktop build
-pnpm --filter @claudeswitcher/desktop start
-```
+There are no prebuilt releases yet, so you build the installer from source. Node.js and pnpm are needed only for building it: the installed app brings its own runtime. If someone gives you an installer they built, skip to step 4.
 
-A `start` az `electron-vite preview`, a lefordított appot indítja. Fejlesztéshez, a renderer élő újratöltésével:
+1. Install [Node.js](https://nodejs.org/) 24 or newer (`engines` in `package.json`).
+2. Enable pnpm through Corepack, which ships with Node.js 24. The repo pins the exact pnpm version (`packageManager` in `package.json`), and Corepack uses that one:
+   ```sh
+   corepack enable
+   ```
+3. Clone the repository and build the installer:
+   ```sh
+   git clone <repository URL> ClaudeSwitcher
+   cd ClaudeSwitcher
+   pnpm install
+   pnpm build
+   pnpm --filter @claudeswitcher/desktop dist
+   ```
+   `pnpm build` builds the shared packages the app bundles; `dist` then builds the app and the installer.
+4. Run `apps/desktop/release/ClaudeSwitcher Setup <version>.exe` (the version comes from `apps/desktop/package.json`).
 
-```sh
-pnpm --filter @claudeswitcher/desktop dev
-```
+The installer is not signed. An installer you built yourself carries no download mark, so Windows does not warn about it. A downloaded copy triggers SmartScreen's "Windows protected your PC": click "More info", then "Run anyway".
 
-Egyszerre egy ClaudeSwitcher fut, akár telepített, akár a repóból indított. Ha ugyanaz a build indul újra, az új példány csendben kilép. Ha egy másik build fut (például a telepített app, és a repóból indul a `start`), az új példány megkérdezi, bezárja-e a futót és induljon-e helyette. Igen válasznál a futó app a rendes kilépési útján áll le, a függő engedélykéréseket elengedi. A daemon a `127.0.0.1:47821` porton figyel (`apps/desktop/src/main/daemon-port.ts` `DAEMON_PORT`). Az alapértelmezett gyorsbillentyű a `Shift+Alt+Space`.
+The installer installs for the current user only, without administrator rights, under `%LOCALAPPDATA%\Programs\ClaudeSwitcher`. It asks whether you want a Start menu shortcut (on by default) and a desktop shortcut (off by default), and remembers the answer for the next install. If ClaudeSwitcher is running, the installer asks it to quit through its normal exit path; it never kills it.
 
-## A telepítő
+## First start
 
-A Windows telepítő elkészítése:
+On the first start the **"Első beállítás"** (first setup) window opens. It shows the settings you have not confirmed yet; **"Mentés"** (save) confirms everything the window shows.
 
-```sh
-pnpm --filter @claudeswitcher/desktop dist
-```
+The window's **"Claude Code integráció"** (Claude Code integration) section is what connects the app to Claude Code. Click **"Telepítés"** (install). This changes your Claude Code user settings, `~/.claude/settings.json` (or `settings.json` under `CLAUDE_CONFIG_DIR`, if you set that variable):
 
-Az eredmény az `apps/desktop/release/ClaudeSwitcher Setup <verzió>.exe` (a verzió a desktop `package.json`-jából jön). A telepítő NSIS alapú, a beállítása az `apps/desktop/electron-builder.yml`, a saját oldala és lépései az `apps/desktop/resources/installer.nsh`.
+- it adds one HTTP hook for each Claude Code event the app listens to. Each hook posts to the app on `http://127.0.0.1:47821/hooks/...` with an `Authorization: Bearer $CLAUDESWITCHER_TOKEN` header;
+- it sets `env.CLAUDESWITCHER_TOKEN`, the app's own token.
 
-**Telepítés:** felhasználónként, rendszergazdai jog nélkül, a `%LOCALAPPDATA%\Programs\ClaudeSwitcher` alá. A telepítő nincs aláírva, ezért a SmartScreen az első futtatáskor figyelmeztet: „További információ” (More info), aztán „Futtatás mindenképp” (Run anyway). A telepítő egy oldalon megkérdezi, legyen-e Start menü parancsikon (alapból igen) és asztali parancsikon (alapból nem). A választást megjegyzi (`HKCU\Software\ClaudeSwitcher\Installer`), és egy későbbi telepítés vagy frissítés ezzel kezdi. Csendes telepítésnél (`/S`) egy megjegyzett Start menü vagy asztali parancsikont, amelynek a fájlját közben kézzel törölted, a telepítő nem hozza létre újra, és kikapcsoltnak jegyzi meg; a párbeszédes oldal a megjegyzett választást változatlanul mutatja. Ha közben fut egy telepített ClaudeSwitcher, a telepítő a rendes kilépési útján bezárja (`--quit`), soha nem lövi le. Ha ez nem sikerül, megkéri, hogy zárd be a tálcáról. A végén elindíthatod az új verziót.
+It leaves your other hooks and settings alone. Before the first write that changes an existing file it saves a copy next to it, `settings.json.claudeswitcher-backup` (an existing copy is never overwritten). If the file cannot be read or parsed, it writes nothing.
 
-**Eltávolítás** (Gépház, Alkalmazások): leveszi a programfájlokat, a parancsikonokat és a megjegyzett választást, és az app maga (`--uninstall`) kikapcsolja az automatikus indítást és kiveszi a Claude Code integrációt a `settings.json`-ból. Ha az integrációt nem tudja kivenni, szól, és folytatja. A `userData` könyvtárat (config és token) megtartja, kivéve ha az eltávolítót kézzel a `--delete-app-data` kapcsolóval indítják. Egy frissítés (új telepítés a régi fölé) a régi verzió eltávolítóját futtatja, de az integrációhoz, az automatikus indításhoz és a parancsikonokhoz nem nyúl.
+Claude Code sessions started after the install report to the app; sessions already running may need a restart. If the app is not running, Claude Code behaves exactly as without the hooks.
 
-**Közös `userData`:** a telepített app és a repóból indított buildek ugyanazt a könyvtárat használják, `%APPDATA%\@claudeswitcher\desktop` (`apps/desktop/src/main/user-data.ts` `userDataDir`). Ezért a token és vele a már telepített Claude Code hookok, valamint a beállítások túlélik a telepítést, a frissítést és a buildek közti váltást.
+To undo it, open the same window and click **"Eltávolítás"** (remove). It removes only the app's own entries.
 
-## A Claude Code integráció
+## Using it
 
-Az integrációt a beállítások ablakban lehet kezelni (tálcamenü, „Beállítások…”, „Claude Code integráció” rész). A **„Telepítés”** gomb a `~/.claude/settings.json`-ba ír (vagy a `CLAUDE_CONFIG_DIR` alá, ha be van állítva):
-- egy HTTP hookot minden eseményre, amit az app figyel. A lista egy helyen él: `packages/core/src/hook-contract.ts` `HOOK_CONTRACT`. Mindegyik a `http://127.0.0.1:47821/hooks/...` címre megy, `Authorization: Bearer $CLAUDESWITCHER_TOKEN` fejléccel;
-- az `env.CLAUDESWITCHER_TOKEN` értéket, a daemon tokenjét.
+### The tray
 
-Az idegen hookokhoz és beállításokhoz nem nyúl. Az első olyan írás előtt, ami egy meglévő fájlt megváltoztat, egyszer biztonsági másolatot készít: `settings.json.claudeswitcher-backup` (egy meglévő másolatot soha nem ír felül). Ha a fájl nem olvasható vagy nem értelmezhető, nem ír semmit.
+The tray icon changes when a session waits for you, and its tooltip says how many. Clicking the icon opens the list. The right-click menu:
 
-Az **„Eltávolítás”** gomb csak a saját bejegyzéseket veszi ki, egy korábbi verzió kivezetett bejegyzéseivel együtt (`SessionStart` hook, a régi statusLine, `env.CLAUDESWITCHER_PORT`).
+- **"Megnyitás"** (open): opens the list.
+- **"Gyorsbillentyű: Shift+Alt+Space"** (hotkey): the hotkey in effect, or what is wrong with it if it could not be registered.
+- **"Beállítások…"** (settings): the settings window, with the integration section.
+- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab). All three are on by default.
+- **"Kilépés"** (quit).
 
-Az ablak a gombokat az állapothoz igazítja: nincs telepítve, csak „Telepítés”; telepítve, csak „Eltávolítás”; elavult vagy nem olvasható `settings.json`, mindkettő. Ha a telepített hookok elavultak (egy újabb verzió új hookot vár), a tálcamenü ezt egy sorral jelzi („Integráció elavult, telepítsd újra”), és a sorra kattintva megnyílik a beállítások ablak. A tálcamenüben nincs külön telepítő vagy eltávolító pont.
+If the installed integration is out of date, a line **"Integráció elavult, telepítsd újra"** (integration out of date, install again) appears in the menu, with the reason in brackets: **"hiányzó hook"** (a newer version expects a hook the old install lacks) or **"rossz token"** (the token in `settings.json` is not the app's, for example in a `settings.json` brought from another machine; every hook would then be rejected). Clicking the line opens the settings window, where **"Telepítés"** fixes it.
 
-## Hol mi van
+### The list
 
-- **Config és token:** az Electron `userData` könyvtárában (`app.getPath('userData')`): `config.json` (gyorsbillentyű, tálcapipák, a felhasználó által megerősített beállítások) és `daemon-token`. A tálcapipák azonnal hatnak, és a módosított beállítást megerősítettnek jegyzik. Az automatikus indítást a Windows bejelentkezési eleme tárolja, és csak a telepített app állíthatja.
-- **`CLAUDESWITCHER_HOOK_LOG=<fájl>`:** ha be van állítva az app indításakor, a daemon minden beérkező hook nyers törzsét egy JSON-sorként hozzáfűzi ehhez a fájlhoz. Diagnosztika, alapból ki van kapcsolva.
-- **`CS_PROBE_MEASURE=1`:** bekapcsolja a kézi processz-probe mérést (`apps/desktop/src/main/process-probe.measure.test.ts`), ami nélküle kihagyódik. Futtatás Git Bash-ből: `CS_PROBE_MEASURE=1 pnpm --filter @claudeswitcher/desktop test process-probe.measure`.
+The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"Gyorsbillentyű"**). The list appears on the display where the mouse is and hides when it loses focus. Each row starts with a marker:
 
-## Dokumentáció
+| Marker | Meaning |
+|---|---|
+| ● | "Válaszra vár": waiting for you |
+| ◐ | "Dolgozik": working |
+| ✓ | "Épp végzett": just finished |
+| ○ | "Tétlen": idle |
+| ◆ | the app let go of the request; decide it in VS Code |
 
-- Terv és mért tények: [`docs/superpowers/specs/2026-09-04-claudeswitcher-design.md`](docs/superpowers/specs/2026-09-04-claudeswitcher-design.md)
-- A teljes repó-átnézés és az eredménye: [`docs/reviews/2026-10-25-repo-review.md`](docs/reviews/2026-10-25-repo-review.md)
-- Feature backlog, ütemezés és halasztott tételek: [`docs/backlog.md`](docs/backlog.md)
-- Az M2 spike mérései: [`spikes/m2-permission/RESULTS.md`](spikes/m2-permission/RESULTS.md)
+Keys: the arrows move the selection, **Enter** jumps to the selected session (so does a double click), **Esc** hides the list.
+
+### Deciding a request
+
+Selecting a waiting session opens its request. What you can do depends on the request:
+
+- **A tool call** (a command, a web fetch, an MCP tool): **"Engedélyez"** (allow, key A), **"Tilt…"** (deny, key D, with an optional reason sent to the session), **"Projekt-szabály…"** (project rule, key P) and **"Gépszintű szabály…"** (machine-wide rule, key G). The rule buttons show Claude Code's suggested rule, which you can edit before allowing; Claude Code then writes it to the project's `.claude/settings.local.json` or to `~/.claude/settings.json`.
+- **A file edit:** **"Engedélyez"** (A), **"Tilt…"** (D), and **"Erre a sessionre automatikusan"** (S): accept this session's further edits automatically.
+- **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer).
+- **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there.
+
+The letter keys do not fire for a short moment after a panel appears, on key repeat, or within a moment after you typed in a text field.
+
+The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. The prompt in VS Code stays and can still be answered there.
+
+## Uninstall
+
+1. Open the settings window from the tray (**"Beállítások…"**) and click **"Eltávolítás"** in the **"Claude Code integráció"** section. The window shows **"Nincs telepítve"** (not installed) once the hooks are gone from `settings.json`.
+2. Uninstall ClaudeSwitcher in Windows Settings, under Apps.
+
+The uninstaller also removes the integration on its own, and turns off start at login. If it cannot remove the integration, it says so and goes on; then remove the ClaudeSwitcher entries from `settings.json` by hand. It removes the program files, the shortcuts and the remembered shortcut choices.
+
+It keeps the app's data folder, `%APPDATA%\@claudeswitcher\desktop` (the settings, the token and Electron's cache), and the `settings.json.claudeswitcher-backup` copy. Delete them by hand if you want them gone.
+
+## Development
+
+How to run it from the repository, how it is built, and the rules for changes: [`CONTRIBUTING.md`](CONTRIBUTING.md). The design and the measured Claude Code behaviour it relies on: [`docs/superpowers/specs/2026-09-04-claudeswitcher-design.md`](docs/superpowers/specs/2026-09-04-claudeswitcher-design.md).
