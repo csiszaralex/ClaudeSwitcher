@@ -12,6 +12,8 @@
 //   `.each(...)`, `.skip` and similar forms; or
 // - the old value is listed in the `--allow` file, a JSON array of string values (the cooked value,
 //   not the source text). It is meant for the non-GUI log and error texts a translation changes.
+//   A template literal with substitutions is compared part by part: list each changed text part
+//   (head, middle or tail) on its own.
 // Any other difference fails: a different token, a different token count, an added, deleted or
 // renamed file (renames are not followed). Untracked files are not part of a git diff and are not
 // checked. Exit code: 0 when every difference is allowed, 1 on a difference, 2 on a usage error.
@@ -142,7 +144,7 @@ function isTestTitle(node) {
 
 /**
  * @param {ts.Node} node
- * @returns {boolean}
+ * @returns {node is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral | ts.TemplateLiteralToken}
  */
 function isStringLike(node) {
   return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateLiteralToken(node)
@@ -157,9 +159,7 @@ function isStringLike(node) {
 function isAllowedChange(before, after, allowed) {
   if (before.node.kind !== after.node.kind || !isStringLike(before.node)) return false
   if (isTestTitle(before.node) && isTestTitle(after.node)) return true
-  return ts.isStringLiteral(before.node) || ts.isNoSubstitutionTemplateLiteral(before.node)
-    ? allowed.has(before.node.text)
-    : false
+  return allowed.has(before.node.text)
 }
 
 /**
@@ -184,9 +184,7 @@ function compareFile(path, before, after, allowed, used) {
     }
     if (oldToken.text === newToken.text) continue
     if (isAllowedChange(oldToken, newToken, allowed)) {
-      if (ts.isStringLiteral(oldToken.node) || ts.isNoSubstitutionTemplateLiteral(oldToken.node)) {
-        used.add(oldToken.node.text)
-      }
+      if (isStringLike(oldToken.node)) used.add(oldToken.node.text)
       continue
     }
     return (
