@@ -15,6 +15,9 @@ extraResources:
     to: icons
     filter:
       - tray*.png
+# No publish target yet. Without this line a set `GITHUB_TOKEN` makes electron-builder assume the
+# GitHub provider, and the build fails writing the update info because the repository is unknown.
+publish: null
 # Reuse the binary `install-electron` already fetched instead of downloading it again.
 electronDist: node_modules/electron/dist
 win:
