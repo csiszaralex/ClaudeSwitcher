@@ -2,18 +2,18 @@ packages:
   - "packages/*"
   - "apps/*"
 allowBuilds:
-  # Nincs install szkriptje (Electron 42 óta), a pnpm mégis kéri a kulcsot: nélküle
-  # `ERR_PNPM_IGNORED_BUILDS: electron@45.1.0` (mérve a 7/1. hullámban). A binárist az
-  # `install-electron` tölti le (README).
+  # It has no install script (since Electron 42), yet pnpm asks for the key: without it
+  # `ERR_PNPM_IGNORED_BUILDS: electron@45.1.0` (measured). `install-electron` downloads the
+  # binary (README).
   electron: true
-  # `postinstall: node install.js`: ellenőrzi (hiány esetén letölti) a platform bináris csomagját.
+  # `postinstall: node install.js`: checks the platform binary package (and downloads it if missing).
   esbuild: true
-  # `install: node ./cnoke.cjs ... --prebuild`: a natív addont készíti elő.
+  # `install: node ./cnoke.cjs ... --prebuild`: prepares the native addon.
   koffi: true
-  # `postinstall`: az nx saját telepítés utáni lépése (`dist/bin/post-install`).
+  # `postinstall`: nx's own post-install step (`dist/bin/post-install`).
   nx: true
   # electron-builder dependency (through electron-builder-squirrel-windows). Its `install` script
   # (`select-7z-arch.js`) only serves the Squirrel.Windows target; we build NSIS, so it does not run.
   electron-winstaller: false
-  # A hookot a gyökér `prepare` szkriptje telepíti; a csomag saját postinstallja ugyanezt tenné még egyszer.
+  # The root `prepare` script installs the hooks; the package's own postinstall would do the same again.
   simple-git-hooks: false

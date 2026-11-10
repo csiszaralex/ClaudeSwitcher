@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Parancs-típusú hook: a stdin-en kapott payloadot hozzáfűzi a spike naplóhoz, és SEMMIT nem
-// ír ki — így soha nem hoz döntést, a 0-s kilépés a normál folyamatot engedi tovább.
+// Command hook: appends the payload it gets on stdin to the spike log and prints NOTHING, so it
+// never makes a decision; exit code 0 lets the normal flow continue.
 //
-// Azért van a HTTP hook mellett, hogy két hibát szét lehessen választani: ha a HTTP hook nem
-// jelez, de ez igen, akkor az esemény lefut, csak a `type: "http"` nem támogatott rá.
+// It sits next to the HTTP hook to tell two failures apart: if the HTTP hook stays silent but this
+// one fires, the event does run, only `type: "http"` is not supported for it.
 import { appendFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -27,7 +27,7 @@ process.stdin.on('end', () => {
       'utf8',
     )
   } catch {
-    // A napló hibája nem akaszthatja meg a sessiont.
+    // A log failure must not block the session.
   }
   process.exit(0)
 })

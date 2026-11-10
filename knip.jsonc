@@ -1,17 +1,17 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
-  // A spike eldobható kísérlet, a .superpowers munkajegyzet: egyik sem termékkód.
+  // The spike is a throwaway experiment and .superpowers holds working notes: neither is product code.
   "ignore": ["spikes/**", ".superpowers/**"],
-  // A csomagjaink csak egymásnak exportálnak, kívülről senki nem importálja őket: a belépési pont
-  // fel nem használt exportja is halott kód.
+  // Our packages export only to each other, nothing outside imports them: an unused export of an
+  // entry point is dead code too.
   "includeEntryExports": true,
-  // A core két belépési pontját (a fő és az IO-mentes `/browser`) a package.json `exports`-ából,
-  // a daemonét a `main`-ből, az electron-vite main és preload belépési pontját és a vitest
-  // konfigokat a knip saját pluginjai ismerik fel; ami ide kerül, azt nem találják meg.
+  // knip finds the core's two entry points (the main one and the IO-free `/browser`) and the
+  // daemon's in their package.json (`exports`, `main`), and its own plugins find the electron-vite
+  // main and preload entry points and the vitest configs; what is listed here, they do not find.
   "workspaces": {
     "apps/desktop": {
-      // A renderer belépési pontja a HTML, és a `window-api.ts` importálatlan globális
-      // típusdeklaráció, amit a tsconfig `include`-ja hoz be.
+      // The renderer's entry point is the HTML, and `window-api.ts` is a global type declaration
+      // that nothing imports: the tsconfig `include` brings it in.
       // The setup window is a second page with its own global declaration, the same way. Its script
       // and its preload are listed too: knip did not follow `setup.html` to `setup-main.tsx` or find the
       // second preload entry by itself (measured: both reported as unused files).

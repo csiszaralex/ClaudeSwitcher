@@ -1,19 +1,19 @@
-// M2 spike, 2. kör — a `custom` mód válasza. Kérésenként frissen töltődik be.
+// Permission spike, round two: the response of the `custom` mode. Loaded fresh for every request.
 //
-// K1  AskUserQuestion  → allow + updatedInput.answers (az Agent SDK formátuma: kulcs a kérdés
-//                         szövege, érték az opció label-je). Mindig az ELSŐ opciót választja.
-// K2/K3 ExitPlanMode   → az ELSŐ tervet elutasítja visszajelzéssel (K3), a MÁSODIKAT
-//                         jóváhagyja (K2). Számláló a plan-count.txt-ben.
-// K4  Bash             → allow + egy ÁTÍRT szabály (nem a Claude Code javaslata), projekt-szinten.
-// K5  Bash, gépszint   → csak ha USER_LEVEL = true. A globális ~/.claude/settings.json-be ír!
+// K1  AskUserQuestion  → allow + updatedInput.answers (the Agent SDK format: the key is the question
+//                         text, the value the option's label). Always picks the FIRST option.
+// K2/K3 ExitPlanMode   → denies the FIRST plan with feedback (K3), approves the SECOND (K2).
+//                         The counter is in plan-count.txt.
+// K4  Bash             → allow + a REWRITTEN rule (not Claude Code's suggestion), at project level.
+// K5  Bash, user level → only when USER_LEVEL = true. Writes to the global ~/.claude/settings.json!
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 const USER_LEVEL = false
 
-// Terv-jóváhagyás kerülőútjai (K2b/K2c). Az első körben a sima `allow`-t a Claude Code
-// figyelmen kívül hagyta, és a jóváhagyó ablak megmaradt.
-//   'setMode' — PermissionRequest: allow + setMode default a sessionre
-//   'pretool' — PreToolUse: permissionDecision allow (a jóváhagyó ablak ELŐTT fut)
+// Workarounds for approving a plan (K2b/K2c). In the first round Claude Code ignored a plain
+// `allow`, and the approval dialog stayed.
+//   'setMode': PermissionRequest: allow + setMode default for the session
+//   'pretool': PreToolUse: permissionDecision allow (runs BEFORE the approval dialog)
 const PLAN_STRATEGY = 'pretool'
 
 export function preToolUse(body) {
@@ -56,7 +56,7 @@ export default function respond(body) {
           hookEventName: 'PermissionRequest',
           decision: {
             behavior: 'deny',
-            message: 'A ClaudeSwitcher elutasította a tervet. Visszajelzés: a fájl neve legyen spike-k3.txt, a tartalma pedig "terv-visszajelzés".',
+            message: 'ClaudeSwitcher denied the plan. Feedback: name the file spike-k3.txt, and make its content "terv-visszajelzés".',
           },
         },
       }
@@ -74,8 +74,6 @@ export default function respond(body) {
     })
   }
 
-  // Minden más: nincs döntés, a natív prompt marad.
+  // Anything else: no decision, the native prompt stays.
   return undefined
 }
-
-

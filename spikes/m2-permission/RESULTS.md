@@ -1,99 +1,100 @@
-# M2 spike — eredmények (2026-10-08)
+# Permission spike: results (2026-10-08)
 
-Mérve a felhasználó gépén, VSCode bővítményben futó Claude Code-dal (`entrypoint:
-claude-vscode`), egy eldobható mappában (`P:\08_Apps\cs-spike`) projekt-szintű hookokkal.
-Eszköz: `server.mjs` (nyers napló + vezérelhető PermissionRequest válasz) és `log-hook.mjs`
-(parancs-típusú iker). Minden állítás mögött a `spike-log.jsonl` egy-egy idővonala áll.
+Measured live with Claude Code running in the VS Code extension (`entrypoint:
+claude-vscode`), in a throwaway folder with project-level hooks.
+Tools: `server.mjs` (raw log + a controllable PermissionRequest response) and `log-hook.mjs`
+(its command-hook twin). Every claim rests on a timeline in `spike-log.jsonl`.
 
-## A fő kérdés: megépíthető-e az M2?
+## The main question: can the app decide permission requests?
 
-**Igen, és egyszerűbben, mint a spec tervezte.**
+**Yes, and more simply than the design planned.**
 
-| # | Kérdés | Eredmény |
+| # | Question | Result |
 |---|---|---|
-| 1 | Lefut-e a `PermissionRequest` a bővítményben? | **Igen**, HTTP- és parancs-hookként is: Bash, Write, Edit, WebFetch, MCP tool, ExitPlanMode, AskUserQuestion |
-| 2 | Tartás alatt mi látszik a VSCode-ban? | **A natív prompt azonnal megjelenik**, párhuzamosan a tartással |
-| 3 | Elengedés (üres 200) után? | A prompt **megmarad és válaszolható** — 2,5 perccel az elengedés után is lefutott |
-| 4 | VSCode-ban döntök tartás közben? | **Azonnal érvényes**; az app késői válaszát a Claude Code figyelmen kívül hagyja |
-| 5 | Az app engedélyez, miközben a prompt látszik? | **A prompt eltűnik, a parancs ugyanabban a másodpercben lefut** |
-| 6 | Tiltás az appból | Működik |
-| 7 | Remote Control tartás alatt | **A telefonon is megjelenik, és onnan is el lehet fogadni** |
-| 8 | Subagent azonosítása | `agent_id` és `agent_type` **benne van** a PermissionRequest-ben (a Notification-ben nincs) |
-| 9 | Szabály-javaslat | `permission_suggestions`: a Claude Code maga adja a projekt-szabályt (pl. `Bash(echo x *)`, `WebFetch(domain:…)`) |
-| 10 | Szabály beírása az appból | `updatedPermissions` + `destination: localSettings` → **a Claude Code maga írja** a `.claude/settings.local.json`-be |
+| 1 | Does `PermissionRequest` run in the extension? | **Yes**, both as an HTTP and as a command hook: Bash, Write, Edit, WebFetch, MCP tool, ExitPlanMode, AskUserQuestion |
+| 2 | What shows in VS Code while the response is held? | **The native prompt appears at once**, in parallel with the hold |
+| 3 | After the release (empty 200)? | The prompt **stays and can be answered**: it still ran 2.5 minutes after the release |
+| 4 | I decide in VS Code during the hold? | **Takes effect at once**; Claude Code ignores the app's late response |
+| 5 | The app allows while the prompt is showing? | **The prompt disappears, the command runs in the same second** |
+| 6 | Deny from the app | Works |
+| 7 | Remote Control during the hold | **It appears on the phone too, and can be accepted from there** |
+| 8 | Identifying a subagent | `agent_id` and `agent_type` **are in** the PermissionRequest (not in the Notification) |
+| 9 | Rule suggestion | `permission_suggestions`: Claude Code itself gives the project rule (e.g. `Bash(echo x *)`, `WebFetch(domain:…)`) |
+| 10 | Writing a rule from the app | `updatedPermissions` + `destination: localSettings` → **Claude Code itself writes it** into `.claude/settings.local.json` |
 
-## Ami ezzel a specből fölöslegessé válik
+## What this makes unnecessary in the design
 
-- **Lease-modell** (§5): a natív prompt sosem tűnik el, tehát nincs mit „visszaadni". Az app a
-  hook timeoutjáig tarthat, utána üres 200 — a prompt marad.
-- **Presence policy** (§6): a tartás nem veszi el a promptot sem a VSCode-tól, sem a telefontól.
-- **RuleBuilder** (§7): a Claude Code `permission_suggestions`-ben adja a szabályt.
-- **SettingsWriter az M2-ben** (§7): a Claude Code `updatedPermissions`-re maga írja be.
-  (A gép-szintű `userSettings` célt nem mértük — a globális konfigurációt a spike nem érintette.)
+- **Lease model**: the native prompt never disappears, so there is nothing to "give back". The
+  app can hold until the hook timeout, then send an empty 200: the prompt stays.
+- **Presence policy**: holding takes the prompt away neither from VS Code nor from the phone.
+- **RuleBuilder**: Claude Code gives the rule in `permission_suggestions`.
+- **A SettingsWriter for rules**: Claude Code writes them itself on `updatedPermissions`.
+  (The user-level `userSettings` destination was not measured: the spike did not touch the global
+  configuration.)
 
-## Amire az M2-nek figyelnie kell
+## What the decisions from the app must watch for
 
-1. **A natív döntést a kapcsolatból nem tudjuk meg.** Ha a felhasználó a VSCode-ban vagy a
-   telefonon dönt, a Claude Code **nem bontja** a tartott HTTP kérést. Az app a függő sort a
-   `PostToolUse`-ból veheti le (ugyanazon session + tool + input), elutasításnál pedig a
-   következő `PreToolUse`/`Stop`-ból vagy a timeoutból.
-2. **Az `AskUserQuestion` is PermissionRequest-ként jön.** Az appból „engedélyezni" ezt nem
-   szabad: a kérdés válasz nélkül menne tovább. Átengedendő (üres 200), vagy külön kezelendő.
-3. **Az `ExitPlanMode` is** — a jóváhagyás itt a terv elfogadását jelenti, nem egy parancsét.
-4. **A `Notification` (permission_prompt) csak ~6 mp függés után jön.** A gyorsan
-   megválaszolt kérések az M1 overlayben nem látszanak; az M2-ben a PermissionRequest azonnal
-   jön, tehát ott látszanak.
-5. **A `SessionStart` HTTP-hookként nem érkezik meg, csak parancsként.** Ez az M1 telepítését
-   is érinti: a `SessionStart` HTTP-hookja sosem tüzel.
+1. **The connection does not tell us the native decision.** When the user decides in VS Code or
+   on the phone, Claude Code **does not close** the held HTTP request. The app can remove the
+   pending row on `PostToolUse` (same session + tool + input), and on a denial on the next
+   `PreToolUse`/`Stop` or the timeout.
+2. **`AskUserQuestion` also comes as a PermissionRequest.** The app must not "allow" it: the
+   question would go on without an answer. Pass it through (empty 200), or handle it separately.
+3. **So does `ExitPlanMode`**: approving here means accepting the plan, not a command.
+4. **The `Notification` (permission_prompt) comes only after ~6 s of waiting.** Requests answered
+   quickly do not show in the monitoring overlay; the PermissionRequest comes at once, so the
+   decision panel does show them.
+5. **`SessionStart` does not arrive as an HTTP hook, only as a command.** This affects the
+   monitor's installation too: the HTTP hook of `SessionStart` never fires.
 
-## Második kör — a felhasználó döntései alapján
+## Round two: after the decisions on the first round
 
-A felhasználó azt választotta, hogy kérdésre és tervre **az appból is lehessen válaszolni**, és
-legyen **gépszintű engedélyezés szerkeszthető előnézettel**. Ehhez mérve (`custom` mód, a válasz
-a spike mappa `respond.mjs`-éből):
+After the first round it was decided that questions and plans **can be answered from the app
+too**, and that there should be **user-level allowing with an editable preview**. Measured for
+this (`custom` mode, the response from `respond.mjs` in the spike folder):
 
-| # | Mérés | Eredmény |
+| # | Measurement | Result |
 |---|---|---|
-| K1 | AskUserQuestion megválaszolása: `allow` + `updatedInput.answers` (kulcs a kérdés szövege, érték az opció label-je — az Agent SDK formátuma) | ✅ **Működik.** Ugyanabban a másodpercben ment tovább, kattintás nélkül, a választott opcióval |
-| K3 | Terv elutasítása: `deny` + `message` | ✅ **Működik.** Claude a visszajelzés szerint átírta a tervet |
-| K2 | Terv jóváhagyása: `allow` | ❌ A jóváhagyó ablak 6 mp múlva mégis megjelent |
-| K2b | Terv jóváhagyása: `allow` + `setMode default` | ❌ Ugyanígy |
-| K2c | Terv jóváhagyása a `PreToolUse`-ból (`permissionDecision: allow`) | ❌ A PermissionRequest ettől még lefutott, az ablak megjelent |
-| K4 | `updatedPermissions` egy **általunk kitalált** szabállyal (nem a javaslatból) | ✅ **Beírta** a `localSettings`-be, változtatás nélkül |
-| K5 | Ugyanez `destination: userSettings`-szel | ✅ **A globális `~/.claude/settings.json`-be írta.** Utána csak ezt az egy szabályt eltávolítottuk; a fájl bitre azonos lett a mérés előtti mentéssel |
+| K1 | Answering AskUserQuestion: `allow` + `updatedInput.answers` (the key is the question text, the value the option's label: the Agent SDK format) | ✅ **Works.** It went on in the same second, without a click, with the chosen option |
+| K3 | Denying a plan: `deny` + `message` | ✅ **Works.** Claude rewrote the plan according to the feedback |
+| K2 | Approving a plan: `allow` | ❌ The approval dialog still appeared 6 s later |
+| K2b | Approving a plan: `allow` + `setMode default` | ❌ The same |
+| K2c | Approving a plan from `PreToolUse` (`permissionDecision: allow`) | ❌ The PermissionRequest still ran, the dialog appeared |
+| K4 | `updatedPermissions` with a rule **we made up** (not from the suggestion) | ✅ **Written** into `localSettings`, unchanged |
+| K5 | The same with `destination: userSettings` | ✅ **Written into the global `~/.claude/settings.json`.** Afterwards only this one rule was removed; the file was bit-identical to the backup taken before the measurement |
 
-**Következmény az M2-re:**
-- Kérdésre válasz az appból: **megvalósítható**.
-- Terv: **elutasítás visszajelzéssel az appból megvalósítható; jóváhagyás nem.** Három független
-  próba bukott, egybevágóan egy bejelentett Claude Code-hibával (a hookból adott `allow` a
-  tervnél figyelmen kívül marad). Az app a jóváhagyáshoz a VSCode-ba visz (vagy telefonon).
-  Ha a Claude Code javítja, az app oldalán egy válasz-ágat kell bekapcsolni.
-- Projekt- és gépszintű szabály, **szerkeszthető előnézettel: megvalósítható.** A Claude Code
-  bármilyen általunk adott szabályt elfogad és maga ír be; saját beállításfájl-író nem kell.
-- Mérési csapda, amit érdemes megjegyezni: `acceptEdits` módban a `> fájl` átirányítás
-  fájlírásnak számít, és **engedélykérés nélkül** fut — a K4 első próbája ezért nem mért
-  semmit. A második próba egy nem fájlíró paranccsal (`node -e`) futott.
+**Consequences for the decisions from the app:**
+- Answering a question from the app: **feasible**.
+- Plan: **denying with feedback from the app is feasible; approving is not.** Three independent
+  attempts failed, consistent with a reported Claude Code bug (an `allow` given from the hook is
+  ignored for a plan). For approval the app takes the user to VS Code (or the phone).
+  If Claude Code fixes it, a response branch has to be switched on in the app.
+- Project- and user-level rules, **with an editable preview: feasible.** Claude Code accepts any
+  rule we give and writes it itself; no settings-file writer of our own is needed.
+- A measurement trap worth remembering: in `acceptEdits` mode a `> file` redirection counts as a
+  file write and runs **without a permission request**, so the first attempt of K4 measured
+  nothing. The second attempt used a command that writes no file (`node -e`).
 
-## Harmadik kör — a spec nyitott pontjai (2026-10-08)
+## Round three: the design's open points (2026-10-08)
 
-| # | Mérés | Eredmény |
+| # | Measurement | Result |
 |---|---|---|
-| R1a | Többválasztós válasz **tömbként** (`["Alma","Banán"]`) | Tartalmilag ✅ — a session helyesen értette. A felület viszont nem a két opciót pipálta be, hanem „Other: Alma,Banán"-ként mutatta. Az Agent SDK dokumentációja a `", "`-vel összefűzött szöveget is említi; az M2 azt használja, és az elfogadási teszten ellenőrizzük |
-| R1b | Szabad szöveg, ami nem opció | ✅ „Other: …" alatt jelenik meg, a session helyesen értette |
-| R2 | Kérdés megválaszolása a gépen, majd a telefonon (Remote Control) | ✅ Mindkét esetben `PostToolUse` jött `tool_response.answers`-szel és `tool_use_id`-vel → a daemon le tudja zárni a sort |
-| R3 | A hook-szerver leáll a tartás közben | ✅ **A prompt marad, „Yes"-re lefut.** Nincs `PostToolUseFailure` |
-| R4 | A hook-szerver egyáltalán nem fut | ✅ **Pontosan úgy működik, mint hook nélkül** |
+| R1a | Multiple-choice answer **as an array** (`["Alma","Banán"]`) | ✅ in content: the session understood it correctly. The UI, though, did not tick the two options but showed "Other: Alma,Banán". The Agent SDK documentation also mentions text joined with `", "`; the decision panel uses that, to be checked in the acceptance test |
+| R1b | Free text that is not an option | ✅ Shows under "Other: …", the session understood it correctly |
+| R2 | Answering a question on the computer, then on the phone (Remote Control) | ✅ In both cases `PostToolUse` came with `tool_response.answers` and `tool_use_id` → the daemon can close the row |
+| R3 | The hook server stops during the hold | ✅ **The prompt stays and runs on "Yes".** No `PostToolUseFailure` |
+| R4 | The hook server does not run at all | ✅ **Works exactly as without a hook** |
 
-**Következmény:** egy elérhetetlen vagy menet közben leálló hookot a Claude Code „nincs
-döntés"-nek vesz, nem tiltásnak. Az app összeomlása vagy kilépése tehát soha nem tagad meg
-egy parancsot — ezen állt a spec §8 vezérelve.
+**Consequence:** Claude Code treats a hook that is unreachable or stops midway as "no decision",
+not as a denial. So a crash or exit of the app never denies a command: the guiding principle of
+the design's error handling rested on this.
 
-## Nyitva maradt
+## Left open
 
-- **A beírt szabály tényleg megakadályozza-e a következő kérdést?** A beírás biztos. Az
-  ugyanabban a sessionben 3 perccel később futtatott, átirányítást tartalmazó parancs megint
-  kérdezett; az új sessionben végzett próba nem értékelhető (a Claude Code PowerShell-lel
-  futtatta, a `Bash(...)` szabály eleve nem vonatkozott rá). Ugyanez a natív „don't ask again"
-  gombra is igaz — a Claude Code illesztési logikája dönt, nem mi.
-- **600 mp-nél hosszabb hook-timeout** — nem mértük; a lease-modell nélkül nincs rá szükség.
-- **Folder-trust** — nem jött elő.
+- **Does a written rule really prevent the next question?** The writing is certain. A command with
+  a redirection run 3 minutes later in the same session asked again; the attempt in a new session
+  cannot be evaluated (Claude Code ran it with PowerShell, so the `Bash(...)` rule did not apply to
+  it in the first place). The same holds for the native "don't ask again" button: Claude Code's
+  matching logic decides, not us.
+- **A hook timeout longer than 600 s**: not measured; without the lease model it is not needed.
+- **Folder trust**: did not come up.
