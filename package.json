@@ -11,7 +11,8 @@
     "check-types": "nx run-many -t check-types",
     "lint": "nx run-many -t lint",
     "knip": "knip",
-    "verify:root": "tsc -p tsconfig.eslint.json && eslint eslint.config.mjs && knip",
+    "verify:root": "tsc -p tsconfig.eslint.json && eslint eslint.config.mjs scripts && knip",
+    "check:comment-only": "node scripts/check-comment-only-diff.mjs",
     "verify": "nx run-many -t check-types lint test build && pnpm verify:root",
     "prepare": "simple-git-hooks",
     "verify:commit": "nx affected -t check-types lint --uncommitted && knip"

@@ -1,5 +1,6 @@
 {
-  // A gyökér `eslint.config.mjs` típusos lintjéhez és típusellenőrzéséhez (lásd a `verify:root` szkriptet).
+  // Type checking and typed linting of the root scripts: `eslint.config.mjs` and `scripts/` (see the
+  // `verify:root` script).
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "allowJs": true,
@@ -7,5 +8,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["eslint.config.mjs"]
+  "include": ["eslint.config.mjs", "scripts/*.mjs"]
 }
