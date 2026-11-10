@@ -22,7 +22,7 @@ function defaultConfig(): StoredConfig {
   return { values: { ...DEFAULT_VALUES }, confirmed: new Set() }
 }
 
-/** Egy logikai kulcs értéke, vagy az alapértéke, ha hiányzik vagy nem logikai érték. */
+/** The value of a boolean key, or its default if it is missing or not a boolean. */
 function booleanOr(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
@@ -32,14 +32,15 @@ function confirmedKeys(value: unknown): Set<SettingKey> {
   return new Set(Array.isArray(value) ? value.filter(isSettingKey) : [])
 }
 
-/** A config fájl útvonala az Electron `userData` könyvtárában. */
+/** The path of the config file in Electron's `userData` directory. */
 export function configPath(dir: string): string {
   return path.join(dir, 'config.json')
 }
 
 /**
- * A fájl nyers tartalma, vagy `undefined`, ha nincs meg (ENOENT). Minden más olvasási hiba dob:
- * egy foglalt vagy olvashatatlan fájl nem „hiányzik", tehát az alapértékekkel sem írhatjuk felül.
+ * The raw content of the file, or `undefined` if it does not exist (ENOENT). Every other read error
+ * throws: a locked or unreadable file is not "missing", so it must not be overwritten with the
+ * defaults either.
  */
 async function readRaw(file: string): Promise<string | undefined> {
   try {
@@ -50,22 +51,22 @@ async function readRaw(file: string): Promise<string | undefined> {
   }
 }
 
-/** A fájl JSON-objektumként, vagy `undefined`, ha nem az (elrontott kézi szerkesztés). */
+/** The file as a JSON object, or `undefined` if it is not one (a broken manual edit). */
 function parseObject(raw: string): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(raw)
     if (isRecord(parsed)) return parsed
   } catch {
-    // Elrontott fájl: a hívó dönti el, mi legyen. Írni sosem szabad bele.
+    // A broken file: the caller decides what happens. It must never be written to.
   }
   return undefined
 }
 
 /**
- * Olvasás, módosítás, írás a core sorba állított, atomikus JSON-írójával (`transformSettingsFile`):
- * egyedi temp név, átnevezés, fájlonkénti sor, és elutasítás elrontott, üres vagy olvashatatlan
- * fájlnál. A `change` a meglévő objektumot kapja; egy hiányzó fájl üres objektumként érkezik.
- * Biztonsági másolat a saját config fájlunkhoz nem kell.
+ * Read, modify, write with the core's queued, atomic JSON writer (`transformSettingsFile`): a
+ * unique temp name, a rename, a queue per file, and a refusal on a broken, empty or unreadable
+ * file. `change` gets the existing object; a missing file arrives as an empty object. Our own
+ * config file needs no backup.
  */
 async function transformConfig(
   dir: string,
@@ -76,25 +77,25 @@ async function transformConfig(
 }
 
 /**
- * Hiányzó fájlnál az alapértékek. Egy `{}` tartalmú fájl ugyanígy üres objektumként érkezik, és
- * ugyanazt jelenti (minden kulcs az alapértékén), tehát az alapértékekkel feltölteni nem változtat
- * a jelentésén.
+ * The defaults for a missing file. A file containing `{}` arrives as an empty object the same way
+ * and means the same (every key at its default), so filling it with the defaults does not change
+ * its meaning.
  */
 function orDefaults(existing: Record<string, unknown>): Record<string, unknown> {
   return Object.keys(existing).length === 0 ? { ...DEFAULT_VALUES } : existing
 }
 
 /**
- * Beolvassa a beállításokat, és soha nem dob.
+ * Reads the settings, and never throws.
  *
- * Ha a fájl nincs meg, kiírja az alapértékekkel, különben a felhasználó nem tudná, mit és
- * hol szerkeszthet. Ha a fájl elromlott vagy nem olvasható, az alapértékeket adja, de NEM írja
- * felül: a kézi szerkesztés maradjon meg, hogy ki lehessen javítani. Egy írhatatlan könyvtár sem
- * akadályozza meg az indulást.
+ * If the file does not exist, it writes it with the defaults, otherwise the user would not know
+ * what to edit and where. If the file is broken or unreadable, it returns the defaults but does NOT
+ * overwrite it: the manual edit stays, so it can be fixed. An unwritable directory does not stop
+ * the startup either.
  *
- * A kulcsokat egyenként olvassuk: egy hibás gyorsbillentyű nem viszi el a jó auto-hide vagy
- * tab-ugrás értéket, és egy régebbi, egy kulcsot még nem ismerő fájl arra a kulcsra az
- * alapértékkel töltődik be, átírás nélkül.
+ * The keys are read one by one: a bad hotkey does not take the good auto-hide or tab-jump value
+ * with it, and an older file that does not know a key yet loads with the default for that key,
+ * without a rewrite.
  */
 export async function loadConfig(dir: string): Promise<StoredConfig> {
   let raw: string | undefined
@@ -121,7 +122,7 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
 
   const config = defaultConfig()
   try {
-    // Ha a fájl az olvasás óta mégis megjelent, a tartalma marad.
+    // If the file appeared after all since the read, its content stays.
     await transformConfig(dir, orDefaults)
   } catch (error) {
     console.error('[claudeswitcher] could not write the config file; using defaults', error)
@@ -133,11 +134,11 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
  * Persists changed values and, optionally, marks settings as confirmed by the user: the stored
  * list plus `confirm`, deduplicated, in `SETTINGS` order. Never throws; true if it was written.
  *
- * A fájlt frissen olvassuk be, és csak a megadott kulcsokat írjuk át benne: ha a felhasználó
- * indulás óta kézzel átírta a gyorsbillentyűt (az újraindítás után él), vagy saját kulcsot
- * tett bele, az nem veszhet el egy pipa miatt. Elrontott vagy olvashatatlan fájlba nem írunk,
- * ugyanaz a garancia, mint a betöltésnél; a változás ilyenkor csak a futó appban él. A hívások
- * fájlonként sorba állnak, így két egymás után, várakozás nélkül indított módosítás is megmarad.
+ * The file is read fresh and only the given keys are rewritten in it: if the user changed the
+ * hotkey by hand since the startup (it takes effect after a restart), or added a key of their own,
+ * that must not be lost because of a checkbox. A broken or unreadable file is not written to, the
+ * same guarantee as on load; the change then lives only in the running app. The calls queue per
+ * file, so two changes started one after the other without waiting are both kept.
  */
 export async function saveSettings(
   dir: string,

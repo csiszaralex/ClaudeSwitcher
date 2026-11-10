@@ -2,15 +2,15 @@ import { exec, type ExecOptions } from 'node:child_process'
 import { createRequire } from 'node:module'
 import type { PermissionRequestInfo, SessionView } from '@claudeswitcher/core'
 
-// Nem `require`-nek nevezzük: a CJS bundle modulburkolójában a `require` már
-// paraméterként létezik, és egy azonos nevű `const` ütközne vele.
+// Not named `require`: in the module wrapper of the CJS bundle `require` already exists as a
+// parameter, and a `const` of the same name would clash with it.
 const requireNative = createRequire(import.meta.url)
 
 const SW_RESTORE = 9
 const GW_HWNDNEXT = 2
 
 interface User32 {
-  // Az `intptr` visszatérés koffi-ben futásidőben `number` vagy `bigint` lehet.
+  // In koffi an `intptr` return value can be a `number` or a `bigint` at run time.
   GetTopWindow(hWnd: number): number | bigint
   GetWindow(hWnd: number, uCmd: number): number | bigint
   GetWindowThreadProcessId(hWnd: number, pid: [number]): number
@@ -22,17 +22,16 @@ interface User32 {
   ShowWindowAsync(hWnd: number, nCmdShow: number): number
 }
 
-/** `undefined`: még nem próbáltuk. `null`: a betöltés elbukott. */
+/** `undefined`: not tried yet. `null`: loading failed. */
 let user32: User32 | null | undefined
 
 /**
- * Lustán tölti be a user32 kötéseket, és egy hibát elnyel.
+ * Loads the user32 bindings lazily and swallows an error.
  *
- * Szándékosan nem modulszinten: a `focus-window.ts`-t az `index.ts` importálja még az
- * `app.whenReady()` előtt, így egy modulszintű koffi-hiba az indulási hibadialógus
- * bekötése ELŐTT dobna, és az app dialógus nélkül, csendben halna meg. Így egy
- * elérhetetlen natív modul csak a gyors fókuszutat kapcsolja ki; a `code` CLI tartalék
- * tovább működik.
+ * Deliberately not at module level: `index.ts` imports `focus-window.ts` before `app.whenReady()`,
+ * so a module-level koffi error would throw BEFORE the startup error dialog is wired up, and the
+ * app would die silently, without a dialog. This way an unavailable native module only disables the
+ * fast focus path; the `code` CLI fallback keeps working.
  */
 function loadUser32(): User32 | null {
   if (user32 !== undefined) return user32
@@ -45,7 +44,7 @@ function loadUser32(): User32 | null {
       GetWindowThreadProcessId: lib.func(
         'uint32 GetWindowThreadProcessId(intptr hWnd, _Out_ uint32 *pid)',
       ),
-      // A Win32 BOOL egy 4 bájtos int, nem az 1 bájtos C bool.
+      // A Win32 BOOL is a 4-byte int, not the 1-byte C bool.
       IsWindowVisible: lib.func('int IsWindowVisible(intptr hWnd)'),
       GetWindowTextLengthW: lib.func('int GetWindowTextLengthW(intptr hWnd)'),
       GetForegroundWindow: lib.func('intptr GetForegroundWindow()'),
@@ -61,30 +60,29 @@ function loadUser32(): User32 | null {
 }
 
 /**
- * Felső korlát a bejárt ablakok számára. Egy Windows asztalon jellemzően néhány száz
- * top-level ablak van. A korlát azt védi ki, hogy egy váratlan típus (például ha a
- * `koffi` az `intptr`-t BigInt-ként adná vissza, amitől a `hwnd !== 0` sosem lenne
- * hamis) végtelen ciklusba ejtse az Electron főprocesszt, ami az egész appot
- * lefagyasztaná.
+ * Upper bound on the windows walked. A Windows desktop typically has a few hundred top-level
+ * windows. The bound keeps an unexpected type (for example `koffi` returning `intptr` as a BigInt,
+ * so that `hwnd !== 0` would never be false) from sending the Electron main process into an endless
+ * loop, which would freeze the whole app.
  */
 const MAX_WINDOWS_SCANNED = 10_000
 
-/** Az ablakbejáráshoz szükséges user32 részhalmaz, hogy tesztelhető legyen fake-kel. */
+/** The user32 subset the window walk needs, so it can be tested with a fake. */
 export type WindowScanner = Pick<
   User32,
   'GetTopWindow' | 'GetWindow' | 'GetWindowThreadProcessId' | 'IsWindowVisible' | 'GetWindowTextLengthW'
 >
 
 /**
- * A megadott processz látható, címmel rendelkező top-level ablakai, legfeljebb `cap` darab.
+ * The visible, titled top-level windows of the given process, at most `cap` of them.
  *
- * Szándékosan a GetTopWindow + GetWindow láncot járjuk be, nem az EnumWindows-t:
- * az EnumWindows callbacket vár, amit koffi-ban regisztrálni kell, és a
- * regisztrált callback élettartama Electron main processzben könnyen elszáll.
- * A lánc bejárása ugyanazt adja, csak sima skalár hívásokkal.
+ * It deliberately walks the GetTopWindow + GetWindow chain, not EnumWindows: EnumWindows takes a
+ * callback that has to be registered in koffi, and the lifetime of a registered callback easily goes
+ * wrong in the Electron main process. Walking the chain gives the same result with plain scalar
+ * calls.
  *
- * A `cap` miatt nem kell az egész asztalt végigjárni: a hívóknak csak az érdekes, hogy
- * nulla, egy, vagy több mint egy ablak van.
+ * Thanks to `cap` the whole desktop need not be walked: the callers only care whether there are
+ * zero, one or more than one windows.
  */
 export function scanWindowsForPid(api: WindowScanner, targetPid: number, cap = 2): number[] {
   const found: number[] = []
@@ -105,18 +103,17 @@ export function scanWindowsForPid(api: WindowScanner, targetPid: number, cap = 2
 }
 
 /**
- * A megadott processz ablaka, DE csak ha pontosan egy van. Különben 0.
+ * The window of the given process, BUT only if there is exactly one. Otherwise 0.
  *
- * Miért nem elég az első találat? Lemérve ezen a gépen, nem feltételezve: egy VSCode
- * főprocessz az ÖSSZES ablakát birtokolja, és az `~/.claude/ide/*.lock` fájlokban egyetlen
- * pid 8–12 KÜLÖNBÖZŐ workspace mappához tartozik (a 24092-es pid tíz mappához, miközben
- * egyetlen ablaka van). A pid tehát nem azonosít ablakot. Az első Z-sorrendű találat a
- * LEGFELSŐ ablak lenne, nem a sessionhöz tartozó, vagyis az Enter egy másik projekt
- * ablakát hozná elő, és mivel a `SetForegroundWindow` sikeres, a `code` CLI tartalék sem
- * futna le, ami helyesen találná meg.
+ * Why is the first match not enough? Measured live, not assumed: a VSCode main process owns ALL
+ * its windows, and in the `~/.claude/ide/*.lock` files a single pid belongs to 8 to 12 DIFFERENT
+ * workspace folders (one pid to ten folders while it had a single window). So a pid does not
+ * identify a window. The first match in Z order would be the TOPMOST window, not the session's, so
+ * Enter would bring up another project's window, and since `SetForegroundWindow` succeeds, the
+ * `code` CLI fallback, which would find the right one, would not run either.
  *
- * Egyértelműség nélkül ezért inkább nem választunk: a hívó a mappa alapján dolgozó
- * `code` CLI-re esik vissza, ami a VSCode saját ablakfeloldását használja.
+ * Without an unambiguous match it therefore picks none: the caller falls back to the `code` CLI,
+ * which works from the folder and uses VSCode's own window resolution.
  */
 export function findMainWindow(targetPid: number): number {
   const api = loadUser32()
@@ -127,12 +124,11 @@ export function findMainWindow(targetPid: number): number {
 }
 
 /**
- * Ahány látható ablaka a processznek van, kettőnél megállva.
+ * The number of visible windows the process has, stopping at two.
  *
- * Azért van külön a `findMainWindow`-tól, mert a live teszt ezzel tudja igazolni, hogy a
- * `GetWindowThreadProcessId` kimeneti paramétere tényleg ír: a `findMainWindow` egy több
- * ablakot birtokló processznél helyesen 0-t ad, ami ugyanúgy néz ki, mint egy nem működő
- * out-paraméter.
+ * Separate from `findMainWindow` because the live test uses it to prove that the out parameter of
+ * `GetWindowThreadProcessId` really writes: for a process owning several windows `findMainWindow`
+ * correctly returns 0, which looks the same as an out parameter that does not work.
  */
 export function countMainWindows(targetPid: number): number {
   const api = loadUser32()
@@ -141,25 +137,24 @@ export function countMainWindows(targetPid: number): number {
 }
 
 /**
- * Igaz, ha a gyors, pid-alapú fókuszút elérhető, azaz a user32 kötések betöltődtek.
- * Az indulási naplóhoz: a lusta betöltés miatt a `koffi` különben csak az első
- * fókuszkérésnél töltődne be, és addig semmi nem bizonyítaná, hogy az Electron
- * főprocesszben működik.
+ * True if the fast, pid-based focus path is available, that is the user32 bindings loaded. For the
+ * startup log: because of the lazy loading `koffi` would otherwise load only on the first focus
+ * request, and until then nothing would prove that it works in the Electron main process.
  */
 export function isFastFocusAvailable(): boolean {
   return loadUser32() !== null
 }
 
-/** Az aktuálisan előtérben lévő ablak, vagy 0. Csak olvas, semmit nem hoz előre. */
+/** The window currently in the foreground, or 0. Only reads, brings nothing forward. */
 export function foregroundWindow(): number {
   const api = loadUser32()
   return api === null ? 0 : Number(api.GetForegroundWindow())
 }
 
-/** A fókuszáláshoz szükséges user32 részhalmaz, hogy a `bringToFront` tesztelhető legyen fake-kel. */
+/** The user32 subset focusing needs, so `bringToFront` can be tested with a fake. */
 export type FocusApi = Pick<User32, 'IsIconic' | 'ShowWindowAsync' | 'SetForegroundWindow' | 'GetForegroundWindow'>
 
-/** Ennyiszer nézzük meg újra az előtérben lévő ablakot, `FOREGROUND_POLL_INTERVAL_MS` szünetekkel. */
+/** How many times the foreground window is checked again, `FOREGROUND_POLL_INTERVAL_MS` apart. */
 export const FOREGROUND_POLL_ATTEMPTS = 5
 export const FOREGROUND_POLL_INTERVAL_MS = 20
 
@@ -168,18 +163,18 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Előtérbe hozza az ablakot, és igazat ad, ha tényleg az került előtérbe.
+ * Brings the window to the front and returns true if it really is the one in the foreground.
  *
- * - Csak egy minimalizált ablakot állítunk vissza (`IsIconic`). Az `SW_RESTORE` egy maximalizált
- *   ablakot is a normál méretére vinne vissza, így minden ugrás összezsugorítaná a felhasználó
- *   maximalizált VSCode-ját.
- * - `ShowWindowAsync`, nem `ShowWindow`: a `ShowWindow` egy másik processz ablakán szinkron, és
- *   egy lefagyott VSCode-nál a main szálat, vele a daemont és minden session hookját megakasztaná.
- * - A `SetForegroundWindow` visszatérési értéke nem megbízható: a Windows előtérzárolása mellett
- *   „sikert" jelenthet, miközben csak a tálcagombot villogtatja. Ha ezt elhinnénk, a `code` CLI
- *   tartalék sosem futna le. Ezért megnézzük, mi került ténylegesen előtérbe. Mivel a
- *   visszaállítás aszinkron, ezt rövid ideig (legfeljebb kb. 100 ms) többször nézzük, időzítővel,
- *   nem pörgő ciklussal.
+ * - Only a minimised window is restored (`IsIconic`). `SW_RESTORE` would also return a maximised
+ *   window to its normal size, so every jump would shrink the user's maximised VSCode.
+ * - `ShowWindowAsync`, not `ShowWindow`: `ShowWindow` is synchronous on another process's window,
+ *   and with a frozen VSCode it would block the main thread, and with it the daemon and every
+ *   session hook.
+ * - The return value of `SetForegroundWindow` is not reliable: under the Windows foreground lock it
+ *   can report "success" while it only flashes the taskbar button. Believing it would mean the
+ *   `code` CLI fallback never runs. So it checks what actually came to the foreground. Since the
+ *   restore is asynchronous, it checks several times for a short while (at most about 100 ms), with
+ *   a timer, not a busy loop.
  */
 export async function bringToFront(
   api: FocusApi,
@@ -207,21 +202,20 @@ async function focusByPid(pid: number): Promise<boolean> {
 }
 
 /**
- * Karakterek, amiket a cmd.exe idézőjelen belül is értelmez: a `%` környezeti
- * változóként bontódik ki, egy `"` pedig magát az idézést törné meg. Az `&`, `^`,
- * `|`, `<`, `>`, `(`, `)` idézőjelen belül ártalmatlan, ezt a review empirikusan
- * lemérte.
+ * Characters cmd.exe interprets even inside quotes: `%` expands as an environment variable, and a
+ * `"` would break the quoting itself. `&`, `^`, `|`, `<`, `>`, `(`, `)` are harmless inside quotes,
+ * as a review measured empirically.
  */
 const CMD_UNSAFE_IN_QUOTES = /[%"]/
 
 /**
- * Abszolút Windows útvonal eleje: meghajtó (`X:\` vagy `X:/`), vagy UNC megosztás
- * (`\\server\share`). A `\\?\` és a `\\.\` eszköz-névtér nem megosztás, ezt a szerver
- * nevében kizárt `?` és `.` szűri ki.
+ * The start of an absolute Windows path: a drive (`X:\` or `X:/`) or a UNC share
+ * (`\\server\share`). The `\\?\` and `\\.\` device namespaces are not shares; the `?` and `.`
+ * excluded from the server name filter them out.
  */
 const ABSOLUTE_WINDOWS_PATH = /^(?:[A-Za-z]:[\\/]|\\\\[^\\/?.][^\\/]*\\[^\\/]+)/
 
-/** Igaz, ha a szövegben C0 vagy C1 vezérlőkarakter, vagy DEL van. */
+/** True if the text contains a C0 or C1 control character, or DEL. */
 function hasControlCharacter(text: string): boolean {
   for (const char of text) {
     const code = char.charCodeAt(0)
@@ -231,13 +225,13 @@ function hasControlCharacter(text: string): boolean {
 }
 
 /**
- * Igaz, ha a mappa biztonságosan átadható a `code` CLI-nek egy cmd.exe shellen át.
+ * True if the folder can safely be passed to the `code` CLI through a cmd.exe shell.
  *
- * A mappa a registryből vagy egy `ide/*.lock` fájlból jön, ahol csak a típusa ellenőrzött. Egy
- * `-`-vel kezdődő érték idézés után is kapcsolóként jutna a `code`-hoz (pl.
- * `--install-extension=...`), ezért csak abszolút útvonalat engedünk, ami soha nem kezdődik
- * `-`-vel. Vezérlőkarakter (például sortörés) egy valódi mappanévben nem fordul elő, a cmd.exe
- * parancssorában viszont mást jelenthet.
+ * The folder comes from the registry or from an `ide/*.lock` file, where only its type is checked.
+ * A value starting with `-` would reach `code` as an option even after quoting (for example
+ * `--install-extension=...`), so only an absolute path is allowed, which never starts with `-`. A
+ * control character (a line break, for example) never occurs in a real folder name, but can mean
+ * something else on the cmd.exe command line.
  */
 export function isSafeForCli(folder: string): boolean {
   if (folder.startsWith('-')) return false
@@ -247,48 +241,47 @@ export function isSafeForCli(folder: string): boolean {
 }
 
 /**
- * Idézőjelbe tesz egy mappát úgy, hogy a Windows CRT argv-feldolgozója pontosan azt
- * adja vissza.
+ * Quotes a folder so that the Windows CRT argv parser returns exactly that folder.
  *
- * A CRT a záró idézőjel előtti backslashokat escape-ként kezeli: N backslash és egy
- * `"` N/2 backslasht ad, páratlan N esetén pedig a `"`-t is literálisnak veszi. Egy
- * sima idézés mellett így egy `C:\` workspace `C:"`-ként érkezne, egy `\\server\share\`
- * elveszítené a lezárását, és egy `double\\` egy backslasht, vagyis a meghajtó- és
- * megosztásgyökér workspace-ek csendben rossz útvonalat kapnának. Mérve, nem
- * feltételezve: a sima idézés 7 esetből 4-ben rontotta el az útvonalat.
+ * The CRT treats the backslashes before a closing quote as escapes: N backslashes and a `"` give
+ * N/2 backslashes, and with an odd N the `"` is taken literally too. With plain quoting a `C:\`
+ * workspace would therefore arrive as `C:"`, a `\\server\share\` would lose its closing quote, and
+ * a `double\\` would lose a backslash, so drive-root and share-root workspaces would silently get a
+ * wrong path. Measured, not assumed: plain quoting broke the path in 4 cases out of 7.
  *
- * A záró backslash-futam megduplázása ezt kiegyenlíti. Máshol a backslash literális, és
- * `"` a mappában nem fordulhat elő, mert az `isSafeForCli` kizárja.
+ * Doubling the trailing run of backslashes compensates for this. Elsewhere a backslash is literal,
+ * and a `"` cannot occur in the folder because `isSafeForCli` excludes it.
  */
 export function quoteForCli(folder: string): string {
   return `"${folder.replace(/(\\+)$/, '$1$1')}"`
 }
 
 /**
- * A parancs, ami a mappát a VSCode-ban előhozza.
+ * The command that brings the folder up in VSCode.
  *
- * Szándékosan `-r` nélkül. A `-r` a legutóbb aktív ablakba nyitja a mappát: ha a mappa sehol
- * nincs nyitva, lecseréli annak az ablaknak a munkaterületét, és újratölti, a benne futó Claude
- * Code sessionökkel együtt. `-r` nélkül egy már nyitott mappa ablaka így is előjön, egy nem
- * nyitott mappa pedig új ablakot kap, és egyetlen meglévő ablakot sem vesz el.
+ * Deliberately without `-r`. `-r` opens the folder in the most recently active window: if the
+ * folder is open nowhere, it replaces that window's workspace and reloads it, together with the
+ * Claude Code sessions running in it. Without `-r` the window of an already open folder still comes
+ * up, and a folder that is not open gets a new window and takes no existing window away.
  */
 export function codeCliCommand(folder: string): string {
   return `code ${quoteForCli(folder)}`
 }
 
 /**
- * A `code` CLI futtatási beállításai. Timeout nélkül egy beragadt `code.cmd` (frissítés, elakadt
- * egypéldányos kézfogás) a `session:focus` kérést soha nem zárná le, és az overlay fent maradna.
+ * The run options of the `code` CLI. Without a timeout a stuck `code.cmd` (an update, a stalled
+ * single-instance handshake) would never complete the `session:focus` request, and the overlay
+ * would stay up.
  */
 export const CLI_EXEC_OPTIONS = { windowsHide: true, timeout: 10_000 } as const satisfies ExecOptions
 
 function focusByCli(folder: string): Promise<boolean> {
-  // Egy ilyen mappanévnél inkább nem próbálkozunk: a `%` kibontása csendben egy MÁSIK
-  // útvonalat nyitna meg. Egy elmaradt fókusz jobb, mint egy rossz.
+  // With such a folder name it does not even try: expanding `%` would silently open a DIFFERENT
+  // path. A missed focus is better than a wrong one.
   if (!isSafeForCli(folder)) return Promise.resolve(false)
 
-  // A `code` Windowson `code.cmd`, ezért kell a shell. A teljes parancsot egyetlen
-  // stringként adjuk át, az idézést pedig a quoteForCli végzi, egy helyen és tesztelve.
+  // On Windows `code` is `code.cmd`, hence the shell. The whole command is passed as a single
+  // string, and `quoteForCli` does the quoting, in one place and tested.
   return new Promise((resolve) => {
     exec(codeCliCommand(folder), CLI_EXEC_OPTIONS, (error) => {
       resolve(error === null)
@@ -297,36 +290,37 @@ function focusByCli(folder: string): Promise<boolean> {
 }
 
 /**
- * Melyik úton jött elő az ablak. A tab-fókusznak ez kell, nem egy puszta „sikerült":
- * - `pid`: a gyors út, és az előtérbe került ablakot ellenőriztük (`bringToFront`);
- * - `workspace`: a `code` CLI a lock fájl mappáját kapta, az ablakot a VSCode maga oldotta fel;
- * - `cwd`: a `code` CLI a session cwd-jét kapta, mert a mappa ismeretlen. Ha a cwd sehol nincs
- *   nyitva, ez egy VADONATÚJ ablakot nyitott, tehát nem tudjuk, hogy a session ablaka van-e elöl;
- * - `failed`: egyik út sem vezetett eredményre, vagy a CLI-t kihagytuk, mert a session ismerten
- *   nem a VSCode bővítményben fut.
+ * Which path brought the window up. The tab focus needs this, not a bare "it worked":
+ * - `pid`: the fast path, and the window that came to the front was checked (`bringToFront`);
+ * - `workspace`: the `code` CLI got the lock file's folder, and VSCode resolved the window itself;
+ * - `cwd`: the `code` CLI got the session's cwd because the folder is unknown. If the cwd is open
+ *   nowhere, this opened a BRAND NEW window, so it is unknown whether the session's window is in
+ *   front;
+ * - `failed`: neither path succeeded, or the CLI was skipped because the session is known not to
+ *   run in the VSCode extension.
  */
 export type FocusOutcome = 'pid' | 'workspace' | 'cwd' | 'failed'
 
-/** A két fókuszlépés, hogy a `focusWith` sorrendje tesztelhető legyen ablak előhozása nélkül. */
+/** The two focus steps, so the order in `focusWith` can be tested without bringing up a window. */
 export interface FocusSteps {
   byPid(pid: number): Promise<boolean>
   byCli(folder: string): Promise<boolean>
 }
 
-/** A VSCode bővítményben futó session registry-beli `entrypoint` értéke. */
+/** The registry `entrypoint` value of a session running in the VSCode extension. */
 const VSCODE_ENTRYPOINT = 'claude-vscode'
 
 /**
- * A `focusSessionWindow` döntési logikája, befecskendezett lépésekkel.
+ * The decision logic of `focusSessionWindow`, with injected steps.
  *
- * Elsőként a lock fájlból ismert pid alapján, mert az gyors, és az eredményét ellenőrizzük. De
- * csak akkor, ha annak a pidnek pontosan egy ablaka van (lásd `findMainWindow`: egy VSCode
- * főprocessz több ablakot is birtokolhat, és ilyenkor a pid nem azonosít ablakot). Több ablak
- * esetén, és ha a gyors út bármiért nem vezet eredményre, a `code` CLI dönt a mappa alapján.
+ * First by the pid known from the lock file, because that is fast and its result is checked. But
+ * only if that pid has exactly one window (see `findMainWindow`: a VSCode main process can own
+ * several windows, and then the pid does not identify a window). With several windows, and
+ * whenever the fast path fails for any reason, the `code` CLI decides by the folder.
  *
- * A CLI-t kihagyjuk, ha a session `entrypoint`-ja ismert, és nem a VSCode bővítményé: egy
- * terminálos vagy SDK-s sessionnek nincs VSCode ablaka, a `code <mappa>` csak egy új ablakot
- * nyitna neki. Ismeretlen `entrypoint`-nál a CLI tartalék marad.
+ * The CLI is skipped if the session's `entrypoint` is known and is not the VSCode extension's: a
+ * terminal or SDK session has no VSCode window, and `code <folder>` would only open a new window for
+ * it. With an unknown `entrypoint` the CLI fallback stays.
  */
 export async function focusWith(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
   if (view.windowPid !== undefined && (await steps.byPid(view.windowPid))) return 'pid'
@@ -337,42 +331,44 @@ export async function focusWith(view: SessionView, steps: FocusSteps): Promise<F
   return (await steps.byCli(view.cwd)) ? 'cwd' : 'failed'
 }
 
-/** Előtérbe hozza a session VSCode ablakát, és megmondja, melyik úton (lásd `FocusOutcome`). */
+/** Brings the session's VSCode window to the front and says by which path (see `FocusOutcome`). */
 export function focusSessionWindow(view: SessionView): Promise<FocusOutcome> {
   return focusWith(view, { byPid: focusByPid, byCli: focusByCli })
 }
 
 /**
- * Ennyit várunk az ablak előhozása és a tab-fókusz URI között. A URI a legfelső, utoljára
- * aktív VSCode ablakhoz megy (a felhasználó mérése, 2026-10-21): a várakozás alatt a VSCode
- * feldolgozza a fókuszváltást, és a session ablakát jegyzi utoljára aktívnak. Enélkül a URI
- * még az előző ablakhoz érkezhetne, ami egy új tabot nyitna. Rövid, mert a felhasználó vár rá.
+ * The wait between bringing up the window and sending the tab focus URI. The URI goes to the
+ * topmost, most recently active VSCode window (measured live, 2026-10-21): during the wait VSCode
+ * processes the focus change and records the session's window as the last active one. Without it
+ * the URI could still reach the previous window, which would open a new tab. Short, because the
+ * user is waiting for it.
  */
 export const TAB_FOCUS_SETTLE_MS = 200
 
-/** Egy kanonikus UUID (8-4-4-4-12 hexa). A Claude Code session azonosítói ilyenek. */
+/** A canonical UUID (8-4-4-4-12 hex). Claude Code session ids have this form. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
- * A Claude Code bővítmény URI-ja, ami a session meglévő tabját hozza előre, vagy `undefined`,
- * ha nem biztonságos elküldeni. Tiszta függvény: a hívó csak elküldi, amit kap.
+ * The Claude Code extension URI that brings the session's existing tab forward, or `undefined` if
+ * it is not safe to send. A pure function: the caller only sends what it gets.
  *
- * A bővítmény a URI-t a legfelső VSCode ablakban kezeli, és ha abban nincs meg a session, egy
- * ÚJ tabot nyit neki. Ez soha nem történhet meg, ezért csak akkor küldjük, ha MIND igaz:
- * - az ablak előjött, és tudjuk, hogy a session ablaka: a `pid` út ellenőrizte az előtérbe
- *   került ablakot, a `workspace` úton a VSCode a lock fájl mappájából maga oldotta fel. A
- *   `cwd` út nem elég: a `code <cwd>` egy új ablakot nyithatott, és a URI ott a futó session
- *   egy másodpéldányát nyitná meg. `failed` esetén a legfelső ablak bármelyik lehet;
- * - a session ablaka ismert (`windowPid` vagy `workspaceFolder`), a kimenettől függetlenül is,
- *   hogy egy ellentmondó kimenet se nyisson tabot;
- * - a session a VSCode bővítményben fut: egy CLI vagy terminál sessionre a bővítmény egy új
- *   tabot nyitna;
- * - az azonosító UUID: ellenőrizetlen szöveg nem kerül egy `openExternal`-lel megnyitott URL-be;
- * - a beállítás be van kapcsolva;
- * - a sessionnek nincs függő fájlírás-kérése (`edit` fajta, akár tartott, akár visszaengedett).
- *   Ilyenkor a VSCode a javasolt módosítást egy osztott diff tabon mutatja, és a natív kérdés
- *   is nyitva van; a URI a chat tabra váltana el a diffről, amit a felhasználó épp meg akar
- *   nézni (live teszt, 2026-10-22). Ekkor csak az ablak jön elő.
+ * The extension handles the URI in the topmost VSCode window, and if the session is not in it, it
+ * opens a NEW tab for it. That must never happen, so it is sent only if ALL of these hold:
+ * - the window came up and is known to be the session's: the `pid` path checked the window that
+ *   came to the front, and on the `workspace` path VSCode resolved it itself from the lock file's
+ *   folder. The `cwd` path is not enough: `code <cwd>` may have opened a new window, and there the
+ *   URI would open a second copy of the running session. With `failed` the topmost window can be
+ *   any window;
+ * - the session's window is known (`windowPid` or `workspaceFolder`), regardless of the outcome
+ *   too, so that a contradictory outcome cannot open a tab either;
+ * - the session runs in the VSCode extension: for a CLI or terminal session the extension would
+ *   open a new tab;
+ * - the id is a UUID: unchecked text never goes into a URL opened with `openExternal`;
+ * - the setting is on;
+ * - the session has no pending file-write request (the `edit` kind, whether held or released). In
+ *   that case VSCode shows the proposed change in a split diff tab and the native prompt is open
+ *   too; the URI would switch away from the diff, which the user wants to look at, to the chat tab
+ *   (live test, 2026-10-22). Then only the window comes up.
  */
 export function tabFocusUri(
   view: SessionView,

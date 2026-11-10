@@ -28,7 +28,7 @@ describe('imageNameFromExe', () => {
   })
 
   it('leaves names without an .exe extension alone', () => {
-    // A rendszerprocesszeknek (Registry, System, Memory Compression) nincs kiterjesztésük.
+    // The system processes (Registry, System, Memory Compression) have no extension.
     expect(imageNameFromExe('Registry')).toBe('Registry')
     expect(imageNameFromExe('Memory Compression')).toBe('Memory Compression')
     expect(imageNameFromExe('setup.com')).toBe('setup.com')
@@ -111,7 +111,7 @@ describe('native process probe (live)', () => {
   it.skipIf(!onWindows)('reads the creation time of the current process', () => {
     const start = takeNativeSnapshot()?.startFileTime(process.pid)
     expect(start).toMatch(/^\d+$/)
-    // FILETIME: 100 ns egységek 1601-01-01 óta.
+    // FILETIME: 100 ns units since 1601-01-01.
     const startMs = Number(BigInt(start ?? '0') / 10_000n) - 11_644_473_600_000
     const expectedMs = Date.now() - process.uptime() * 1000
     expect(Math.abs(startMs - expectedMs)).toBeLessThan(5000)

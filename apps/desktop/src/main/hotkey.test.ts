@@ -3,7 +3,7 @@ import { DEFAULT_HOTKEY } from '../shared/settings.js'
 import type { HotkeyRegistration } from '../shared/hotkey-status.js'
 import { hotkeyLogText, registerHotkey, registerHotkeyOrDefault, switchHotkey, type RegisterAccelerator } from './hotkey.js'
 
-/** Egy hamis `globalShortcut.register`: a `taken` kombinációkra false, az `invalid`-okra dob. */
+/** A fake `globalShortcut.register`: false for the `taken` combinations, throws for the `invalid` ones. */
 function fakeRegister(options: { taken?: string[]; invalid?: string[] } = {}): {
   register: RegisterAccelerator
   calls: string[]

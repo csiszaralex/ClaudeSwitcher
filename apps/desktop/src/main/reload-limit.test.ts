@@ -19,7 +19,7 @@ describe('createReloadLimiter', () => {
     clock = 20_000
     allow()
     clock = 60_000
-    // A 0-s újratöltés kiesett az ablakból, a 10 s-os és a 20 s-os még benne van.
+    // The reload at 0 has left the window; the ones at 10 s and 20 s are still in it.
     expect(allow()).toBe(true)
     expect(allow()).toBe(false)
   })

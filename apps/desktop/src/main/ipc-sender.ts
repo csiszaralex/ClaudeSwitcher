@@ -28,8 +28,8 @@ function parse(url: string): URL | undefined {
 }
 
 /**
- * A `file://` URL útvonala, `undefined`, ha nem alakítható útvonallá. Egy hosztos file URL
- * Windowson UNC útvonal lesz, ami a saját `index.html`-ünkkel úgysem egyezik.
+ * The path of a `file://` URL, or `undefined` if it cannot be turned into a path. On Windows a file
+ * URL with a host becomes a UNC path, which never matches our own `index.html` anyway.
  */
 function localPath(url: URL): string | undefined {
   try {
@@ -39,7 +39,7 @@ function localPath(url: URL): string | undefined {
   }
 }
 
-/** Windows útvonal összevetéshez: a fájlrendszer kis- és nagybetűre érzéketlen. */
+/** A Windows path for comparison: the file system is case-insensitive. */
 function comparable(file: string): string {
   return path.win32.normalize(file).toLowerCase()
 }

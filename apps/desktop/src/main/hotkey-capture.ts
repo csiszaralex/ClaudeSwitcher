@@ -5,9 +5,9 @@ import { registerHotkey, type RegisterAccelerator } from './hotkey.js'
 /**
  * The Alt+Space family, registered as temporary global shortcuts while a capture runs. Windows
  * handles Alt+Space (the window's system menu) before the page and before `before-input-event`
- * (measured by Alex in the built app, 2026-11-01: neither `before-input-event` nor
+ * (measured live in the built app, 2026-11-01: neither `before-input-event` nor
  * `system-context-menu` stopped it). A global shortcut (RegisterHotKey) should be delivered before the
- * system menu, so these are captured that way (measured by Alex on 2026-11-01: the Alt+Space
+ * system menu, so these are captured that way (measured live on 2026-11-01: the Alt+Space
  * family is captured through these temporary global shortcuts).
  * Written exactly as `acceleratorFromKey` writes them, so a captured value round-trips.
  */

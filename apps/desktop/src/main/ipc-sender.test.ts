@@ -44,7 +44,7 @@ describe('isRendererSender', () => {
   })
 
   it('ignores the drive letter case, percent encoding, query and hash of our own index', () => {
-    // A Windows útvonal kis- és nagybetűre érzéketlen; a Chromium a szóközt %20-ként adja.
+    // A Windows path is case-insensitive; Chromium gives a space as %20.
     const spaced = rendererLocation(undefined, 'C:\\My Apps\\out\\renderer', 'index.html')
     expect(isRendererSender('file:///c:/my%20apps/out/renderer/index.html#x', spaced)).toBe(true)
     expect(isRendererSender(`${pathToFileURL(INDEX).href}?a=1`, production)).toBe(true)

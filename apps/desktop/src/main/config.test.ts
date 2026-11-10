@@ -18,7 +18,7 @@ describe('loadConfig', () => {
   it('writes a config file with the defaults when none exists', async () => {
     const dir = await freshDir()
     expect(await loadValues(dir)).toEqual(DEFAULTS)
-    // Ki is kell írnia, különben a felhasználó nem tudja, mit szerkeszthet.
+    // It has to write the file too, otherwise the user does not know what can be edited.
     expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual(DEFAULTS)
   })
 
@@ -29,8 +29,8 @@ describe('loadConfig', () => {
   })
 
   it('loads an older file without the auto-hide key with its default, keeping the hotkey and the file', async () => {
-    // Egy M1-es config fájlban még nincs `hideAfterLastDecision`. Nem írjuk át: a kulcs
-    // hiánya az alapértéket jelenti, és a kézi szerkesztés érintetlen marad.
+    // A config file from the first release has no `hideAfterLastDecision` yet. It is not
+    // rewritten: the missing key means the default, and the manual edit stays untouched.
     const dir = await freshDir()
     const older = JSON.stringify({ hotkey: 'Control+Shift+F9' })
     await writeFile(configPath(dir), older)
@@ -66,7 +66,7 @@ describe('loadConfig', () => {
     expect((await loadValues(dir)).hideAfterLastDecision).toBe(false)
   })
 
-  it('reads each setting on its own — a bad hotkey does not lose a valid auto-hide value', async () => {
+  it('reads each setting on its own: a bad hotkey does not lose a valid auto-hide value', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 42, hideAfterLastDecision: false }))
     expect(await loadValues(dir)).toEqual({ hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: false, jumpToTab: true })
@@ -81,8 +81,8 @@ describe('loadConfig', () => {
   })
 
   it('falls back to the default on an unparseable file, without overwriting it', async () => {
-    // Az app indulása nem bukhat el egy elrontott kézi szerkesztés miatt, és a fájlt sem
-    // írjuk felül — a felhasználó szerkesztése maradjon meg, hogy ki tudja javítani.
+    // The app's startup must not fail because of a broken manual edit, and the file is not
+    // overwritten either: the user's edit stays, so the user can fix it.
     const dir = await freshDir()
     await writeFile(configPath(dir), '{ broken')
     expect(await loadValues(dir)).toEqual(DEFAULTS)
@@ -98,8 +98,8 @@ describe('loadConfig', () => {
   })
 
   it('never throws when the directory cannot be used', async () => {
-    // Egy írhatatlan userData könyvtár se akadályozza meg az indulást: a gyorsbillentyű
-    // ilyenkor az alapértelmezett, és az app fut.
+    // An unwritable userData directory must not stop the startup either: the hotkey is then the
+    // default, and the app runs.
     const dir = await freshDir()
     const unusable = path.join(dir, 'file-not-a-dir')
     await writeFile(unusable, 'x')
@@ -155,8 +155,8 @@ describe('saveSettings', () => {
   })
 
   it('changes only the given key, keeping the hotkey and any other key the user wrote', async () => {
-    // A fájlt frissen olvassuk be, nem a memóriabeli configot írjuk ki: ha a felhasználó
-    // indulás óta átírta a gyorsbillentyűt (újraindítás után él), az a pipától nem veszhet el.
+    // The file is read fresh instead of writing out the config in memory: if the user changed the
+    // hotkey since the startup (it takes effect after a restart), a checkbox must not lose it.
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 'Control+Shift+F9', note: 'kézzel' }))
     expect(await saveSettings(dir, { hideAfterLastDecision: false }, [])).toBe(true)
@@ -187,7 +187,7 @@ describe('saveSettings', () => {
   })
 
   it('refuses to overwrite an unparseable file', async () => {
-    // Ugyanaz a garancia, mint a betöltésnél: egy elrontott kézi szerkesztést nem írunk felül.
+    // The same guarantee as on load: a broken manual edit is not overwritten.
     const dir = await freshDir()
     await writeFile(configPath(dir), '{ broken')
     expect(await saveSettings(dir, { hideAfterLastDecision: false }, [])).toBe(false)
@@ -202,8 +202,8 @@ describe('saveSettings', () => {
   })
 
   it('persists two updates that were not awaited one after the other', async () => {
-    // A két tálcapipa egymás után, várakozás nélkül hívja. Sorbaállítás nélkül a második a
-    // régi tartalmat olvasná, és az első változás elveszne.
+    // The two tray checkboxes call it one after the other, without waiting. Without the queue the
+    // second would read the old content, and the first change would be lost.
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9' }))
 
@@ -222,7 +222,7 @@ describe('saveSettings', () => {
   })
 
   it('does not overwrite a config it cannot read for a reason other than a missing file', async () => {
-    // Egy könyvtár a config helyén nem ENOENT olvasási hibát ad: ez nem „nincs meg".
+    // A directory in place of the config gives a read error other than ENOENT: that is not "missing".
     const dir = await freshDir()
     await mkdir(configPath(dir))
 

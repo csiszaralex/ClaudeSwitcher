@@ -90,8 +90,8 @@ const LOGIN_ITEMS: LoginItems = {
 const handleFrom = createHandleFrom(ipcMain)
 
 /**
- * Elküldi a tab-fókusz URI-t a VSCode-nak, `TAB_FOCUS_SETTLE_MS` várakozás után. Soha nem dob:
- * egy elbukott megnyitás csak naplózódik: az ablak ilyenkor is elöl van, mint az M1-ben.
+ * Sends the tab focus URI to VSCode after waiting `TAB_FOCUS_SETTLE_MS`. Never throws: a failed
+ * open is only logged, and the window is in front anyway, as it was before the tab focus existed.
  */
 async function openTabFocusUri(uri: string): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, TAB_FOCUS_SETTLE_MS))
@@ -120,10 +120,10 @@ const quitSequence = createQuitSequence({
 })
 
 /**
- * Egyszerre egy példány. Egy második példány a fix porton elbukna (hibadialógussal), és a
- * közös `userData` miatt a Chromium cache-t is összeakasztaná („Unable to move the cache:
- * Access is denied"). Ezért a második példány csendben kilép, még a port lefoglalása és
- * bármilyen ablak előtt; az első a `second-instance` eseményre megmutatja az overlayt.
+ * One instance at a time. A second instance would fail on the fixed port (with an error dialog),
+ * and through the shared `userData` it would also tangle the Chromium cache ("Unable to move the
+ * cache: Access is denied"). So the second instance quits silently, before it takes the port or
+ * opens any window; the first one shows the overlay on the `second-instance` event.
  *
  * A different build that finds the lock taken asks first, and can hand over (`handOverOrQuit`).
  * The `--quit` and `--uninstall` helpers ask the running app to quit (`runHelper`). Each tells
@@ -152,7 +152,7 @@ function becomePrimary(): void {
         app.quit()
         break
       case 'show':
-        // Egy második indítás (pl. a parancsikonra kattintva) a futó példányt hozza elő.
+        // A second start (clicking the shortcut, for example) brings up the running instance.
         showOverlayWhenStarted?.()
         break
       case 'ignore':
@@ -227,7 +227,7 @@ async function handOverOrQuit(): Promise<void> {
   }
   // Requests the lock only after the helper is gone. While it waits, the helper retries the lock
   // with `{ kind: 'quit' }`: had this build taken the lock first, the helper's next retry would
-  // have asked this build to quit (measured by Alex, 2026-11-02). The helper exits once it holds
+  // have asked this build to quit (measured live, 2026-11-02). The helper exits once it holds
   // the lock (or gives up after `HANDOVER_TIMEOUT_MS`), and releases it while exiting, so the
   // lock is then polled too. Each refused request sends `{ kind: 'show', build }` to the holder:
   // the exiting helper has no `second-instance` handler, and an old primary that did not quit
@@ -303,9 +303,9 @@ switch (MODE) {
 async function startApp(): Promise<void> {
   // A quit that began during startup (an early `--quit`) must not be followed by a daemon and windows.
   if (quitSequence.isQuitting()) return
-  // A token tartós, a port rögzített: a telepített hookok ezeket kapják
-  // a settings.json-ban, így az app újraindítása után is érvényesek maradnak. Foglalt
-  // porton a startDaemon elutasít, és az indulási hibadialógus jelenik meg.
+  // The token is persistent and the port is fixed: the installed hooks get these in settings.json,
+  // so they stay valid after the app restarts. On a taken port startDaemon rejects, and the startup
+  // error dialog appears.
   const userData = app.getPath('userData')
   // Every handler reads the settings from the service at the time of use, so a change from the
   // tray (or the setup window) takes effect at once.
@@ -318,7 +318,7 @@ async function startApp(): Promise<void> {
   // A local, non-null constant: the handlers capture it, so no `!` is needed, and the type
   // guarantees that every handler sees the same running daemon after startup. The quit sequence
   // gets it through `setDaemon`.
-  // A natív probe az elsődleges; a PowerShell csak tartalék, ha a koffi nem tölthető be.
+  // The native probe comes first; PowerShell is only the fallback when koffi cannot be loaded.
   const nativeProbe = createNativeProcessProbe()
   const running = await startDaemon({
     claudeDir: resolveClaudeDir(),
@@ -346,8 +346,8 @@ async function startApp(): Promise<void> {
     RENDERER,
     OVERLAY_CHANNELS.decide,
     (id: unknown, raw: unknown) => {
-      // IPC-bemenet: a renderer bármit küldhet. Csak egy pontosan érvényes döntés jut a
-      // daemonhoz, annak érvényességét az adott kérésre a broker még külön ellenőrzi.
+      // IPC input: the renderer may send anything. Only a strictly valid decision reaches the
+      // daemon, and the broker checks separately that it is valid for that request.
       if (typeof id !== 'string') return { ok: false, reason: 'Érvénytelen azonosító.' }
       const decision = parseUserDecision(raw)
       if (decision === undefined) return { ok: false, reason: 'Érvénytelen döntés.' }
@@ -360,19 +360,19 @@ async function startApp(): Promise<void> {
     RENDERER,
     OVERLAY_CHANNELS.focusSession,
     async (sessionId: unknown) => {
-      // IPC-bemenet: a renderer bármit küldhet, ezért `unknown`, és itt ellenőrizzük.
+      // IPC input: the renderer may send anything, hence `unknown`, checked here.
       if (typeof sessionId !== 'string') return false
       const view = running.state().sessions.find((s) => s.sessionId === sessionId)
       if (view === undefined) return false
-      // Előbb fókuszálunk, csak utána rejtjük el az overlayt. A Windows csak annak a
-      // folyamatnak engedi a SetForegroundWindow-t, amelyik épp az előtérben van:
-      // az overlay elrejtése ezt a jogot elvenné tőlünk, és a hívás csendben csak a
-      // tálcagombot villogtatná. Ha így is elbukik, a `code` CLI tartalék megoldja.
+      // Focus first, hide the overlay only afterwards. Windows allows SetForegroundWindow only to
+      // the process currently in the foreground: hiding the overlay would take that right away, and
+      // the call would silently just flash the taskbar button. If it fails anyway, the `code` CLI
+      // fallback handles it.
       const outcome = await focusSessionWindow(view)
       overlay.hide()
-      // A pontos tab csak az ablak UTÁN, és csak ha a `tabFocusUri` minden feltétele teljesül.
-      // A döntéseket a fókusz UTÁN olvassuk: a várakozás alatt egy fájlírás-kérés is beérkezhetett.
-      // Nem várjuk meg: a renderer az ablakfókusz eredményét kapja, ugyanúgy, mint eddig.
+      // The exact tab only AFTER the window, and only if every condition of `tabFocusUri` holds.
+      // The decisions are read AFTER the focus: a file-write request may have arrived during the
+      // wait. Not awaited: the renderer gets the result of the window focus, as before.
       const uri = tabFocusUri(view, outcome, settings.snapshot().values.jumpToTab, running.state().decisions)
       if (uri !== undefined) void openTabFocusUri(uri)
       return outcome !== 'failed'
@@ -388,9 +388,9 @@ async function startApp(): Promise<void> {
     return { hideAfterLastDecision: settings.snapshot().values.hideAfterLastDecision }
   })
 
-  // Indulási összegzés a főprocessz stdoutjára. Ez teszi a Step 5 ellenőrzését
-  // automatizálhatóvá: nem kell DevTools-konzolba gépelni ahhoz, hogy lássuk,
-  // a daemon elindult és tényleg megtalálta a futó sessionöket.
+  // A startup summary on the main process's stdout. It makes the startup check automatable: no
+  // typing into the DevTools console is needed to see that the daemon started and really found the
+  // running sessions.
   console.log(
     `[claudeswitcher] daemon on ${DAEMON_HOST}:${running.port}, ` +
       `${running.state().sessions.length} session(s) discovered, ` +
@@ -458,9 +458,9 @@ async function startApp(): Promise<void> {
   })
 
   /**
-   * Elavult-e a telepített integráció. Egy korábbi verzió telepítésében nincs benne az azóta
-   * hozzáadott hook, és ez magától nem derül ki: az új hook egyszerűen nem tüzel. Indításkor és
-   * minden telepítés vagy eltávolítás után fut; a settings.json-t csak olvassa.
+   * Whether the installed integration is stale. An install by an earlier version lacks a hook added
+   * since, and that does not show by itself: the new hook simply does not fire. Runs at startup and
+   * after every install or uninstall; it only reads settings.json.
    */
   function syncIntegrationNotice(): void {
     readHookInstallState(resolveClaudeDir())
@@ -577,9 +577,8 @@ async function startApp(): Promise<void> {
   // From here on a second start of the same build brings the overlay up (`becomePrimary`).
   showOverlayWhenStarted = overlay.show
 
-  // A tálca és a gyorsbillentyű állapota a stdoutra. Ez teszi a Task 13 ellenőrzését
-  // gomblenyomás nélkül mérhetővé: a createTray üres ikonnál dob, tehát ha ez a sor
-  // megjelenik, a tálcaikon látható képet kapott.
+  // The tray and hotkey state on stdout. It makes the tray check measurable without pressing a key:
+  // createTray throws on an empty icon, so if this line appears, the tray icon got a visible image.
   console.log(`[claudeswitcher] tray ready, ${hotkeyLogText(hotkey)}`)
 
   const syncTray = (): void => {
@@ -602,10 +601,10 @@ async function startApp(): Promise<void> {
 }
 
 function startupFailed(error: unknown): void {
-  // Tálcaikonos app: ha az indulás elbukik (tipikusan a daemon), nincs ablak és
-  // nincs tálcaikon, a processz csendben halott maradna, a felhasználó pedig csak
-  // azt látná, hogy „nem csinál semmit". A showErrorBox szinkron és ablak nélkül
-  // is működik, tehát ez az egyetlen hely, ahol a hiba biztosan eljut hozzá.
+  // A tray app: if the startup fails (typically the daemon), there is no window and no tray icon,
+  // the process would stay silently dead, and the user would only see that "it does nothing".
+  // showErrorBox is synchronous and works without a window, so this is the one place where the
+  // error surely reaches the user.
   console.error('[claudeswitcher] startup failed', error)
   dialog.showErrorBox(
     'A ClaudeSwitcher nem tudott elindulni',
@@ -615,7 +614,7 @@ function startupFailed(error: unknown): void {
 }
 
 app.on('window-all-closed', () => {
-  // Tálcaikonos app: az ablak bezárása nem lépteti ki.
+  // A tray app: closing the window does not quit it.
 })
 
 // The single `before-quit` handler: the quit sequence (`createQuitSequence`).

@@ -31,13 +31,12 @@ function isBooleanSetting(setting: SettingDefinition): setting is SettingDefinit
 const TOGGLES = SETTINGS.filter(isBooleanSetting)
 
 /**
- * Betölt egy ikont, és hangosan elbukik, ha üres.
+ * Loads an icon, and fails loudly if it is empty.
  *
- * A `nativeImage.createFromPath` hiányzó vagy hibás fájlnál NEM dob, hanem üres képet
- * ad vissza, és egy üres képpel létrehozott tálcaikon Windowson láthatatlan. Az app
- * így futna, a felhasználó pedig nem találná meg: csendes hiba egy olyan appban, aminek
- * a tálcaikon az egyetlen belépési pontja. A dobás az `app.whenReady()` hibakezelőjéhez
- * jut, ami hibadialógust mutat.
+ * `nativeImage.createFromPath` does NOT throw on a missing or broken file but returns an empty
+ * image, and a tray icon created with an empty image is invisible on Windows. The app would run and
+ * the user could not find it: a silent failure in an app whose only entry point is the tray icon.
+ * The throw reaches the `app.whenReady()` error handler, which shows an error dialog.
  */
 function loadIcon(file: string): Electron.NativeImage {
   const iconPath = path.join(resources, file)

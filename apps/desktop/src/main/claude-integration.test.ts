@@ -21,21 +21,21 @@ const OPTIONS = {
   token: 'abc123',
 }
 
-/** A kivezetett status line, ahogy egy korábbi verzió telepítette: a jelölő a parancs végén. */
+/** The retired status line as an earlier version installed it: the marker at the end of the command. */
 const OUR_OLD_STATUS_LINE = {
   type: 'command',
   command: 'node "P:\\repo\\packages\\statusline\\dist\\main.js" --claudeswitcher',
   padding: 0,
 }
 
-/** Egy korábbi verzió telepítése: hookok, a jelölt status line és mindkét env-változó. */
+/** An install by an earlier version: the hooks, the marked status line and both env variables. */
 function olderInstall(base: Record<string, unknown>): Record<string, unknown> {
   const installed = applyIntegration(base, OPTIONS).settings
   const env = installed['env'] as Record<string, unknown>
   return { ...installed, statusLine: OUR_OLD_STATUS_LINE, env: { ...env, CLAUDESWITCHER_PORT: '47821' } }
 }
 
-/** A felhasználó valódi settings.json-jának alakja, a munkamenet elején lemérve. */
+/** The shape of a real user settings.json, measured live. */
 const USER_SETTINGS: Record<string, unknown> = {
   permissions: { allow: ['Bash(pnpm build *)', 'Read(//tmp/**)'] },
   model: 'opus[1m]',
@@ -50,7 +50,7 @@ const FOREIGN_NOTIFICATION = {
   hooks: [{ type: 'command', command: 'powershell -c [console]::beep()' }],
 }
 
-/** Egy másik repó status line-ja, ugyanazzal az elterjedt útvonal-elrendezéssel. */
+/** Another repo's status line, with the same common path layout. */
 const FOREIGN_STATUS_LINE = {
   type: 'command',
   command: 'node /home/u/otherrepo/packages/statusline/dist/main.js',
@@ -67,7 +67,7 @@ describe('applyIntegration', () => {
     }
   })
 
-  it('installs the M2 hook events, including the blocking PermissionRequest', () => {
+  it('installs every contract hook event, including the blocking PermissionRequest', () => {
     const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as Record<string, unknown>
     expect(Object.keys(hooks).sort()).toEqual([
       'Notification',
@@ -83,8 +83,8 @@ describe('applyIntegration', () => {
   })
 
   it('sends a failed tool to the PostToolUse route and an API-error turn end to the Stop route', () => {
-    // A PostToolUseFailure ugyanazt a session_id-t és tool_use_id-t hozza, mint a PostToolUse, a
-    // StopFailure pedig ugyanúgy a fő kör végét jelenti, mint a Stop: új route nem kell.
+    // PostToolUseFailure carries the same session_id and tool_use_id as PostToolUse, and StopFailure
+    // marks the end of the main turn just like Stop: no new route is needed.
     const hooks = applyIntegration({}, OPTIONS).settings['hooks'] as HookGroups
     const failure = hooks['PostToolUseFailure']![0]!.hooks[0]!
     const stopFailure = hooks['StopFailure']![0]!.hooks[0]!
@@ -113,7 +113,7 @@ describe('applyIntegration', () => {
   })
 
   it('keeps a foreign hook on the same event instead of overwriting it', () => {
-    // Az eredeti terv a tömböt egészben cserélte, és ezt a hookot némán törölte volna.
+    // The original plan replaced the whole array and would have silently deleted this hook.
     const existing = { hooks: { Notification: [FOREIGN_NOTIFICATION] } }
     const hooks = applyIntegration(existing, OPTIONS).settings['hooks'] as Record<string, unknown[]>
     expect(hooks['Notification']).toHaveLength(2)
@@ -153,7 +153,7 @@ describe('applyIntegration', () => {
   })
 
   it('keeps a foreign status line that replaced ours after the install, through reinstall and uninstall', () => {
-    // A felhasználó a mi status line-unkat a sajátjára cserélte: onnantól az nem a miénk.
+    // The user replaced our status line with their own: from then on it is not ours.
     const replaced = { ...olderInstall(USER_SETTINGS), statusLine: FOREIGN_STATUS_LINE }
     const reinstalled = applyIntegration(replaced, OPTIONS).settings
     expect(reinstalled['statusLine']).toEqual(FOREIGN_STATUS_LINE)
@@ -168,16 +168,16 @@ describe('applyIntegration', () => {
   })
 
   it('does not mistake another repo\'s statusline for ours', () => {
-    // Az útvonal elrendezése nem a miénk, hanem elterjedt. Útvonal szerinti felismeréssel a
-    // telepítés és az eltávolítás is elvinné ezt az idegen status line-t.
+    // The path layout is not ours but common. With recognition by path, both install and uninstall
+    // would take this foreign status line away.
     const { settings } = applyIntegration({ statusLine: FOREIGN_STATUS_LINE }, OPTIONS)
     expect(settings['statusLine']).toEqual(FOREIGN_STATUS_LINE)
     expect(removeIntegration(settings)).toEqual({ statusLine: FOREIGN_STATUS_LINE })
   })
 
   it('keeps a foreign hook that sits inside our own matcher group', () => {
-    // Kézzel szerkesztve ez a természetes mozdulat: a saját parancsot a meglévő `hooks`
-    // tömbbe fűzni. Csoportszintű eldobás ezt is elvinné.
+    // When editing by hand this is the natural move: adding your own command to the existing
+    // `hooks` array. Dropping at group level would take it away too.
     const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
     const theirs = { type: 'command', command: 'their-beep' }
     installed.hooks['Stop']![0]!.hooks.push(theirs)
@@ -189,8 +189,8 @@ describe('applyIntegration', () => {
   })
 
   it('still recognises our hook after its allowedEnvVars is pruned', () => {
-    // Az allowedEnvVars nem feltétele a futásnak, tehát kieshet. Enélkül a bejegyzés
-    // felismerhetetlen árva lenne, és minden telepítés duplikálná.
+    // allowedEnvVars is not a condition for running, so it can go missing. Without the fallback
+    // the entry would be an unrecognisable orphan, and every install would duplicate it.
     const installed = applyIntegration({}, OPTIONS).settings as { hooks: HookGroups }
     delete installed.hooks['Stop']![0]!.hooks[0]!['allowedEnvVars']
 
@@ -200,9 +200,8 @@ describe('applyIntegration', () => {
   })
 
   it('does not claim a loopback hook that is not spoken over http', () => {
-    // A `new URL` a hostot és az útvonalat bármilyen sémára kitölti, tehát protokoll-
-    // ellenőrzés nélkül egy ilyen idegen bejegyzés is a mienknek számítana — és a
-    // telepítés némán elvinné.
+    // `new URL` fills in the host and the path for any scheme, so without a protocol check such a
+    // foreign entry would count as ours too, and the install would silently take it away.
     const theirs = { type: 'command', url: 'file://127.0.0.1/hooks/notification' }
     const existing = { hooks: { Notification: [{ hooks: [theirs] }] } }
 
@@ -212,8 +211,8 @@ describe('applyIntegration', () => {
   })
 
   it('keeps a foreign loopback hook on our path but another port, through install and uninstall', () => {
-    // Egy másik helyi eszköz ugyanilyen útvonalat használhat. Port nélkül a tartalék
-    // felismerés a mienknek nézné, és a telepítés némán törölné.
+    // Another local tool may use the same path. Without the port the fallback recognition would take
+    // it for ours, and the install would silently delete it.
     const theirs = { type: 'http', url: 'http://127.0.0.1:8080/hooks/notification' }
     const existing = { hooks: { Notification: [{ hooks: [theirs] }] } }
 
@@ -236,7 +235,7 @@ describe('applyIntegration', () => {
   })
 
   it('removes the SessionStart entry an earlier version installed, keeping a foreign one', () => {
-    // A korábbi verzió saját bejegyzése: a tokenre hivatkozik, a régi route-ra mutat.
+    // The earlier version's own entry: it refers to the token and points to the old route.
     const legacy = {
       hooks: [
         {
@@ -264,7 +263,7 @@ describe('applyIntegration', () => {
 
 describe('removeIntegration', () => {
   it('restores the real settings exactly after an install', () => {
-    // A legfontosabb tulajdonság: telepítés + eltávolítás együtt veszteségmentes.
+    // The most important property: install + uninstall together lose nothing.
     const installed = applyIntegration(USER_SETTINGS, OPTIONS).settings
     expect(removeIntegration(installed)).toEqual(USER_SETTINGS)
   })
@@ -304,7 +303,7 @@ describe('hookInstallState', () => {
   })
 
   it('lists the events an older install lacks', () => {
-    // A 4.1/4.2 előtti telepítés: a két hibás végű esemény nincs benne.
+    // An install from before the two failure events were added: they are not in it.
     const older = without(installedHooks(), ['PostToolUseFailure', 'StopFailure'])
     expect(hookInstallState(older)).toEqual({ kind: 'stale', missing: ['StopFailure', 'PostToolUseFailure'] })
   })

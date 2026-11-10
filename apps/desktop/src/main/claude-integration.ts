@@ -23,43 +23,43 @@ export interface IntegrationOptions {
 
 export interface IntegrationResult {
   settings: Record<string, unknown>
-  /** Emberi olvasásra szánt leírások arról, amit szándékosan nem írtunk felül. */
+  /** Human-readable descriptions of what was deliberately not overwritten. */
   conflicts: string[]
 }
 
 /**
- * A telepített hookok és a kivezetettek a core szerződéséből (`HOOK_CONTRACT`,
- * `LEGACY_HOOK_CONTRACT`). A hibás végű események (`PostToolUseFailure`, `StopFailure`) a sikeres
- * párjuk route-ját kapják, ezért az `OUR_HOOK_PATHS`-ra illeszkednek, és a telepítés meg az
- * eltávolítás külön kód nélkül kezeli őket.
+ * The installed hooks and the retired ones come from the core contract (`HOOK_CONTRACT`,
+ * `LEGACY_HOOK_CONTRACT`). The failure events (`PostToolUseFailure`, `StopFailure`) get the route
+ * of their success counterpart, so they match `OUR_HOOK_PATHS`, and install and uninstall handle
+ * them without extra code.
  */
 const LEGACY_EVENTS: readonly string[] = LEGACY_HOOK_CONTRACT.map((hook) => hook.event)
 
 const TOKEN_ENV = 'CLAUDESWITCHER_TOKEN'
 
 /**
- * Egy korábbi verzió írta, azóta kivezetve. Csak a kivezetett status line scriptje olvasta, a
- * hookok URL-je a portot közvetlenül tartalmazza. Telepítéskor és eltávolításkor is kivesszük.
+ * Written by an earlier version, retired since. Only the retired status line script read it; the
+ * hook URLs contain the port directly. Removed on both install and uninstall.
  */
 const LEGACY_PORT_ENV = 'CLAUDESWITCHER_PORT'
 
-/** Új objektum a megadott kulcsok nélkül, `delete` helyett, ami mutálna. */
+/** A new object without the given keys, instead of `delete`, which would mutate. */
 function without(source: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(source).filter(([key]) => !keys.includes(key)))
 }
 
 /**
- * Igaz, ha EGY hook a mienk.
+ * True if ONE hook is ours.
  *
- * Elsődleges jel: az `allowedEnvVars` hivatkozik a tokenünkre. Portfüggetlen, tehát egy
- * portváltás után is felismeri a régi telepítést.
+ * Primary sign: `allowedEnvVars` refers to our token. It does not depend on the port, so it also
+ * recognises an old install after a port change.
  *
- * Tartalék jel: a saját loopback-végpontunkra mutat, a `DAEMON_PORT` porton. A port is
- * feltétel: egy másik helyi eszköz ugyanilyen útvonalat használhat egy másik porton, és annak
- * a hookját a telepítés különben némán törölné. Azért kell, mert az `allowedEnvVars`
- * nem feltétele annak, hogy a hook lefusson: csak az env-változó behelyettesítését
- * engedélyezi. Ha valaki kiveszi, a bejegyzés felismerhetetlen árvává válna: minden újabb
- * telepítés egy újabb duplikátumot tenne mellé, az eltávolítás pedig soha nem vinné el.
+ * Fallback sign: it points to our own loopback endpoint, on the `DAEMON_PORT` port. The port is a
+ * condition too: another local tool may use the same path on another port, and the install would
+ * otherwise silently delete its hook. The fallback is needed because `allowedEnvVars` is not a
+ * condition for the hook to run: it only permits the env variable substitution. If someone removes
+ * it, the entry would become an unrecognisable orphan: every new install would add another
+ * duplicate next to it, and uninstall would never remove it.
  */
 function isOurHook(hook: unknown): boolean {
   if (!isRecord(hook)) return false
@@ -69,9 +69,9 @@ function isOurHook(hook: unknown): boolean {
   if (typeof url !== 'string') return false
   try {
     const parsed = new URL(url)
-    // A protokollt is nézni kell. A `new URL` a hostot és az útvonalat bármilyen sémára
-    // kitölti, így e nélkül egy `file://127.0.0.1/hooks/notification` is a mienknek
-    // számítana, ez túl tág azonosítás.
+    // The protocol has to be checked too. `new URL` fills in the host and the path for any scheme,
+    // so without this a `file://127.0.0.1/hooks/notification` would count as ours, which is too
+    // loose an identification.
     const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:'
     return (
       isHttp &&
@@ -85,11 +85,11 @@ function isOurHook(hook: unknown): boolean {
 }
 
 /**
- * Kiveszi a saját hookjainkat egy esemény matcher-csoportjaiból.
+ * Removes our own hooks from an event's matcher groups.
  *
- * HOOK-szinten dolgozik, nem csoportszinten: ha a felhasználó a saját parancsát a mi
- * csoportunk `hooks` tömbjébe fűzte be, a csoport egészének eldobása az ő hookját is
- * elvinné. Egy csoport csak akkor tűnik el, ha kizárólag a mi hookjainkból állt.
+ * Works at HOOK level, not group level: if the user added their own command to the `hooks` array
+ * of our group, dropping the whole group would take their hook too. A group disappears only if it
+ * consisted solely of our hooks.
  */
 function stripOurHooks(list: readonly unknown[]): unknown[] {
   return list.flatMap((entry) => {
@@ -103,7 +103,7 @@ function stripOurHooks(list: readonly unknown[]): unknown[] {
   })
 }
 
-/** A megadott eseményekből kiveszi a mieinket; a kiürült eseménykulcs is eltűnik. */
+/** Removes ours from the given events; an event key left empty disappears too. */
 function stripEvents(hooks: Record<string, unknown>, events: readonly string[]): Record<string, unknown> {
   const result: Record<string, unknown> = { ...hooks }
   const emptied: string[] = []
@@ -118,24 +118,24 @@ function stripEvents(hooks: Record<string, unknown>, events: readonly string[]):
 }
 
 /**
- * Jelölő a kivezetett status line parancsunk végén. Egy korábbi verzió telepítette a status
- * line-t (a VSCode-bővítmény nem futtatja), ma már csak a régi bejegyzés felismerésére kell:
- * telepítéskor és eltávolításkor is kivesszük.
+ * The marker at the end of our retired status line command. An earlier version installed the status
+ * line (the VSCode extension does not run it); today it is only needed to recognise the old entry:
+ * it is removed on both install and uninstall.
  *
- * Az útvonal önmagában nem azonosít: a `packages/statusline/dist/main.js` elrendezés nem a
- * miénk, hanem elterjedt, és egy másik repó ugyanilyen status line-ját a sajátunknak néznénk,
- * majd törölnénk. A jelölő nélküli status line ezért soha nem a miénk.
+ * The path alone does not identify it: the `packages/statusline/dist/main.js` layout is not ours
+ * but common, and the same kind of status line from another repo would be taken for ours and then
+ * deleted. So a status line without the marker is never ours.
  */
 const STATUS_LINE_MARKER = '--claudeswitcher'
 
-/** Igaz, ha a status line a kivezetett saját bejegyzésünk: a jelölőnk alapján, nem az útvonala alapján. */
+/** True if the status line is our own retired entry: by our marker, not by its path. */
 function isOurStatusLine(statusLine: unknown): boolean {
   if (!isRecord(statusLine)) return false
   const command = statusLine['command']
   return typeof command === 'string' && command.includes(STATUS_LINE_MARKER)
 }
 
-/** A hook URL-je. A telepítés és az elavultság-ellenőrzés is innen veszi. */
+/** The hook's URL. Both the install and the staleness check take it from here. */
 function hookUrl(port: number, { route }: HookContractEntry): string {
   return `http://${DAEMON_HOST}:${String(port)}${hookPath(route)}`
 }
@@ -155,20 +155,20 @@ function ourHookEntry(port: number, hook: HookContractEntry): Record<string, unk
 }
 
 /**
- * Új objektum a kivezetett status line-unk nélkül, ha az még a miénk. Egy idegenhez nem nyúl.
- * Mindig másolatot ad: a hívók a visszakapott objektumot tovább írják.
+ * A new object without our retired status line, if it is still ours. It does not touch a foreign
+ * one. Always returns a copy: the callers keep writing to the returned object.
  */
 function withoutOurStatusLine(settings: Record<string, unknown>): Record<string, unknown> {
   return isOurStatusLine(settings['statusLine']) ? without(settings, ['statusLine']) : { ...settings }
 }
 
 /**
- * A telepítés tiszta transzformációja.
+ * The pure transformation of the install.
  *
- * Semmit nem töröl és nem ír felül, ami nem a mienk: az idegen hookok megmaradnak az
- * eseményük tömbjében, egy idegen vagy hibás alakú érték pedig ütközésként jelentődik. A
- * korábbi verzió kivezetett bejegyzéseit (`SessionStart` hook, status line, port env-változó)
- * kivesszük, így az újratelepítés egyben migrál is.
+ * It deletes and overwrites nothing that is not ours: foreign hooks stay in their event's array,
+ * and a foreign or malformed value is reported as a conflict. The retired entries of the earlier
+ * version (the `SessionStart` hook, the status line, the port env variable) are removed, so a
+ * reinstall migrates as well.
  */
 export function applyIntegration(
   existing: Record<string, unknown>,
@@ -208,9 +208,9 @@ export function applyIntegration(
 }
 
 /**
- * Az eltávolítás tiszta transzformációja: csak a saját bejegyzéseinket veszi ki (a korábbi
- * verzió kivezetett bejegyzéseit is), és a kiürült `hooks` / `env` kulcsot is törli, így egy telepítés utáni
- * eltávolítás pontosan az eredeti beállításokat adja vissza.
+ * The pure transformation of the uninstall: it removes only our own entries (the earlier version's
+ * retired entries too) and deletes a `hooks` / `env` key left empty, so an uninstall after an
+ * install gives back exactly the original settings.
  */
 export function removeIntegration(existing: Record<string, unknown>): Record<string, unknown> {
   let settings: Record<string, unknown> = withoutOurStatusLine(existing)
@@ -246,7 +246,7 @@ export type HookInstallState =
   | { kind: Exclude<IntegrationKind, 'stale'> }
   | { kind: 'stale'; missing: string[] }
 
-/** Egy esemény saját hookjai, a matcher-csoportokon át. Hibás alakú bejegyzés: nincs benne a mienk. */
+/** Our hooks of one event, across the matcher groups. A malformed entry holds none of ours. */
 function ourHooksOf(groups: unknown): Record<string, unknown>[] {
   if (!Array.isArray(groups)) return []
   return groups.flatMap((group) => {
@@ -258,8 +258,9 @@ function ourHooksOf(groups: unknown): Record<string, unknown>[] {
 }
 
 /**
- * Tiszta függvény: a settings.json `hooks` szakaszából megmondja, mely eseményeink hiányoznak.
- * Az elvárt URL ugyanabból a `HOOK_CONTRACT`-ból és `hookUrl`-ből jön, amiből a telepítés is ír.
+ * A pure function: from the `hooks` section of settings.json it tells which of our events are
+ * missing. The expected URL comes from the same `HOOK_CONTRACT` and `hookUrl` the install writes
+ * from.
  */
 export function hookInstallState(hooks: unknown, port: number = DAEMON_PORT): HookInstallState {
   if (!isRecord(hooks)) return { kind: 'not-installed' }
@@ -275,15 +276,15 @@ export function hookInstallState(hooks: unknown, port: number = DAEMON_PORT): Ho
   return missing.length === 0 ? { kind: 'current' } : { kind: 'stale', missing }
 }
 
-/** A tálcán mutatott egy sor, vagy `undefined`, ha nincs mit mondani. */
+/** The one line shown in the tray, or `undefined` if there is nothing to say. */
 export function integrationNotice(state: HookInstallState): string | undefined {
   if (state.kind !== 'stale') return undefined
   return `Integráció elavult, telepítsd újra (${String(state.missing.length)} hiányzó hook)`
 }
 
 /**
- * Csak olvas: a settings.json-t ugyanott keresi, ahová a telepítés ír (`userSettingsPath`), de soha
- * nem írja. Hiányzó fájl: nincs telepítve. Minden más olvasási vagy értelmezési hiba `unknown`.
+ * Only reads: it looks for settings.json where the install writes it (`userSettingsPath`), but never
+ * writes it. A missing file: not installed. Every other read or parse error is `unknown`.
  */
 export async function readHookInstallState(claudeDir: string): Promise<HookInstallState> {
   let raw: string
@@ -301,7 +302,7 @@ export async function readHookInstallState(claudeDir: string): Promise<HookInsta
   return isRecord(parsed) ? hookInstallState(parsed['hooks']) : { kind: 'unknown' }
 }
 
-/** Telepít a felhasználó settings.json-jába. Az ütközések leírását adja vissza. */
+/** Installs into the user's settings.json. Returns the descriptions of the conflicts. */
 export async function installIntegration(
   claudeDir: string,
   options: IntegrationOptions,
@@ -315,7 +316,7 @@ export async function installIntegration(
   return conflicts
 }
 
-/** Eltávolítja a saját bejegyzéseinket a felhasználó settings.json-jából. */
+/** Removes our own entries from the user's settings.json. */
 export function uninstallIntegration(claudeDir: string): Promise<void> {
   return transformSettingsFile(userSettingsPath(claudeDir), removeIntegration)
 }

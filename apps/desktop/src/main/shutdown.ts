@@ -2,10 +2,10 @@
 export const STOP_TIMEOUT_MS = 2000
 
 /**
- * A daemon leállítása legfeljebb `timeoutMs` ideig. Igazat ad, ha a leállás időben lezárult,
- * hamisat, ha az idő lejárt vagy a leállás hibát dobott. A kilépés egyik esetben sem akadhat
- * meg: a tartott kérések kapcsolatai a processzel úgyis elhalnak, és azt a Claude Code mérten
- * „nincs döntés"-nek veszi (spec §8).
+ * Stops the daemon within at most `timeoutMs`. Returns true if the stop completed in time, false if
+ * the time ran out or the stop threw. Quitting must not get stuck in either case: the connections
+ * of the held requests die with the process anyway, and Claude Code, as measured, takes that as "no
+ * decision" (design doc, section 8).
  */
 export async function stopWithin(stop: () => Promise<void>, timeoutMs: number = STOP_TIMEOUT_MS): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined

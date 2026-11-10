@@ -33,7 +33,7 @@ export function createOverlayController(options: {
    * held back in that case either.
    */
   let sessionEnding = false
-  /** Az overlay renderer-újratöltéseinek korlátja, az újra létrehozott overlayen át is közös. */
+  /** The limit on the overlay's renderer reloads, shared across a re-created overlay too. */
   const allowRendererReload = createReloadLimiter()
 
   function createOverlay(): BrowserWindow {
@@ -55,19 +55,19 @@ export function createOverlayController(options: {
     window.on('blur', () => {
       window.hide()
     })
-    // Az overlay megjelenésének jele a renderernek: erre jelöli ki a legrégebben várakozó
-    // sessiont. Szándékosan a main `show` eseménye, nem a renderer `focus`-a vagy a
-    // `visibilitychange`: a Windows előtérzára a `focus()`-t csendben megtagadhatja (lásd
-    // session:focus), a Chromium láthatósági jele pedig az ablakelfedés-követéstől függ. A
-    // `show` mindig lefut, amikor az ablak ténylegesen láthatóvá válik, és csak akkor.
+    // The signal to the renderer that the overlay appeared: on it the renderer selects the session
+    // that has been waiting longest. Deliberately the main process's `show` event, not the
+    // renderer's `focus` or `visibilitychange`: the Windows foreground lock can silently refuse
+    // `focus()` (see `bringToFront`), and Chromium's visibility signal depends on window occlusion
+    // tracking. `show` always fires when the window really becomes visible, and only then.
     window.on('show', () => {
       window.webContents.send(OVERLAY_CHANNELS.shown)
     })
 
-    // Az Alt+F4 a keret nélküli ablakot is bezárná, és vele az egyetlen ablakot végleg. Utána a
-    // gyorsbillentyű és a tálca egy megsemmisült ablakot érne el („Object has been destroyed"),
-    // miközben a hookok tovább élnek. Ezért a bezárás csak elrejt, amíg nem lépünk ki: így a
-    // renderer állapota és a WS kapcsolata is megmarad.
+    // Alt+F4 would close the frameless window too, and with it the only window for good. After that
+    // the hotkey and the tray would reach a destroyed window ("Object has been destroyed") while the
+    // hooks live on. So a close only hides until the app quits: this way the renderer's state and
+    // its WS connection are kept too.
     // On quit, `before-quit` starts the quit sequence before the windows' `close` events, so
     // `isQuitting()` is already true here and a real quit is not held back.
     window.on('close', (event) => {
@@ -104,18 +104,18 @@ export function createOverlayController(options: {
   let overlay = createOverlay()
 
   const show = (): void => {
-    // Kilépés közben nem hozunk létre új ablakot, és nem mutatjuk a régit.
+    // While quitting, no new window is created and the old one is not shown.
     if (options.isQuitting()) return
-    // A `close` kezelő óta az overlay csak kilépéskor semmisül meg. Ha mégis megsemmisült (egy
-    // ismeretlen út), egy új ablak jobb, mint egy „Object has been destroyed" kivétel.
+    // Since the `close` handler, the overlay is destroyed only on quit. If it was destroyed anyway
+    // (by an unknown path), a new window is better than an "Object has been destroyed" exception.
     if (overlay.isDestroyed()) overlay = createOverlay()
     const window = overlay
-    // Ha a renderer a korlát miatt halott maradt, a megnyitás próbálja újra (szintén korlátosan).
+    // If the renderer stayed dead because of the limit, opening retries (also within the limit).
     if (window.webContents.isCrashed() && allowRendererReload()) window.reload()
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-    // Hely és méret egyetlen `setBounds`-szal, a munkaterülethez szorítva. Egy alacsony
-    // kijelzőn így az overlay teteje sem lóg ki; a csak pozíciót állító `setPosition` eltérő
-    // méretezésű kijelzők között a méretet is elronthatja.
+    // Position and size with a single `setBounds`, clamped to the work area. So the top of the
+    // overlay does not stick out on a low display either; a `setPosition` that only sets the
+    // position can break the size too between displays with different scaling.
     window.setBounds(overlayBounds(display.workArea))
     window.show()
     window.focus()

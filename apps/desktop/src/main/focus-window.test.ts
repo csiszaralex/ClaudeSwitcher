@@ -22,7 +22,7 @@ import {
   type WindowScanner,
 } from './focus-window.js'
 
-/** Egy hamis asztal: a megadott ablakok Z-sorrendben, láncba kötve. */
+/** A fake desktop: the given windows in Z order, linked into a chain. */
 function fakeScanner(
   windows: Array<{ hwnd: number; pid: number; visible?: boolean; titled?: boolean }>,
 ): WindowScanner {
@@ -45,7 +45,7 @@ function fakeScanner(
 
 const onWindows = process.platform === 'win32'
 
-/** Egy futó, látható főablakkal rendelkező VSCode processz pidje, vagy undefined. */
+/** The pid of a running VSCode process with a visible main window, or undefined. */
 function runningVSCodeWindowPid(): number | undefined {
   const out = execFileSync(
     'powershell.exe',
@@ -65,34 +65,34 @@ function runningVSCodeWindowPid(): number | undefined {
 
 describe('findMainWindow', () => {
   it.skipIf(!onWindows)('loads the koffi bindings and returns 0 for a pid owning no window', () => {
-    // Bizonyítja, hogy a user32 kötések betöltődnek a deklarált szignatúrákkal, és
-    // hogy a bejáró ciklus leáll. FIGYELEM: önmagában NEM bizonyítja, hogy a
-    // GetWindowThreadProcessId kimeneti paramétere működik — ha a pid sosem íródna
-    // ki, ez a teszt akkor is 0-t kapna és átmenne. Azt a harmadik teszt fedi.
+    // Proves that the user32 bindings load with the declared signatures and that the walk loop
+    // stops. NOTE: on its own it does NOT prove that the out parameter of GetWindowThreadProcessId
+    // works: if the pid were never written, this test would still get 0 and pass. The third test
+    // covers that.
     expect(findMainWindow(999_999_998)).toBe(0)
   })
 
   it.skipIf(!onWindows)('returns a plain number rather than a BigInt', () => {
-    // Egy BigInt HWND-vel a `hwnd !== 0` sosem lenne hamis.
+    // With a BigInt HWND `hwnd !== 0` would never be false.
     expect(typeof findMainWindow(999_999_998)).toBe('number')
   })
 
   it.skipIf(!onWindows)('finds the main window of a running VSCode instance', (ctx) => {
-    // Ez az a teszt, ami ténylegesen igazolja a kimeneti paramétert: nullánál
-    // nagyobb értéket csak akkor kaphatunk, ha a GetWindowThreadProcessId kiírta a
-    // pidet, és az egyezett. Ablakot NEM hoz előtérbe — csak megkeresi.
+    // This is the test that actually proves the out parameter: a value above zero is only possible
+    // if GetWindowThreadProcessId wrote the pid and it matched. It does NOT bring a window to the
+    // front, it only finds it.
     //
-    // A `countMainWindows`-t használja, nem a `findMainWindow`-t: utóbbi egy több ablakot
-    // birtokló processznél helyesen 0-t ad, ami megkülönböztethetetlen lenne egy nem
-    // működő out-paramétertől — vagyis a teszt pont azt nem bizonyítaná, amiért létezik.
+    // It uses `countMainWindows`, not `findMainWindow`: for a process owning several windows the
+    // latter correctly returns 0, which could not be told apart from an out parameter that does not
+    // work, so the test would fail to prove exactly what it exists for.
     const pid = runningVSCodeWindowPid()
     if (pid === undefined) {
-      // Látható kihagyás, nem csendes átmenet: a futtatás kimenetében látszania kell.
+      // A visible skip, not a silent pass: it has to show in the run's output.
       ctx.skip()
       return
     }
     expect(countMainWindows(pid)).toBeGreaterThan(0)
-    // A segéd egy valódi PowerShellt indít (lásd `runningVSCodeWindowPid`): terhelés alatt lassú.
+    // The helper starts a real PowerShell (see `runningVSCodeWindowPid`): slow under load.
   }, 40_000)
 })
 
@@ -106,8 +106,8 @@ describe('scanWindowsForPid', () => {
   })
 
   it('reports more than one window, so an ambiguous pid can be detected', () => {
-    // Ez a valódi eset: egy VSCode főprocessz az összes ablakát birtokolja, és egy
-    // lock-pid több workspace mappához tartozik. Ilyenkor a pid nem azonosít ablakot.
+    // This is the real case: a VSCode main process owns all its windows, and one lock pid belongs to
+    // several workspace folders. Then the pid does not identify a window.
     const api = fakeScanner([
       { hwnd: 10, pid: 777 },
       { hwnd: 20, pid: 999 },
@@ -132,11 +132,11 @@ describe('scanWindowsForPid', () => {
 
 describe('foregroundWindow', () => {
   it.skipIf(!onWindows)('reads the foreground handle through loaded bindings, without changing it', () => {
-    // A focusByPid ezzel ellenőrzi, hogy a fókuszváltás ténylegesen megtörtént-e.
-    // Az isFastFocusAvailable nélkül ez a teszt akkor is átmenne, ha a kötések el sem
-    // töltődtek — a foregroundWindow ilyenkor 0-t ad, ami szintén véges szám. A
-    // teszt csak olvas; nullánál nagyobb értéket nem követel, mert zárolt képernyőn
-    // vagy fókuszváltás közben a Windows jogosan adhat 0-t.
+    // `bringToFront` checks with the same GetForegroundWindow call that the focus change really
+    // happened. Without isFastFocusAvailable this test would pass even if the bindings never
+    // loaded: foregroundWindow then returns 0, which is a finite number too. The test only reads; it
+    // does not demand a value above zero, because on a locked screen or during a focus change
+    // Windows may rightly return 0.
     expect(isFastFocusAvailable()).toBe(true)
     const hwnd = foregroundWindow()
     expect(typeof hwnd).toBe('number')
@@ -145,7 +145,7 @@ describe('foregroundWindow', () => {
 })
 
 describe('quoteForCli', () => {
-  /** Átküldi az idézett tokent a valódi cmd.exe + CRT argv láncon, és visszaolvassa. */
+  /** Sends the quoted token through the real cmd.exe + CRT argv chain and reads it back. */
   function roundTrip(folder: string): Promise<string> {
     return new Promise((resolve, reject) => {
       exec(
@@ -160,8 +160,8 @@ describe('quoteForCli', () => {
   }
 
   it.skipIf(!onWindows)('survives the real CRT argv parser unchanged', async () => {
-    // Nem a string alakját állítja, hanem hogy a valódi feldolgozó ugyanazt adja
-    // vissza. A javítás előtti sima idézés ezek közül négyet elrontott.
+    // It does not assert the shape of the string but that the real parser returns the same folder.
+    // The plain quoting used before the fix broke four of these.
     const folders = [
       'C:\\work\\normal-folder',
       'C:\\',
@@ -173,14 +173,15 @@ describe('quoteForCli', () => {
     for (const folder of folders) {
       expect(await roundTrip(folder)).toBe(folder)
     }
-    // Hat valódi `node` indítás egymás után: egy terhelt vagy frissen telepített gépen (víruskereső,
-    // hideg cache) a teljes futás alatt az alap 5 mp kevés volt, egyedül 1,2 mp (mérve 2026-10-30).
+    // Six real `node` starts in a row: on a loaded or freshly installed machine (virus scanner, cold
+    // cache) the default 5 s was too little during the full run; alone it took 1.2 s (measured
+    // 2026-10-30).
   }, 20_000)
 })
 
 const SESSION_ID = '0b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f'
 
-/** Egy VSCode bővítményben futó session, ismert ablakkal — a tab-fókusz boldog esete. */
+/** A session running in the VSCode extension, with a known window: the happy case of the tab focus. */
 function extensionView(over: Partial<SessionView> = {}): SessionView {
   return {
     sessionId: SESSION_ID,
@@ -195,7 +196,7 @@ function extensionView(over: Partial<SessionView> = {}): SessionView {
   }
 }
 
-/** Hamis fókuszlépések: rögzítik, mit kértek tőlük, és semmit nem hoznak előre. */
+/** Fake focus steps: they record what was asked of them and bring nothing forward. */
 function fakeSteps(result: { pid: boolean; cli: boolean }): {
   steps: Parameters<typeof focusWith>[1]
   pidCalls: number[]
@@ -242,9 +243,9 @@ describe('focusWith', () => {
   })
 
   it('reports the cwd path when the pid is known but the folder is not and the fast path failed', async () => {
-    // Ez a rés a `windowPid !== undefined || workspaceFolder !== undefined` feltétel mögött: a
-    // pid ismert, de a gyors út elbukott, így a `code` a cwd-t kapta, ami egy új ablakot
-    // nyithatott. A kimenet ezt `cwd`-ként mondja meg, nem „sikerként".
+    // This is the gap behind the `windowPid !== undefined || workspaceFolder !== undefined`
+    // condition: the pid is known, but the fast path failed, so `code` got the cwd, which may have
+    // opened a new window. The outcome reports this as `cwd`, not as a "success".
     const fake = fakeSteps({ pid: false, cli: true })
     const view = extensionView({ workspaceFolder: undefined })
     expect(await focusWith(view, fake.steps)).toBe<FocusOutcome>('cwd')
@@ -256,8 +257,8 @@ describe('focusWith', () => {
   })
 
   it('never runs the CLI for a session that is known not to run in the VS Code extension', async () => {
-    // Egy terminálos vagy SDK-s sessionnek nincs VS Code ablaka: a `code <mappa>` csak egy új
-    // ablakot nyitna neki.
+    // A terminal or SDK session has no VS Code window: `code <folder>` would only open a new window
+    // for it.
     for (const entrypoint of ['cli', 'sdk-ts', 'Claude-VSCode']) {
       const fake = fakeSteps({ pid: false, cli: true })
       expect(await focusWith(extensionView({ entrypoint }), fake.steps)).toBe<FocusOutcome>('failed')
@@ -284,7 +285,7 @@ describe('focusWith', () => {
 
 describe('codeCliCommand', () => {
   it('opens the folder without -r, so an existing window is never taken over', () => {
-    // A `-r` a legutóbb aktív ablakba nyitná a mappát, és lecserélné annak munkaterületét.
+    // `-r` would open the folder in the most recently active window and replace its workspace.
     expect(codeCliCommand('C:\\work\\alpha')).toBe('code "C:\\work\\alpha"')
     expect(codeCliCommand('C:\\')).toBe('code "C:\\\\"')
   })
@@ -296,7 +297,7 @@ describe('codeCliCommand', () => {
   })
 })
 
-/** Egy hamis user32 a fókuszhoz: rögzíti a hívásokat, és megadott lekérdezés után adja az előteret. */
+/** A fake user32 for focusing: records the calls and reports the window in front after a given number of queries. */
 function fakeFocusApi(options: { iconic: boolean; foregroundAfter?: number }): {
   api: FocusApi
   restored: Array<[number, number]>
@@ -318,7 +319,7 @@ function fakeFocusApi(options: { iconic: boolean; foregroundAfter?: number }): {
       },
       GetForegroundWindow: () => {
         queries++
-        // BigInt, ahogy a koffi `intptr`-je futásidőben is jöhet.
+        // A BigInt, as koffi's `intptr` can arrive at run time too.
         return options.foregroundAfter !== undefined && queries > options.foregroundAfter ? BigInt(42) : 7
       },
     },
@@ -385,7 +386,7 @@ describe('tabFocusUri', () => {
   })
 
   it('sends nothing when the window focus failed', () => {
-    // A URI a legfelső VSCode ablakhoz megy: ha nem a session ablaka jött elő, az egy új tabot nyitna.
+    // The URI goes to the topmost VSCode window: if that is not the session's, it would open a new tab.
     expect(tabFocusUri(extensionView(), 'failed', true, [])).toBeUndefined()
   })
 
@@ -416,8 +417,8 @@ describe('tabFocusUri', () => {
       `${SESSION_ID}\n`,
       ` ${SESSION_ID}`,
       '../../etc',
-      '0b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6', // egy karakterrel rövidebb
-      '0b5c1d7e3f2a4c8b9e6d1a2b3c4d5e6f', // kötőjelek nélkül
+      '0b5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6', // one character short
+      '0b5c1d7e3f2a4c8b9e6d1a2b3c4d5e6f', // without hyphens
       'zb5c1d7e-3f2a-4c8b-9e6d-1a2b3c4d5e6f',
     ]) {
       expect(tabFocusUri(extensionView({ sessionId }), 'pid', true, [])).toBeUndefined()
@@ -429,8 +430,8 @@ describe('tabFocusUri', () => {
   })
 
   it('sends nothing while the session has a pending file edit, so the proposed diff stays in front', () => {
-    // A VSCode a fájlírásnál egy osztott diff tabot nyit; a tab URI a chat tabra váltana el róla.
-    // Visszaengedett (`released`) kérésnél is: a natív kérdés és a diff akkor is nyitva van.
+    // For a file write VSCode opens a split diff tab; the tab URI would switch away from it to the
+    // chat tab. Also for a released request: the native prompt and the diff are open then too.
     expect(tabFocusUri(extensionView(), 'pid', true, [{ sessionId: SESSION_ID, kind: 'edit' }])).toBeUndefined()
     expect(
       tabFocusUri(extensionView(), 'workspace', true, [
@@ -464,7 +465,7 @@ describe('isSafeForCli', () => {
   })
 
   it('rejects folders cmd.exe would reinterpret even inside quotes', () => {
-    // A `%TEMP%` a review mérése szerint csendben egy MÁSIK útvonalra bontódik ki.
+    // As a review measured, `%TEMP%` silently expands to a DIFFERENT path.
     expect(isSafeForCli('C:\\work\\%TEMP%')).toBe(false)
     expect(isSafeForCli('C:\\work\\a"b')).toBe(false)
   })
@@ -477,7 +478,7 @@ describe('isSafeForCli', () => {
   })
 
   it('rejects a folder the code CLI would read as an option', () => {
-    // A security review esete: idézés után a `code` ezt kapcsolóként kapná meg.
+    // The case a security review found: after quoting, `code` would still receive this as an option.
     expect(isSafeForCli('--install-extension=C:\\x\\evil.vsix')).toBe(false)
     expect(isSafeForCli('-n')).toBe(false)
   })

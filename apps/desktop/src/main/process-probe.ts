@@ -1,25 +1,25 @@
 import { createRequire } from 'node:module'
 import { PROBE_TTL_MS, createSnapshotProbe, type ProcessProbe, type ProcessSnapshot } from '@claudeswitcher/core'
 
-// Nem `require`-nek nevezzük: a CJS bundle modulburkolójában a `require` már
-// paraméterként létezik, és egy azonos nevű `const` ütközne vele.
+// Not named `require`: in the module wrapper of the CJS bundle `require` already exists as a
+// parameter, and a `const` of the same name would clash with it.
 const requireNative = createRequire(import.meta.url)
 
 const TH32CS_SNAPPROCESS = 0x2
 const PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 const INVALID_HANDLE_VALUE = -1
 const MAX_PATH = 260
-/** A `PROCESSENTRY32W` mérete x64-en: 9 skalár mező (egy 8 bájtos ULONG_PTR-rel) + 260 WCHAR. */
+/** The size of `PROCESSENTRY32W` on x64: 9 scalar fields (one an 8-byte ULONG_PTR) + 260 WCHARs. */
 const PROCESSENTRY32W_SIZE_X64 = 568
 
 /**
- * Felső korlát a bejárt processzek számára. Egy asztali gépen néhány száz processz fut; a
- * korlát azt védi ki, hogy egy váratlanul viselkedő `Process32NextW` végtelen ciklusba ejtse
- * az Electron főprocesszt, ami az egész appot lefagyasztaná.
+ * Upper bound on the processes walked. A desktop machine runs a few hundred processes; the bound
+ * keeps an unexpectedly behaving `Process32NextW` from sending the Electron main process into an
+ * endless loop, which would freeze the whole app.
  */
 const MAX_PROCESSES = 100_000
 
-/** A `PROCESSENTRY32W` mezői, ahogy a koffi a JS objektum és a struct között oda-vissza alakítja. */
+/** The fields of `PROCESSENTRY32W`, as koffi converts between the JS object and the struct both ways. */
 interface ProcessEntry32 {
   dwSize: number
   cntUsage: number
@@ -39,9 +39,9 @@ interface FileTime {
 }
 
 interface Kernel32 {
-  /** A `koffi.sizeof(PROCESSENTRY32W)`: ez kerül a `dwSize`-ba, enélkül a Process32FirstW elbukik. */
+  /** `koffi.sizeof(PROCESSENTRY32W)`: it goes into `dwSize`; without it Process32FirstW fails. */
   entrySize: number
-  // A HANDLE (`intptr`) visszatérés koffi-ben futásidőben `number` vagy `bigint` lehet.
+  // In koffi a HANDLE (`intptr`) return value can be a `number` or a `bigint` at run time.
   CreateToolhelp32Snapshot(flags: number, pid: number): number | bigint
   Process32FirstW(snapshot: number, entry: ProcessEntry32): number
   Process32NextW(snapshot: number, entry: ProcessEntry32): number
@@ -50,17 +50,17 @@ interface Kernel32 {
   CloseHandle(handle: number): number
 }
 
-/** `undefined`: még nem próbáltuk. `null`: a betöltés elbukott. */
+/** `undefined`: not tried yet. `null`: loading failed. */
 let kernel32: Kernel32 | null | undefined
 
 /**
- * Lustán tölti be a kernel32 kötéseket, és egy hibát elnyel, ugyanazért, amiért a
- * `focus-window.ts` a user32-t: egy modulszintű koffi-hiba az indulási hibadialógus bekötése
- * előtt dobna. Elérhetetlen natív modulnál a hívó a PowerShell tartalékra esik vissza; ezt
- * egyszer naplózzuk, mert az eredményt megjegyezzük.
+ * Loads the kernel32 bindings lazily and swallows an error, for the same reason `focus-window.ts`
+ * does with user32 (`loadUser32`): a module-level koffi error would throw before the startup error
+ * dialog is wired up. With an unavailable native module the caller falls back to the PowerShell
+ * probe; this is logged once, because the result is remembered.
  *
- * A structok névtelenek: a koffi a típusneveket processz-szinten regisztrálja, és egy
- * újratöltött modul (teszt, HMR) egy névvel ellátott structot másodszor már nem definiálhatna.
+ * The structs are anonymous: koffi registers type names per process, and a reloaded module (a
+ * test, HMR) could not define a named struct a second time.
  */
 function loadKernel32(): Kernel32 | null {
   if (kernel32 !== undefined) return kernel32
@@ -91,7 +91,7 @@ function loadKernel32(): Kernel32 | null {
       CreateToolhelp32Snapshot: lib.func('CreateToolhelp32Snapshot', 'intptr', ['uint32', 'uint32']),
       Process32FirstW: lib.func('Process32FirstW', 'int', ['intptr', entryPtr]),
       Process32NextW: lib.func('Process32NextW', 'int', ['intptr', entryPtr]),
-      // A Win32 BOOL egy 4 bájtos int, nem az 1 bájtos C bool.
+      // A Win32 BOOL is a 4-byte int, not the 1-byte C bool.
       OpenProcess: lib.func('OpenProcess', 'intptr', ['uint32', 'int', 'uint32']),
       GetProcessTimes: lib.func('GetProcessTimes', 'int', ['intptr', fileTimeOut, fileTimeOut, fileTimeOut, fileTimeOut]),
       CloseHandle: lib.func('CloseHandle', 'int', ['intptr']),
@@ -104,31 +104,31 @@ function loadKernel32(): Kernel32 | null {
 }
 
 /**
- * Az exe névből a `Get-Process` `Name` oszlopa: a `.exe` kiterjesztés nélkül, a betűméretet
- * megtartva (`Code.exe` → `Code`, `Code - Insiders.exe` → `Code - Insiders`). Más kiterjesztést
- * a .NET sem vág le, és a rendszerprocesszeknek (`Registry`, `System`) nincs is.
+ * The `Name` column of `Get-Process` from the exe name: without the `.exe` extension, keeping the
+ * case (`Code.exe` → `Code`, `Code - Insiders.exe` → `Code - Insiders`). .NET does not cut any other
+ * extension either, and the system processes (`Registry`, `System`) have none.
  */
 export function imageNameFromExe(exe: string): string {
   return exe.replace(/\.exe$/i, '')
 }
 
 /**
- * Egy FILETIME két 32 bites feléből a decimális string, ugyanaz, amit a
- * `StartTime.ToFileTime()` adott, és amit a session fájl `procStart`-ja tárol. A 64 bites
- * érték nem fér el pontosan egy `number`-ben, ezért BigInt-tel rakjuk össze; a feleket
- * előjel nélkülinek vesszük.
+ * The decimal string from the two 32-bit halves of a FILETIME: the same value
+ * `StartTime.ToFileTime()` gave and the session file's `procStart` stores. The 64-bit value does
+ * not fit exactly in a `number`, so it is put together with BigInt; the halves are taken as
+ * unsigned.
  */
 export function fileTimeToDecimal(low: number, high: number): string {
   return ((BigInt(high >>> 0) << 32n) | BigInt(low >>> 0)).toString()
 }
 
-/** Egy processz a Toolhelp32 listából. */
+/** A process from the Toolhelp32 list. */
 export interface ProcessListEntry {
   pid: number
   image: string
 }
 
-/** A struct releváns mezőiből egy listaelem, vagy `undefined`, ha nincs neve. */
+/** A list entry from the relevant fields of the struct, or `undefined` if it has no name. */
 export function entryFromStruct(raw: Pick<ProcessEntry32, 'th32ProcessID' | 'szExeFile'>): ProcessListEntry | undefined {
   const nul = raw.szExeFile.indexOf('\0')
   const exe = nul === -1 ? raw.szExeFile : raw.szExeFile.slice(0, nul)
@@ -137,17 +137,17 @@ export function entryFromStruct(raw: Pick<ProcessEntry32, 'th32ProcessID' | 'szE
 }
 
 /**
- * Pillanatkép egy processzlistából. Az indulási időt lustán kérdezzük le, csak a ténylegesen
- * megkérdezett pidekre (egy szkennelés 20–30 pid, nem mind a ~650), és pidenként legfeljebb
- * egyszer: a sikertelen lekérdezést is megjegyezzük. Listán kívüli pidet nem kérdezünk le:
- * az halott, akármi is futna most azon a pid-en.
+ * A snapshot from a process list. The start time is queried lazily, only for the pids actually
+ * asked about (a scan asks about 20 to 30 pids, not all ~650), and at most once per pid: a failed
+ * query is remembered too. A pid not on the list is not queried: it is dead, whatever might run on
+ * that pid now.
  */
 export function snapshotFromEntries(
   entries: readonly ProcessListEntry[],
   queryStart: (pid: number) => string | undefined,
 ): ProcessSnapshot {
   const images = new Map(entries.map((entry) => [entry.pid, entry.image]))
-  /** `null`: lekérdeztük, és nem sikerült. */
+  /** `null`: queried, and it failed. */
   const starts = new Map<number, string | null>()
   return {
     size: images.size,
@@ -197,9 +197,9 @@ function listProcesses(api: Kernel32): ProcessListEntry[] {
 }
 
 /**
- * A processz creation FILETIME-ja, vagy `undefined`, ha nem kérdezhető le: access denied
- * (egy másik felhasználó vagy egy védett processz), vagy a processz közben kilépett. A
- * registry sessionjei a saját felhasználónk `claude` processzei, náluk ez sikerül.
+ * The process's creation FILETIME, or `undefined` if it cannot be queried: access denied (another
+ * user or a protected process), or the process exited meanwhile. The registry's sessions are
+ * `claude` processes of the current user, and for them it succeeds.
  */
 function queryStartTime(api: Kernel32, pid: number): string | undefined {
   const handle = Number(api.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid))
@@ -221,8 +221,9 @@ function snapshotWith(api: Kernel32): ProcessSnapshot {
 }
 
 /**
- * Egy natív pillanatkép most, vagy `undefined`, ha a kernel32 kötések nem tölthetők be. Hibánál
- * dob. A probe ezt használja; külön is elérhető, hogy a mérés és a live teszt közvetlenül lássa.
+ * A native snapshot now, or `undefined` if the kernel32 bindings cannot be loaded. Throws on an
+ * error. The probe uses the same snapshot; this is exported separately so the measurement and the
+ * live test can see it directly.
  */
 export function takeNativeSnapshot(): ProcessSnapshot | undefined {
   const api = loadKernel32()
@@ -230,14 +231,14 @@ export function takeNativeSnapshot(): ProcessSnapshot | undefined {
 }
 
 /**
- * A natív Windows process probe, vagy `undefined`, ha a kernel32 kötések nem tölthetők be:
- * ilyenkor a hívó a core PowerShell probe-jára esik vissza.
+ * The native Windows process probe, or `undefined` if the kernel32 bindings cannot be loaded: then
+ * the caller falls back to the core PowerShell probe.
  *
- * A `refresh()` a fő szálon veszi a listát, PowerShell nélkül. Ezen a gépen ~15 ms ~680
- * processzre (2026-10-22), és ennek szinte egésze maga a `CreateToolhelp32Snapshot` kernelhívás
- * (egy nyers Buffer-es bejárás ugyanennyi volt), a 20–30 indulási idő lekérdezése ~0,3 ms.
- * Ez elhanyagolható a korábbi 330 ms–10 s blokkoláshoz képest, de nem nulla, ezért a TTL a
- * régi 2 s marad: a poll és a lifecycle hookok által sűrűn indított szkennelések sem kérnek gyakrabban.
+ * `refresh()` takes the list on the main thread, without PowerShell. Measured at ~15 ms for ~680
+ * processes (2026-10-22), almost all of it the `CreateToolhelp32Snapshot` kernel call itself (a raw
+ * Buffer-based walk took the same), and querying the 20 to 30 start times took ~0.3 ms. That is
+ * negligible next to the earlier 330 ms to 10 s of blocking, but not zero, so the TTL stays at the
+ * old 2 s: the scans that the poll and the lifecycle hooks start often do not ask more often either.
  */
 export function createNativeProcessProbe(ttlMs = PROBE_TTL_MS): ProcessProbe | undefined {
   const api = loadKernel32()

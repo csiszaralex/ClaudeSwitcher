@@ -4,13 +4,13 @@ import { isNotFoundError, writeFileAtomic } from '@claudeswitcher/core'
 import { createToken, isToken } from '@claudeswitcher/daemon'
 
 /**
- * Tartós daemon-token. A telepített hookok a settings.json `env` blokkjából
- * kapják, tehát az app újraindításai között azonosnak kell maradnia, különben minden
- * újraindítás elavulttá tenné a telepítést.
+ * A persistent daemon token. The installed hooks get it from the `env` block of settings.json, so
+ * it has to stay the same across app restarts, otherwise every restart would make the install
+ * stale.
  *
- * Új tokent csak két esetben készítünk: ha a fájl nincs meg (ENOENT), vagy ha a tartalma nem
- * érvényes token. Minden más olvasási hiba dob, és az indulási hibadialógus mutatja: egy
- * átmeneti hiba miatt csendben lecserélt token után minden telepített hook 401-et kapna.
+ * A new token is made in only two cases: if the file does not exist (ENOENT), or if its content is
+ * not a valid token. Every other read error throws, and the startup error dialog shows it: after a
+ * token silently replaced because of a transient error, every installed hook would get a 401.
  */
 export async function loadOrCreateToken(dir: string): Promise<string> {
   const file = path.join(dir, 'daemon-token')

@@ -4,15 +4,15 @@ import { DEFAULT_HOTKEY } from '../shared/settings.js'
 // The registration result types and their Hungarian text are in `shared/hotkey-status.ts`: the
 // setup window shows them too.
 
-/** A `globalShortcut.register` alakja, hogy a foglalás Electron nélkül tesztelhető legyen. */
+/** The shape of `globalShortcut.register`, so the registration can be tested without Electron. */
 export type RegisterAccelerator = (accelerator: string, handler: () => void) => boolean
 
 /**
- * Lefoglal egy gyorsbillentyűt, és soha nem dob.
+ * Registers a hotkey, and never throws.
  *
- * A gyorsbillentyű a felhasználó által szerkesztett config.json-ból jön (a `loadConfig` csak azt
- * nézi, hogy nem üres szöveg), ezért egy dobás itt nem programozási hiba, hanem egy elgépelés.
- * Korábban az `app.whenReady()` hibakezelőjéhez jutott, és az app el sem indult.
+ * The hotkey comes from the config.json the user edits (`loadConfig` only checks that it is a
+ * non-empty string), so a throw here is not a programming error but a typo. Before this guard the
+ * throw reached the `app.whenReady()` error handler, and the app did not start at all.
  */
 export function registerHotkey(register: RegisterAccelerator, accelerator: string, handler: () => void): HotkeyStatus {
   try {
@@ -24,10 +24,10 @@ export function registerHotkey(register: RegisterAccelerator, accelerator: strin
 }
 
 /**
- * Lefoglalja a beállított gyorsbillentyűt; ha érvénytelen, a `DEFAULT_HOTKEY`-t. Így egy elgépelés
- * után is van működő gyorsbillentyű, és a tálca megmondja, mit kell javítani (lásd `hotkeyLabel`).
- * Foglalt billentyűnél nem lépünk az alapértékre: az érvényes, csak most nem elérhető, és a
- * felhasználó szándékosan választotta.
+ * Registers the configured hotkey, or `DEFAULT_HOTKEY` if it is invalid. So there is a working
+ * hotkey even after a typo, and the tray says what to fix (see `hotkeyLabel`). A taken hotkey does
+ * not fall back to the default: it is valid, only unavailable right now, and the user chose it on
+ * purpose.
  */
 export function registerHotkeyOrDefault(
   register: RegisterAccelerator,

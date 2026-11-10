@@ -1,23 +1,23 @@
-/** Legfeljebb ennyi renderer-újratöltés `RELOAD_WINDOW_MS` alatt. */
+/** At most this many renderer reloads within `RELOAD_WINDOW_MS`. */
 export const RELOAD_LIMIT = 3
 export const RELOAD_WINDOW_MS = 60_000
 
 export interface ReloadLimiterOptions {
   limit?: number | undefined
   windowMs?: number | undefined
-  /** Az óra, hogy a csúszó ablak tesztelhető legyen. */
+  /** The clock, so the sliding window can be tested. */
   now?: (() => number) | undefined
 }
 
 /**
- * Egy csúszó ablakos korlát az overlay renderer újratöltésére. Igazat ad, ha az újratöltés még
- * belefér, és ilyenkor fel is jegyzi.
+ * A sliding-window limit on reloading the overlay renderer. Returns true if the reload still fits,
+ * and then records it.
  *
- * Egy betöltéskor mindig összeomló renderer (például OOM egy hatalmas állapoton) korlát nélkül
- * szoros összeomlás és újratöltés ciklusba esne, ami égeti a CPU-t és teleírja a naplót. A
- * megtagadott kísérlet nem számít bele az ablakba, így a korlát az utolsó engedélyezett
- * újratöltések után legkésőbb `windowMs` múlva újra enged (az `index.ts` ilyenkor az overlay
- * következő megnyitásakor próbálja újra).
+ * Without a limit, a renderer that always crashes on load (for example OOM on a huge state) would
+ * fall into a tight crash and reload loop, which burns CPU and floods the log. A refused attempt
+ * does not count towards the window, so the limit allows again at the latest `windowMs` after the
+ * last allowed reloads (the overlay's `show` in `createOverlayController` then retries on the next
+ * opening).
  */
 export function createReloadLimiter(options: ReloadLimiterOptions = {}): () => boolean {
   const limit = options.limit ?? RELOAD_LIMIT

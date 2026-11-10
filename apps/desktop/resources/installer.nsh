@@ -206,7 +206,7 @@
   !macroend
 !endif
 
-# A real uninstall only (Review Focus 1): an upgrade runs this with `--updated`, and must keep the
+# A real uninstall only: an upgrade runs this with `--updated`, and must keep the
 # integration, autostart and the shortcuts. `--uninstall` makes the app quit if it still runs,
 # turn autostart off and remove the Claude Code integration (claude-integration.ts stays the only
 # writer of settings.json). userData is kept (deleteAppDataOnUninstall: false); repo builds share it.

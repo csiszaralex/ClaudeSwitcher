@@ -1,8 +1,8 @@
-/** Az overlay teljes mérete DIP-ben. A `createOverlay` ezzel hozza létre az ablakot. */
+/** The full size of the overlay in DIPs. `createOverlay` creates the window with it. */
 export const OVERLAY_WIDTH = 620
 export const OVERLAY_HEIGHT = 600
 
-/** Egy téglalap DIP-ben, az Electron `Rectangle` alakjában. */
+/** A rectangle in DIPs, in the shape of Electron's `Rectangle`. */
 export interface Bounds {
   x: number
   y: number
@@ -11,12 +11,12 @@ export interface Bounds {
 }
 
 /**
- * Az overlay helye és mérete egy kijelző munkaterületén: vízszintesen középen, függőlegesen a
- * harmadánál, és mindig teljesen a munkaterületen belül.
+ * The overlay's position and size on a display's work area: centred horizontally, at a third
+ * vertically, and always entirely inside the work area.
  *
- * A méretet is a munkaterülethez szorítja. Egy 600 DIP-nél alacsonyabb munkaterületen (például
- * egy 768 pixeles laptop 125 %-on) a régi számítás negatív eltolást adott, és az overlay teteje
- * kilógott a képernyőről. A hívó egyetlen `setBounds`-szal állítja be helyet és méretet együtt.
+ * It clamps the size to the work area too. On a work area lower than 600 DIPs (for example a
+ * 768-pixel laptop at 125 %) the old calculation gave a negative offset, and the top of the overlay
+ * stuck out of the screen. The caller sets position and size together with a single `setBounds`.
  */
 export function overlayBounds(workArea: Bounds): Bounds {
   const width = Math.min(OVERLAY_WIDTH, Math.floor(workArea.width))

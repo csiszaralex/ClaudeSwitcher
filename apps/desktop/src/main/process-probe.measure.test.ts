@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest'
 import { takeNativeSnapshot } from './process-probe.js'
 
 /**
- * Egyszeri, kézzel indított mérés ezen a gépen: `CS_PROBE_MEASURE=1 vitest run process-probe.measure`.
- * Csak olvas — semmilyen processzt nem állít le és nem jelez. Egy PowerShell pillanatképet
- * is vesz összehasonlításnak; az az appon kívül, egyszer fut, ezért elfogadható.
+ * A one-off measurement on the local machine, started by hand: `CS_PROBE_MEASURE=1 vitest run process-probe.measure`.
+ * It only reads: it stops and signals no process. It also takes a PowerShell snapshot for
+ * comparison; that runs outside the app, once, so it is acceptable.
  */
 const enabled = process.env['CS_PROBE_MEASURE'] === '1'
 
@@ -31,7 +31,7 @@ async function readPids(dir: string, ext: string): Promise<RegistryEntry[]> {
       const procStart = 'procStart' in raw && typeof raw.procStart === 'string' ? raw.procStart : undefined
       out.push({ pid: raw.pid, procStart })
     } catch {
-      // Olvashatatlan fájl: kimarad.
+      // An unreadable file is skipped.
     }
   }
   return out
@@ -94,7 +94,7 @@ describe.runIf(enabled)('native probe measurement (manual)', () => {
 
     for (const row of rows) {
       expect(row.nativeAlive, `alive ${String(row.pid)}`).toBe(row.psAlive)
-      // Csak az élő pideknél van mit összevetni; a PowerShell a halottakat nem listázza.
+      // Only the live pids can be compared; PowerShell does not list the dead ones.
       if (row.psAlive) expect(row.nativeImage, `image ${String(row.pid)}`).toBe(row.psImage)
     }
   }, 60_000)
