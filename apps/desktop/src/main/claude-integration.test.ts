@@ -290,44 +290,68 @@ describe('removeIntegration', () => {
 })
 
 describe('hookInstallState', () => {
-  const installedHooks = (): HookGroups => applyIntegration({}, OPTIONS).settings['hooks'] as HookGroups
+  const installed = (): Record<string, unknown> => applyIntegration({}, OPTIONS).settings
+  const installedHooks = (): HookGroups => installed()['hooks'] as HookGroups
+  /** The settings with these hooks and the install's token. */
+  const withHooks = (hooks: unknown): Record<string, unknown> => ({ ...installed(), hooks })
+  const stateOf = (settings: Record<string, unknown>) => hookInstallState(settings, OPTIONS.token)
 
   it('reports a fresh install as current', () => {
-    expect(hookInstallState(installedHooks())).toEqual({ kind: 'current' })
+    expect(stateOf(installed())).toEqual({ kind: 'current' })
   })
 
   it('reports no integration when none of our hooks is there, foreign ones included', () => {
-    expect(hookInstallState(undefined)).toEqual({ kind: 'not-installed' })
-    expect(hookInstallState({})).toEqual({ kind: 'not-installed' })
-    expect(hookInstallState({ Notification: [FOREIGN_NOTIFICATION] })).toEqual({ kind: 'not-installed' })
+    expect(stateOf({})).toEqual({ kind: 'not-installed' })
+    expect(stateOf(withHooks({}))).toEqual({ kind: 'not-installed' })
+    expect(stateOf(withHooks({ Notification: [FOREIGN_NOTIFICATION] }))).toEqual({ kind: 'not-installed' })
   })
 
   it('lists the events an older install lacks', () => {
     // An install from before the two failure events were added: they are not in it.
     const older = without(installedHooks(), ['PostToolUseFailure', 'StopFailure'])
-    expect(hookInstallState(older)).toEqual({ kind: 'stale', missing: ['StopFailure', 'PostToolUseFailure'] })
+    expect(stateOf(withHooks(older))).toEqual({
+      kind: 'stale',
+      missing: ['StopFailure', 'PostToolUseFailure'],
+      tokenMismatch: false,
+    })
   })
 
   it('counts our hook on the wrong route or the wrong port as missing', () => {
     const hooks = installedHooks()
     const wrongRoute = { ...hooks['Stop']![0]!.hooks[0]!, url: 'http://127.0.0.1:47821/hooks/lifecycle/end' }
     const wrongPort = { ...hooks['PreToolUse']![0]!.hooks[0]!, url: 'http://127.0.0.1:11111/hooks/pre-tool-use' }
-    const state = hookInstallState({ ...hooks, Stop: [{ hooks: [wrongRoute] }], PreToolUse: [{ hooks: [wrongPort] }] })
-    expect(state).toEqual({ kind: 'stale', missing: ['Stop', 'PreToolUse'] })
+    const state = stateOf(withHooks({ ...hooks, Stop: [{ hooks: [wrongRoute] }], PreToolUse: [{ hooks: [wrongPort] }] }))
+    expect(state).toEqual({ kind: 'stale', missing: ['Stop', 'PreToolUse'], tokenMismatch: false })
   })
 
   it('finds our hook beside foreign ones in the same event', () => {
     const hooks = installedHooks()
-    expect(hookInstallState({ ...hooks, Notification: [FOREIGN_NOTIFICATION, ...hooks['Notification']!] })).toEqual({
+    expect(stateOf(withHooks({ ...hooks, Notification: [FOREIGN_NOTIFICATION, ...hooks['Notification']!] }))).toEqual({
       kind: 'current',
     })
+  })
+
+  it('reports our hooks with another token as stale, since every hook would get a 401', () => {
+    // A settings.json brought from another machine carries that machine's token.
+    expect(hookInstallState(installed(), 'def456')).toEqual({ kind: 'stale', missing: [], tokenMismatch: true })
+    expect(stateOf(without(installed(), ['env']))).toEqual({ kind: 'stale', missing: [], tokenMismatch: true })
+  })
+
+  it('does not report a token problem when none of our hooks is there', () => {
+    expect(hookInstallState({ env: { CLAUDESWITCHER_TOKEN: 'def456' } }, OPTIONS.token)).toEqual({ kind: 'not-installed' })
   })
 })
 
 describe('integrationNotice', () => {
-  it('names the missing hook count only for a stale install', () => {
-    expect(integrationNotice({ kind: 'stale', missing: ['PostToolUseFailure', 'StopFailure'] })).toBe(
+  it('names the missing hook count and a wrong token only for a stale install', () => {
+    expect(integrationNotice({ kind: 'stale', missing: ['PostToolUseFailure', 'StopFailure'], tokenMismatch: false })).toBe(
       'Integráció elavult, telepítsd újra (2 hiányzó hook)',
+    )
+    expect(integrationNotice({ kind: 'stale', missing: [], tokenMismatch: true })).toBe(
+      'Integráció elavult, telepítsd újra (rossz token)',
+    )
+    expect(integrationNotice({ kind: 'stale', missing: ['Stop'], tokenMismatch: true })).toBe(
+      'Integráció elavult, telepítsd újra (1 hiányzó hook, rossz token)',
     )
     expect(integrationNotice({ kind: 'current' })).toBeUndefined()
     expect(integrationNotice({ kind: 'not-installed' })).toBeUndefined()
@@ -338,19 +362,20 @@ describe('integrationNotice', () => {
 describe('readHookInstallState on a real file', () => {
   it('reads a fresh install as current, and an absent file as not installed', async () => {
     const dir = await tempDir('cs-setup-')
-    expect(await readHookInstallState(dir)).toEqual({ kind: 'not-installed' })
+    expect(await readHookInstallState(dir, OPTIONS.token)).toEqual({ kind: 'not-installed' })
     await installIntegration(dir, OPTIONS)
-    expect(await readHookInstallState(dir)).toEqual({ kind: 'current' })
+    expect(await readHookInstallState(dir, OPTIONS.token)).toEqual({ kind: 'current' })
+    expect(await readHookInstallState(dir, 'def456')).toEqual({ kind: 'stale', missing: [], tokenMismatch: true })
   })
 
   it('treats an unreadable or unparsable file as unknown, not as stale', async () => {
     const dir = await tempDir('cs-setup-')
     await writeFile(path.join(dir, 'settings.json'), '{ not json')
-    expect(await readHookInstallState(dir)).toEqual({ kind: 'unknown' })
+    expect(await readHookInstallState(dir, OPTIONS.token)).toEqual({ kind: 'unknown' })
 
     const asDir = await tempDir('cs-setup-')
     await mkdir(path.join(asDir, 'settings.json'))
-    expect(await readHookInstallState(asDir)).toEqual({ kind: 'unknown' })
+    expect(await readHookInstallState(asDir, OPTIONS.token)).toEqual({ kind: 'unknown' })
   })
 
   it('never writes the file it reads', async () => {
@@ -358,7 +383,7 @@ describe('readHookInstallState on a real file', () => {
     const file = path.join(dir, 'settings.json')
     const raw = JSON.stringify({ hooks: { Notification: [FOREIGN_NOTIFICATION] } })
     await writeFile(file, raw)
-    await readHookInstallState(dir)
+    await readHookInstallState(dir, OPTIONS.token)
     expect(await readFile(file, 'utf8')).toBe(raw)
     expect(await readdir(dir)).toEqual(['settings.json'])
   })

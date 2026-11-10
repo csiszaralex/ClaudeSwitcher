@@ -237,14 +237,15 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
  * - `current`: every event has a hook of ours on the right route and on `DAEMON_PORT`.
  * - `stale`: ours are there, but for the `missing` events the hook is absent or points to a wrong
  *   route or port. An install by an earlier version looks like this once a new event has been added
- *   to `HOOK_CONTRACT`.
+ *   to `HOOK_CONTRACT`. Also stale with `tokenMismatch`: the `env` token is not the daemon's, so
+ *   every hook gets a 401, for example in a settings.json brought from another machine.
  * - `unknown`: the file cannot be read or parsed. That is not "stale": we do not know.
  *
  * The kinds are listed once, in `INTEGRATION_KINDS` (the setup window checks against it).
  */
 export type HookInstallState =
   | { kind: Exclude<IntegrationKind, 'stale'> }
-  | { kind: 'stale'; missing: string[] }
+  | { kind: 'stale'; missing: string[]; tokenMismatch: boolean }
 
 /** Our hooks of one event, across the matcher groups. A malformed entry holds none of ours. */
 function ourHooksOf(groups: unknown): Record<string, unknown>[] {
@@ -258,11 +259,16 @@ function ourHooksOf(groups: unknown): Record<string, unknown>[] {
 }
 
 /**
- * A pure function: from the `hooks` section of settings.json it tells which of our events are
- * missing. The expected URL comes from the same `HOOK_CONTRACT` and `hookUrl` the install writes
- * from.
+ * A pure function: from settings.json it tells which of our events are missing, and whether the
+ * `env` token is the daemon's `token`. The expected URL comes from the same `HOOK_CONTRACT` and
+ * `hookUrl` the install writes from.
  */
-export function hookInstallState(hooks: unknown, port: number = DAEMON_PORT): HookInstallState {
+export function hookInstallState(
+  settings: Record<string, unknown>,
+  token: string,
+  port: number = DAEMON_PORT,
+): HookInstallState {
+  const hooks = settings['hooks']
   if (!isRecord(hooks)) return { kind: 'not-installed' }
   let anyOurs = false
   const missing: string[] = []
@@ -273,20 +279,26 @@ export function hookInstallState(hooks: unknown, port: number = DAEMON_PORT): Ho
     if (!ours.some((hook) => hook['url'] === expected)) missing.push(entry.event)
   }
   if (!anyOurs) return { kind: 'not-installed' }
-  return missing.length === 0 ? { kind: 'current' } : { kind: 'stale', missing }
+  const env = settings['env']
+  const tokenMismatch = !isRecord(env) || env[TOKEN_ENV] !== token
+  return missing.length === 0 && !tokenMismatch ? { kind: 'current' } : { kind: 'stale', missing, tokenMismatch }
 }
 
 /** The one line shown in the tray, or `undefined` if there is nothing to say. */
 export function integrationNotice(state: HookInstallState): string | undefined {
   if (state.kind !== 'stale') return undefined
-  return `Integráció elavult, telepítsd újra (${String(state.missing.length)} hiányzó hook)`
+  const reasons = [
+    ...(state.missing.length > 0 ? [`${String(state.missing.length)} hiányzó hook`] : []),
+    ...(state.tokenMismatch ? ['rossz token'] : []),
+  ]
+  return `Integráció elavult, telepítsd újra (${reasons.join(', ')})`
 }
 
 /**
  * Only reads: it looks for settings.json where the install writes it (`userSettingsPath`), but never
  * writes it. A missing file: not installed. Every other read or parse error is `unknown`.
  */
-export async function readHookInstallState(claudeDir: string): Promise<HookInstallState> {
+export async function readHookInstallState(claudeDir: string, token: string): Promise<HookInstallState> {
   let raw: string
   try {
     raw = await readFile(userSettingsPath(claudeDir), 'utf8')
@@ -299,7 +311,7 @@ export async function readHookInstallState(claudeDir: string): Promise<HookInsta
   } catch {
     return { kind: 'unknown' }
   }
-  return isRecord(parsed) ? hookInstallState(parsed['hooks']) : { kind: 'unknown' }
+  return isRecord(parsed) ? hookInstallState(parsed, token) : { kind: 'unknown' }
 }
 
 /** Installs into the user's settings.json. Returns the descriptions of the conflicts. */

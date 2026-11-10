@@ -463,11 +463,13 @@ async function startApp(): Promise<void> {
    * after every install or uninstall; it only reads settings.json.
    */
   function syncIntegrationNotice(): void {
-    readHookInstallState(resolveClaudeDir())
+    readHookInstallState(resolveClaudeDir(), token)
       .then((state) => {
         console.log(
           `[claudeswitcher] hook install state: ${state.kind}` +
-            (state.kind === 'stale' ? ` (missing: ${state.missing.join(', ')})` : ''),
+            (state.kind === 'stale'
+              ? ` (missing: ${state.missing.join(', ')}${state.tokenMismatch ? '; token mismatch' : ''})`
+              : ''),
         )
         tray.setNotice(integrationNotice(state))
         // An open setup window shows the integration state too.
@@ -531,7 +533,7 @@ async function startApp(): Promise<void> {
 
   // Every setup handler first checks that the setup page sent it (`handleFrom`).
   handleFrom(SETUP_PAGE, SETUP_CHANNELS.load, async () => {
-    const integration = await readHookInstallState(resolveClaudeDir())
+    const integration = await readHookInstallState(resolveClaudeDir(), token)
     return setupState(settings.snapshot(), { hotkey: hotkeyController.registration(), integration, showAll: setupWindow.showAll() })
   })
   handleFrom(

@@ -139,7 +139,7 @@ describe('setupState', () => {
 
   it('asks for the unconfirmed settings and passes the rest through', () => {
     const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(['jumpToTab']), autostartAvailable: true }
-    expect(setupState(snapshot, { hotkey, integration: { kind: 'stale', missing: ['Stop'] }, showAll: true })).toEqual({
+    expect(setupState(snapshot, { hotkey, integration: { kind: 'stale', missing: ['Stop'], tokenMismatch: false }, showAll: true })).toEqual({
       values: VALUES,
       ask: ['autostart', 'hideAfterLastDecision', 'hotkey'],
       autostartAvailable: true,
