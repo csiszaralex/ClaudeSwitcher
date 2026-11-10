@@ -6,7 +6,7 @@ const same = (text: string): PreviewLine => ({ sign: 'same', text })
 const add = (text: string): PreviewLine => ({ sign: 'add', text })
 const remove = (text: string): PreviewLine => ({ sign: 'remove', text })
 
-describe('editPreview — Write', () => {
+describe('editPreview: Write', () => {
   it('shows the content as new content, line by line', () => {
     expect(editPreview('Write', { file_path: 'p:\\a.ts', content: 'a\nb\n' })).toEqual({
       blocks: [{ title: 'új tartalom', notes: [], lines: [same('a'), same('b')], hiddenLines: 0 }],
@@ -26,8 +26,8 @@ describe('editPreview — Write', () => {
   })
 })
 
-describe('editPreview — Write of a notebook', () => {
-  // A mért alak: így írta a Claude Code az `m3-nb.ipynb`-t a cs-spike live teszten.
+describe('editPreview: Write of a notebook', () => {
+  // The measured shape: this is how Claude Code wrote a notebook in a live test.
   const measured =
     '{"cells":[{"cell_type":"code","execution_count":null,"metadata":{},"outputs":[],"source":["print(\\"hello\\")"]}],' +
     '"metadata":{"kernelspec":{"display_name":"Python 3","language":"python","name":"python3"},' +
@@ -99,7 +99,7 @@ describe('editPreview — Write of a notebook', () => {
     for (const file_path of ['n.json', 'n.ipynb.bak', 'ipynb']) {
       expect(editPreview('Write', { file_path, content: measured })?.blocks[0]?.title).toBe('új tartalom')
     }
-    // Útvonal nélkül sem jegyzetfüzet — a Write előnézete eddig sem kérte az útvonalat.
+    // Without a path it is not a notebook either: the Write preview did not need the path before.
     expect(editPreview('Write', { content: measured })?.blocks[0]?.title).toBe('új tartalom')
   })
 
@@ -115,7 +115,7 @@ describe('editPreview — Write of a notebook', () => {
   })
 })
 
-describe('editPreview — Edit', () => {
+describe('editPreview: Edit', () => {
   it('shows the changed lines as - and +, the shared ones around them as context', () => {
     const preview = editPreview('Edit', {
       file_path: 'x',
@@ -156,13 +156,13 @@ describe('editPreview — Edit', () => {
     ).toEqual(['minden előfordulás'])
   })
 
-  it('has no preview without both strings — the panel falls back to the raw input', () => {
+  it('has no preview without both strings: the panel falls back to the raw input', () => {
     expect(editPreview('Edit', { file_path: 'x', old_string: 'a' })).toBeUndefined()
     expect(editPreview('Edit', { file_path: 'x', old_string: 1, new_string: 'b' })).toBeUndefined()
   })
 })
 
-describe('editPreview — MultiEdit', () => {
+describe('editPreview: MultiEdit', () => {
   it('shows each edit as its own numbered block', () => {
     const preview = editPreview('MultiEdit', {
       file_path: 'x',
@@ -180,7 +180,7 @@ describe('editPreview — MultiEdit', () => {
     })
   })
 
-  it('has no preview when any edit is unreadable — hiding one would hide part of what is approved', () => {
+  it('has no preview when any edit is unreadable: hiding one would hide part of what is approved', () => {
     expect(
       editPreview('MultiEdit', { file_path: 'x', edits: [{ old_string: 'a', new_string: 'b' }, { old_string: 'c' }] }),
     ).toBeUndefined()
@@ -189,7 +189,7 @@ describe('editPreview — MultiEdit', () => {
   })
 })
 
-describe('editPreview — NotebookEdit', () => {
+describe('editPreview: NotebookEdit', () => {
   it('shows the new cell source with the edit mode and cell type', () => {
     expect(
       editPreview('NotebookEdit', {
@@ -227,7 +227,7 @@ describe('editPreview — NotebookEdit', () => {
   })
 })
 
-describe('editPreview — unknown shapes', () => {
+describe('editPreview: unknown shapes', () => {
   it('has no preview for an unknown tool or a malformed input, and never throws', () => {
     expect(editPreview('Frobnicate', { file_path: 'x', content: 'a' })).toBeUndefined()
     expect(editPreview('Write', { file_path: 'x' })).toBeUndefined()
@@ -237,7 +237,7 @@ describe('editPreview — unknown shapes', () => {
   })
 })
 
-describe('editPreview — size caps', () => {
+describe('editPreview: size caps', () => {
   it('caps the lines of a block and counts the rest', () => {
     const content = Array.from({ length: PREVIEW_LINES + 50 }, (_, i) => `l${i}`).join('\n')
     const block = editPreview('Write', { file_path: 'x', content })?.blocks[0]

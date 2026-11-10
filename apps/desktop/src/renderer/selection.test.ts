@@ -27,8 +27,8 @@ describe('resolveSelectedIndex', () => {
   })
 
   it('follows the selected session when the list re-sorts', () => {
-    // A `b` az 1-es indexen volt; egy várakozni kezdő `c` felülre ugrik. Index
-    // szerinti követéssel az Enter most az `a` ablakára ugrana.
+    // `b` was at index 1; a `c` that starts waiting jumps to the top. Tracking by index, Enter
+    // would now jump to `a`'s window.
     expect(resolveSelectedIndex(['c', 'a', 'b'], 'b')).toBe(2)
   })
 
@@ -49,25 +49,25 @@ describe('moveSelection', () => {
   })
 
   it('returns undefined for an empty list rather than an invalid position', () => {
-    // A javítás előtt ez a kiválasztást -1-re állította, ahol beragadt.
+    // Before the fix this set the selection to -1, where it got stuck.
     expect(moveSelection([], undefined, 1)).toBeUndefined()
   })
 })
 
 describe('selectOnShow', () => {
-  it('selects the first waiting session — the daemon sorts the oldest wait first', () => {
+  it('selects the first waiting session: the daemon sorts the oldest wait first', () => {
     const sessions = [view('w1', 'waiting'), view('w2', 'waiting'), view('i', 'idle')]
     expect(selectOnShow(sessions, [], 'i')).toBe('w1')
   })
 
   it('counts a session with a held decision as waiting even if its status lags', () => {
-    // A két adat külön üzenetrészben jön; egy tartott döntés mindenképp figyelmet kér.
+    // The two pieces of data come in separate parts of the message; a held decision asks for attention regardless.
     expect(selectOnShow([view('a', 'idle'), view('b', 'working')], [pending('d1', 'b')], 'a')).toBe('b')
   })
 
   it('does not jump to a session whose decisions are all released while another one waits', () => {
-    // A daemon a `#pending` miatt az elengedett kérésű sessiont is `waiting`-nek mutatja, és előre
-    // rendezi: a status tehát nem emelheti vissza az első szintre.
+    // Because of `#pending` the daemon shows a session with a released request as `waiting` too,
+    // and sorts it first: so the status must not lift it back to tier 1.
     const sessions = [view('r', 'waiting'), view('w', 'waiting')]
     expect(selectOnShow(sessions, [pending('d1', 'r', true), pending('d2', 'w')], 'w')).toBe('w')
   })
@@ -96,8 +96,8 @@ describe('selectOnShow', () => {
 
 describe('nextAfterDecision', () => {
   it('moves to the first waiting session other than the decided one', () => {
-    // A frissen eldöntött session az állapotban még „waiting" lehet, ha a broadcast a döntés
-    // válasza után jön — ezért kizárjuk, nem az állapotra várunk.
+    // The session just decided can still be "waiting" in the state if the broadcast comes after the
+    // decision's reply: so it is excluded instead of waiting for the state.
     const sessions = [view('a', 'waiting'), view('b', 'waiting'), view('c', 'idle')]
     const decisions = [pending('da', 'a'), pending('db', 'b')]
     expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'b', hide: false })
@@ -109,8 +109,8 @@ describe('nextAfterDecision', () => {
   })
 
   it('stays on the decided session when it has another held decision', () => {
-    // Párhuzamos tool-hívások: ugyanannak a sessionnek több kérése is függhet. Ilyenkor
-    // nem szabad elrejtőzni, és a következő kérés ugyanitt van.
+    // Parallel tool calls: the same session can have several pending requests. Then the overlay
+    // must not hide, and the next request is right here.
     const sessions = [view('a', 'waiting'), view('b', 'waiting')]
     const decisions = [pending('d1', 'a'), pending('d2', 'a'), pending('d3', 'b')]
     expect(nextAfterDecision(sessions, decisions, pending('d1', 'a'), true)).toEqual({ select: 'a', hide: false })
@@ -211,7 +211,7 @@ describe('trackArrivals', () => {
     const sessions = [view('a', 'idle'), view('b', 'waiting')]
     expect(track({ sessions, decisions: [], selectedId: 'a', ...calm })).toBeUndefined()
     expect(track({ sessions, decisions: [pending('db', 'b')], selectedId: 'a', ...calm })).toBe('b')
-    // A felhasználó visszalépett az `a`-ra: ugyanaz a kérés nem rántja el újra.
+    // The user stepped back to `a`: the same request does not pull the selection away again.
     expect(track({ sessions, decisions: [pending('db', 'b')], selectedId: 'a', ...calm })).toBeUndefined()
   })
 
@@ -220,7 +220,7 @@ describe('trackArrivals', () => {
     const sessions = [view('a', 'waiting'), view('b', 'waiting')]
     expect(track({ sessions, decisions: [pending('da', 'a')], selectedId: 'a', ...calm })).toBe(undefined)
     expect(track({ sessions, decisions: [pending('da', 'a'), pending('db', 'b')], selectedId: 'a', ...calm })).toBeUndefined()
-    // Az `a` kérése lezárult: a `b` már nem új, nem ugrunk rá utólag.
+    // `a`'s request was settled: `b` is no longer new, so the selection does not jump to it afterwards.
     expect(track({ sessions, decisions: [pending('db', 'b')], selectedId: 'a', ...calm })).toBeUndefined()
   })
 })

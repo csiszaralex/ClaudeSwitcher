@@ -8,7 +8,7 @@ interface Props {
   onSubmit: (answers: Record<string, string>) => void
 }
 
-/** A session kérdései válaszolható formában. Amíg minden kérdésre nincs válasz, nem küldhető el. */
+/** The session's questions in an answerable form. It cannot be sent until every question has an answer. */
 export function QuestionForm({ questions, busy, onSubmit }: Props): JSX.Element {
   const [state, setState] = useState(() => initialFormState(questions))
   const complete = isComplete(questions, state)
@@ -21,7 +21,7 @@ export function QuestionForm({ questions, busy, onSubmit }: Props): JSX.Element 
         if (complete && !busy) onSubmit(buildAnswers(questions, state))
       }}
     >
-      {/* A kérdések görgetnek, a küldés gombja alul marad (lásd DecisionPanel). */}
+      {/* The questions scroll, the submit button stays at the bottom (see DecisionPanel). */}
       <div className="question-list">
         {questions.map((question, index) => (
           <fieldset key={question.question}>

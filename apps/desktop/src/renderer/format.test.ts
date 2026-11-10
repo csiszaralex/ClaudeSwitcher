@@ -47,8 +47,8 @@ describe('summarize', () => {
   })
 
   it('survives a session whose activity is missing entirely', () => {
-    // A daemon a típus szerint mindig ad `activity`-t, de egy hibás üzenet nem. Ez
-    // renderelés közben dobna, és az egész overlay eltűnne.
+    // By its type the daemon always gives `activity`, but a bad message does not. This would throw
+    // during render, and the whole overlay would disappear.
     const broken = { status: 'idle' } as unknown as Parameters<typeof summarize>[0]
     expect(() => summarize(broken)).not.toThrow()
     expect(summarize(broken)).toBe('—')
@@ -70,7 +70,7 @@ describe('toolLabel', () => {
   })
 })
 
-describe('summarize — a tool részlete és a subagentek', () => {
+describe('summarize: the tool detail and the subagents', () => {
   const searching = { agentId: 'a1', description: 'Final-review fix wave', runningTool: 'Grep', toolDetail: 'createPanel', updatedAt: 2 }
   const reading = { agentId: 'a2', agentType: 'Explore', runningTool: 'Read', toolDetail: 'x.ts', updatedAt: 1 }
 

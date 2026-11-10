@@ -3,17 +3,17 @@ import { parsedPayload } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import { buildAnswers, initialFormState, isComplete, setOtherText, toggleOption } from './question-form.js'
 
-// A spike valódi kérdései: egy többválasztós (gyümölcsök) és egy egyválasztós (szín).
+// The spike's real questions: a multiple-choice one (fruits) and a single-choice one (colour).
 const ask = parsedPayload('permissionRequest_askMulti')
 const [fruits, colour] = ask.questions
 if (fruits === undefined || colour === undefined) throw new Error('fixture has two questions')
 
 describe('question form', () => {
-  it('starts incomplete — an empty answer must not reach the hook', () => {
+  it('starts incomplete: an empty answer must not reach the hook', () => {
     expect(isComplete(ask.questions, initialFormState(ask.questions))).toBe(false)
   })
 
-  it('is never complete with no questions — an unreadable question must not be sent as answered', () => {
+  it('is never complete with no questions: an unreadable question must not be sent as answered', () => {
     expect(isComplete([], initialFormState([]))).toBe(false)
   })
 

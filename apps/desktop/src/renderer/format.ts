@@ -15,24 +15,24 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * Egy futó tool a sorban: `Bash: pnpm test`, `Grep „createPanel"`, vagy részlet nélkül `Read fut`.
- * Ugyanez a fő sessionnél és a subagentnél, hogy a kettő egyformán olvasson.
+ * A running tool in the row: `Bash: pnpm test`, `Grep „createPanel"`, or without a detail `Read fut`.
+ * The same for the main session and a subagent, so the two read alike.
  */
 export function toolLabel(tool: string, detail?: string): string {
   if (detail === undefined || detail === '') return `${tool} fut`
-  // A parancsot futtató eszköz részlete maga a parancs, kettősponttal jobban olvasható.
+  // The detail of a tool that runs a command is the command itself, which reads better after a colon.
   return isCommandTool(tool) ? `${tool}: ${detail}` : `${tool} „${detail}"`
 }
 
-/** Egy subagent munkája: `<leírás vagy típus> · <futó tool>`, tool nélkül csak a név. */
+/** A subagent's work: `<description or type> · <running tool>`, without a tool only the name. */
 function subagentWork(subagent: SubagentView): string {
   const name = subagent.description ?? subagent.agentType ?? 'subagent'
   return subagent.runningTool === undefined ? name : `${name} · ${toolLabel(subagent.runningTool, subagent.toolDetail)}`
 }
 
 /**
- * A sor tooltipje: az összes aktív subagent, soronként egy. `undefined`, ha nincs: akkor a
- * sornak nincs is tooltipje.
+ * The row's tooltip: every active subagent, one per line. `undefined` if there is none: then the
+ * row has no tooltip at all.
  */
 export function subagentTooltip(subagents: readonly SubagentView[] | undefined): string | undefined {
   if (subagents === undefined || subagents.length === 0) return undefined
@@ -47,20 +47,20 @@ function clip(raw: string): string {
 }
 
 /**
- * Egy függő kérés a sorban: `Bash: <parancs>`, egy sorba vágva. Egy több száz kilobájtos parancs
- * így nem kerül egészében a DOM-ba minden másodperces újrarenderelésnél; a teljes szöveg a panelé.
+ * A pending request in the row: `Bash: <command>`, cut to one line. So a command of several hundred
+ * kilobytes does not go whole into the DOM on every per-second re-render; the full text is the panel's.
  */
 export function pendingRowText(pending: { toolName: string; summary: string }): string {
   return clip(`${pending.toolName}: ${pending.summary}`)
 }
 
-/** Az Agent tool alapértelmezett típusa: szinte mindig ez, így önmagában semmit nem mond. */
+/** The Agent tool's default type: it is almost always this one, so on its own it says nothing. */
 const DEFAULT_AGENT_TYPE = 'general-purpose'
 
 /**
- * A panel fejlécében a kérő subagent: a feladatának leírása (a session `subagents` listájából,
- * az `agentId` szerint), és a típusa, ha az nem az alapértelmezett. Leírás nélkül a típus.
- * `undefined`, ha a kérés a fő sessioné.
+ * The requesting subagent in the panel header: the description of its task (from the session's
+ * `subagents` list, by `agentId`), and its type if it is not the default. Without a description,
+ * the type. `undefined` if the request belongs to the main session.
  */
 export function subagentLabel(
   decision: { agentId?: string | undefined; agentType?: string | undefined },
@@ -76,25 +76,25 @@ export function subagentLabel(
 }
 
 /**
- * A sor összefoglalója. Sorrend: egy várakozó session értesítése; az aktív subagent munkája
- * (a legutóbbi, és `+N`, ha több is fut), mert a fő session ilyenkor csak az `Agent` toolt futtatja,
- * vagy a Stop után már semmit; a fő session futó toolja; végül az utolsó assistant-szöveg.
- * A függő döntés ennél is erősebb, azt az App mutatja e helyett.
+ * The row's summary. Order: a waiting session's notification; the active subagent's work (the
+ * latest one, and `+N` if more run), because the main session then only runs the `Agent` tool, or
+ * nothing after the Stop; the main session's running tool; finally the last assistant text.
+ * A pending decision is stronger still: App shows it instead of this.
  */
 export function summarize(view: {
   status: SessionStatus
-  // Futásidőben hiányozhat (lásd lent), ezért a típus is ezt mondja.
+  // It can be missing at runtime (see below), so the type says so too.
   activity?: SessionActivity | undefined
   notificationText?: string | undefined
   subagents?: readonly SubagentView[] | undefined
 }): string {
-  // Az `activity` a típus szerint kötelező, de a daemon üzenete futásidőben bármi lehet.
-  // Egy hiányzó mező itt renderelési hibát dobna, ami az EGÉSZ overlayt leszedné, ezért
-  // itt is védekezünk, nem csak az ErrorBoundaryben.
+  // By its type `activity` is required, but at runtime the daemon's message can be anything. A
+  // missing field would throw a render error here that takes down the WHOLE overlay, so this
+  // guards here too, not only in the ErrorBoundary.
   const waitingText = view.status === 'waiting' ? view.notificationText : undefined
   const [latest, ...others] = view.subagents ?? []
   if (waitingText === undefined && latest !== undefined) {
-    // A `+N` elöl áll: a CSS a sor végét levághatja, a számot pedig látni kell.
+    // The `+N` comes first: CSS may cut off the end of the row, and the number must be seen.
     const more = others.length > 0 ? `+${String(others.length)} · ` : ''
     return clip(`↳ ${more}${subagentWork(latest)}`)
   }

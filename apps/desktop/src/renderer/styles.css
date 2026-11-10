@@ -36,7 +36,7 @@ body {
 
 .session {
   display: grid;
-  /* A névoszlop a tipikus `projekt-NN` neveknek és a Remote Control-pöttynek is elég széles. */
+  /* The name column is wide enough for typical `project-NN` names and the Remote Control dot. */
   grid-template-columns: 16px 170px 1fr 56px;
   gap: 8px;
   align-items: baseline;
@@ -46,7 +46,7 @@ body {
 }
 
 .session.selected { background: var(--raised); }
-/* Az állapotjel (session-marker.ts): a szín mellett az alak is más. */
+/* The status marker (session-marker.ts): the shape differs besides the color. */
 .marker { cursor: default; }
 .marker.tone-waiting { color: var(--accent); }
 .marker.tone-released { color: var(--warning); }
@@ -54,11 +54,11 @@ body {
 .marker.tone-done { color: var(--success); }
 .marker.tone-idle { color: var(--text-faint); }
 
-/* Flex, hogy csak a szöveg csonkolódjon (…), a Remote Control-pötty soha ne. */
+/* Flex, so only the text is truncated (…), never the Remote Control dot. */
 .name { display: flex; align-items: baseline; min-width: 0; font-weight: 600; }
 .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .remote { flex: none; margin-left: 4px; color: var(--link); font-size: 9px; font-weight: 400; cursor: default; }
-/* „2 vár" (rows.ts `pendingBadge`): a név csonkolódik helyette, a szám mindig látszik. */
+/* The pending-count badge (rows.ts `pendingBadge`): the name is truncated instead, the count always shows. */
 .pending-count {
   flex: none;
   margin-left: 4px;
@@ -86,10 +86,11 @@ body {
 .muted { color: var(--text-faint); }
 
 /*
- * A panel oszlop: fejléc felül, művelet-terület alul (flex: none), köztük a görgethető
- * tartalom. A 620×600-as, át nem méretezhető ablakban a 60vh a session-listának is hagy
- * ~200 px-t, ami a saját scrolljával görget. Az `overflow-y: auto` csak tartalék: ha a
- * művelet-terület maga nem férne el, inkább görgessen az egész, mint hogy levágja a gombokat.
+ * The panel is a column: the header on top, the action area at the bottom (flex: none), the
+ * scrollable content between them. In the 620×600 window, which cannot be resized, 60vh still
+ * leaves ~200 px to the session list, which scrolls on its own. The `overflow-y: auto` is only a
+ * fallback: if the action area itself did not fit, the whole panel should scroll rather than cut
+ * off the buttons.
  */
 .decision {
   display: flex;
@@ -107,12 +108,12 @@ body {
 .decision-head { flex: none; display: flex; gap: 10px; align-items: baseline; }
 .decision-scroll { flex: 0 1 auto; min-height: 2.5em; overflow-y: auto; }
 .decision-actions { flex: none; }
-/* Kérdésnél és tervnél a művelet-terület is hosszú: ott a belseje görget, a gombsor alul marad. */
+/* For a question and a plan the action area is long too: there its inside scrolls, the button row stays at the bottom. */
 .decision-actions.fill { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .decision-kind { color: var(--accent); font-weight: 600; }
 .decision-tool { color: var(--text-dim); }
 .decision-lines { flex: none; color: var(--warning); font-size: 11px; }
-/* A subagent feladatleírása hosszú lehet: egy sorban, csonkolva; a teljes szöveg a tooltipben. */
+/* A subagent's task description can be long: on one line, truncated; the full text is in the tooltip. */
 .decision-agent {
   min-width: 0;
   margin-left: auto;
@@ -122,7 +123,7 @@ body {
   color: var(--info);
 }
 .decision-warning { margin: 8px 0 0; color: var(--danger); font-weight: 600; }
-/* Egy láthatatlan karakter escape-je (summary-view.ts): elüt a parancs szövegétől. */
+/* The escape of an invisible character (summary-view.ts): it stands out from the command text. */
 .invisible-char { padding: 0 1px; border-radius: 2px; background: var(--danger-tint-strong); color: var(--danger); }
 .decision-summary {
   margin: 8px 0;
@@ -131,7 +132,7 @@ body {
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
   color: var(--text);
 }
-/* A parancs fölött áll (DecisionPanel): a térközt alatta a parancs felső margója adja. */
+/* It stands above the command (DecisionContent): the gap below it comes from the command's top margin. */
 .decision-description { margin: 8px 0 0; color: var(--text-soft); }
 .decision-details { margin: 0 0 6px; }
 .decision-details summary { color: var(--text-dim); cursor: pointer; }
@@ -145,10 +146,10 @@ body {
   word-break: break-word;
   font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
 }
-/* A fájlírás előnézete (edit-preview.ts): `-` piros, `+` zöld, a változatlan környezet halvány. */
+/* The file write preview (edit-preview.ts): `-` red, `+` green, the unchanged context dim. */
 .edit-preview .diff-line { display: block; min-height: 1.4em; }
-/* Az előjel és az utána álló szóköz nem része a kijelölhető szövegnek: a pszeudo-elem tartalma
-   nem kerül a vágólapra, így a másolás a fájl pontos tartalmát adja. */
+/* The sign and the space after it are not part of the selectable text: a pseudo-element's content
+   does not go to the clipboard, so copying gives the file's exact content. */
 .edit-preview .diff-line::before { content: attr(data-mark) " "; user-select: none; }
 .edit-preview .diff-add { color: var(--success); background: var(--success-tint); }
 .edit-preview .diff-remove { color: var(--danger); background: var(--danger-tint); }
@@ -174,7 +175,7 @@ body {
   font: 11px Consolas, monospace;
   color: var(--accent);
 }
-/* A szabálygomb billentyűjele inverzben, ha a Claude Code szabályt javasol (rule-editor.ts `suggestionTooltip`). */
+/* The rule button's key letter inverted when Claude Code suggests a rule (rule-editor.ts `suggestionTooltip`). */
 .decision kbd.suggested { border-color: var(--accent); background: var(--accent); color: var(--bg); }
 .decision input, .decision textarea {
   box-sizing: border-box;

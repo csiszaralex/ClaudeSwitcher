@@ -8,9 +8,9 @@ import { injectCsp, rendererCsp } from './src/csp/renderer-csp.js'
 import { DAEMON_PORT } from './src/main/daemon-port.js'
 
 /**
- * Az app `package.json`-jának `workspace:` függőségei (a saját csomagjaink). Kézi lista helyett a
- * manifestből jön, így egy új workspace csomag nem maradhat ki belőle. Ha egy sem lenne, az hibás
- * manifest: a build hangosan megáll.
+ * The `workspace:` dependencies of the app's `package.json` (our own packages). They come from the
+ * manifest instead of a hand-kept list, so a new workspace package cannot be left out. If there
+ * were none, the manifest is wrong: the build stops loudly.
  */
 function workspaceDependencies(manifest: unknown): string[] {
   if (typeof manifest !== 'object' || manifest === null || !('dependencies' in manifest)) return []
@@ -22,24 +22,23 @@ function workspaceDependencies(manifest: unknown): string[] {
 }
 
 /**
- * A főprocessz ES modul (`"type": "module"` a `package.json`-ban). A workspace csomagjainkat
- * mégis a bundle-be építjük, a tranzitív függőségeikkel (hono, @hono/node-server, ws) együtt: azok
- * nem szerepelnek ennek az appnak a `dependencies`-ében, tehát nem externalizálódnak. Így futáskor
- * csak a `koffi` és az `electron` jön a `node_modules`-ból.
+ * The main process is an ES module (`"type": "module"` in `package.json`). Our workspace packages
+ * are still built into the bundle, together with their transitive dependencies (hono,
+ * @hono/node-server, ws): those are not in this app's `dependencies`, so they are not externalized.
+ * So at runtime only `koffi` and `electron` come from `node_modules`.
  *
- * Ez csomagolási döntés, nem betöltési kényszer. Az Electron 33 Node 20-a alatt az volt: a CJS main
- * egy externalizált ESM workspace csomagnál `ERR_REQUIRE_ESM`-mel halt meg. A Node 24.22.1 (az
- * Electron 45-é) az ESM-et és a CJS-ből `require()`-elt ESM-et is betölti, figyelmeztetés nélkül
- * (mérve sima `node`-dal, a 7/2. hullám jelentése). Externalizálva viszont a főprocesszt a pnpm
- * workspace symlinkjei (`node_modules/@claudeswitcher/*` → `packages/*`) és a csomagok `dist`-je
- * táplálná, amit a telepítőnek (a backlog ütemezésében a 8-as tétel) külön be kellene csomagolnia.
- * A bundle-lel ez a gond nem létezik.
+ * This is a packaging decision, not a loading constraint. Under Electron 33's Node 20 it was one: the
+ * CJS main died with `ERR_REQUIRE_ESM` on an externalized ESM workspace package. Node 24.22.1
+ * (Electron 45's) loads ESM, and ESM `require()`d from CJS, without a warning (measured with plain
+ * `node`). Externalized, though, the main process would be fed by the pnpm workspace symlinks
+ * (`node_modules/@claudeswitcher/*` → `packages/*`) and the packages' `dist`, which the installer
+ * would have to package separately. With the bundle this problem does not exist.
  */
 const BUNDLED_WORKSPACE_PACKAGES = workspaceDependencies(
   JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')),
 )
 if (BUNDLED_WORKSPACE_PACKAGES.length === 0) {
-  throw new Error('electron.vite.config.ts: a package.json-ban nincs workspace: függőség')
+  throw new Error('electron.vite.config.ts: package.json has no workspace: dependency')
 }
 
 /**

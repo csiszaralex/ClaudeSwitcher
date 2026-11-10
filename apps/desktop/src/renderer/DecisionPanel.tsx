@@ -38,21 +38,21 @@ type Mode = 'buttons' | Extract<DecisionAction, 'deny' | 'rule-project' | 'rule-
 
 interface Props {
   decision: PendingDecisionView
-  /** A kérő subagent felirata a fejlécben (format.ts `subagentLabel`); a fő sessionnél nincs. */
+  /** The requesting subagent's label in the header (format.ts `subagentLabel`); absent for the main session. */
   agentLabel: string | undefined
-  /** Van-e a sessionnek Remote Control kapcsolata (session-marker.ts `hasRemoteControl`): az elengedett kérés szövegét adja. */
+  /** Whether the session has a Remote Control connection (session-marker.ts `hasRemoteControl`): it picks the released request's text. */
   remoteControl: boolean
-  /** Az App billentyű-előzménye: az overlay megjelenése és az utolsó szövegmezős leütés (key-guard.ts). */
+  /** App's key history: the overlay's appearance and the last keystroke in a text field (key-guard.ts). */
   keyHistory: RefObject<KeyHistory>
-  /** A daemon elfogadta a döntést: az App ebből lépteti a kijelölést, vagy rejti el az overlayt. */
+  /** The daemon accepted the decision: from this App steps the selection or hides the overlay. */
   onDecided: () => void
-  /** Ugrás a session VSCode ablakára: ott a natív prompt végig megvan. */
+  /** Jumps to the session's VS Code window: the native prompt is there all along. */
   onJump: () => void
 }
 
 /**
- * Egy függő kérés döntési panelje. A döntést a main processzen át a daemon ellenőrzi és
- * továbbítja; siker esetén a következő állapot leveszi a kérést, és a panel eltűnik.
+ * The decision panel of one pending request. The daemon checks and forwards the decision through
+ * the main process; on success the next state removes the request, and the panel disappears.
  */
 export function DecisionPanel({
   decision,
@@ -97,14 +97,14 @@ export function DecisionPanel({
     }
   }
 
-  // Élesedés: a panel minden kéréshez újra mountol (az App `key={decision.id}`-ja), így ez minden
-  // új kérésnél újraindul. Az overlay megjelenése a `keyHistory`-ból élesít újra.
+  // Arming: the panel mounts again for every request (App's `key={decision.id}`), so this restarts
+  // on every new request. The overlay's appearance re-arms it through `keyHistory`.
   const [mountArmedAt] = useState(() => armUntil(Date.now()))
   function armedAt(): number {
     return Math.max(mountArmedAt, keyHistory.current.shownArmedAt)
   }
-  // Az engedélyező gombok az élesedésig tiltva: egy dupla kattintás második fele ugyanoda esik,
-  // és a következő kérés gombját nyomná meg. A tiltás, az ugrás és a mégse gomb élesedés nélkül is megy.
+  // The allowing buttons are disabled until armed: the second half of a double click lands on the
+  // same spot and would press the next request's button. Deny, jump and cancel work unarmed too.
   const armed = isArmed(armedAt(), Date.now())
   const [, rerenderWhenArmed] = useState(0)
   useEffect(() => {
@@ -118,8 +118,9 @@ export function DecisionPanel({
     }
   })
 
-  // A betűjelek. Nyitott űrlapnál, futó kérés közben és elengedett kérésnél nem hatnak; a többi
-  // feltétel (ismétlés, módosítók, szövegmező, élesedés, gépelés utáni szünet) a key-guard.ts-ben.
+  // The key letters. They have no effect with an open form, while a request is in flight, and on a
+  // released request; the other conditions (repeat, modifiers, text field, arming, the pause after
+  // typing) are in key-guard.ts.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
       if (decision.released || busy || mode !== 'buttons') return
@@ -234,8 +235,8 @@ export function DecisionPanel({
       )
     }
 
-    // Olvashatatlan parancs, fájl vagy URL: engedélyezést a core úgyis elutasítana. A sor ne legyen
-    // zsákutca: tiltani lehet, és a natív prompt a VSCode-ban ott van.
+    // An unreadable command, file or URL: the core would reject allowing anyway. The row must not be
+    // a dead end: denying works, and the native prompt is there in VS Code.
     if (!decision.readable) {
       return (
         <div className="decision-row">
@@ -248,8 +249,9 @@ export function DecisionPanel({
 
     switch (decision.kind) {
       case 'tool': {
-        // A Claude Code javaslata mindkét szabálygomb szerkesztőjét kitölti, ezért mindkettő jelet
-        // kap: a billentyűjel inverz (narancs háttér), így a gombsor egy sorban marad. A szabály a tooltipben.
+        // Claude Code's suggestion fills the editor of both rule buttons, so both get a mark: the key
+        // letter is inverted (orange background), so the button row stays on one line. The rule is
+        // in the tooltip.
         const suggestion = suggestionTooltip(decision.suggestedRules)
         const ruleKey = suggestion === undefined ? undefined : 'suggested'
         return (
@@ -263,8 +265,9 @@ export function DecisionPanel({
       case 'edit':
         return <div className="decision-row">{ACTION_BUTTONS.edit.map((button) => actionButton(button))}</div>
       case 'question':
-        // Kiolvashatatlan kérdésre nem lehet válaszolni (a daemon el is utasítaná), de a sor ne
-        // legyen zsákutca: a natív prompt a VSCode-ban ott van, vagy a session tiltást kap üzenettel.
+        // An unreadable question cannot be answered (the daemon would reject it too), but the row
+        // must not be a dead end: the native prompt is there in VS Code, or the session gets a deny
+        // with a message.
         if (isUnreadableQuestion(decision)) {
           return (
             <div className="decision-row">
@@ -303,12 +306,12 @@ export function DecisionPanel({
   // it again. The header shows its line count, `DecisionContent` its text.
   const summary = useMemo(() => summaryView(decision.summary), [decision])
 
-  // Kérdésnél és tervnél a művelet-terület maga is hosszú (kérdések, tervszöveg): ott a belseje
-  // görget, a küldő gombok pedig alul maradnak.
+  // For a question and a plan the action area itself is long (questions, plan text): there its
+  // inside scrolls, and the submit buttons stay at the bottom.
   const fill = decision.kind === 'question' || decision.kind === 'plan'
 
-  // Felül a fejléc, alul a művelet-terület, köztük a görgethető tartalom: egy hosszú parancsnál
-  // se kelljen a gombokig görgetni (Task 10, 2. eltérés).
+  // The header on top, the action area at the bottom, the scrollable content between them: even
+  // with a long command the user does not have to scroll to the buttons.
   return (
     <section className="decision">
       <header className="decision-head">

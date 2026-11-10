@@ -12,7 +12,7 @@ import {
 
 const plainKey: ShortcutKey = { repeat: false, ctrlKey: false, altKey: false, metaKey: false, typingTarget: false }
 const NOW = 100_000
-// Rég élesített panel, és soha nem gépeltünk szövegmezőbe: minden más szabály ehhez mér.
+// A panel armed long ago, and no typing into a text field ever: every other rule measures against this.
 const calm: ShortcutClock = { armedAt: NOW - 10_000, lastTypedAt: undefined, now: NOW }
 
 describe('the constants', () => {
@@ -64,7 +64,8 @@ describe('shortcutAllowed', () => {
   })
 
   it('waits TYPING_COOLDOWN_MS after the last keystroke into a text field', () => {
-    // A mező eltűnt a kezünk alól (a kérés máshol lezárult): a fókusz a body-n, a gépelés folytatódik.
+    // The field vanished under the user's hand (the request was settled elsewhere): focus is on the
+    // body, and the typing goes on.
     const lastTypedAt = NOW - TYPING_COOLDOWN_MS + 1
     expect(shortcutAllowed(plainKey, { ...calm, lastTypedAt })).toBe(false)
     expect(shortcutAllowed(plainKey, { ...calm, lastTypedAt: NOW })).toBe(false)

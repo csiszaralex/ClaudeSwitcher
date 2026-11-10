@@ -5,11 +5,11 @@ import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
 import { broadRules, editorRows, suggestionCount } from './rule-editor.js'
 
 interface Props {
-  /** A Claude Code javaslata, soronként egy szabály, a felhasználó átírhatja. */
+  /** Claude Code's suggestion, one rule per line; the user can rewrite it. */
   initial: string
-  /** Hány javaslat maradt ki a kezdőszövegből, mert sortörés van benne (rule-editor.ts `ruleEditorSeed`). */
+  /** How many suggestions were left out of the initial text because they contain a line break (rule-editor.ts `ruleEditorSeed`). */
   multilineSuggestions: number
-  /** Gépszint: minden projektre és sessionre hat, ezért külön megerősítés kell. */
+  /** Machine level: it affects every project and session, so it needs a separate confirmation. */
   machine: boolean
   busy: boolean
   onSubmit: (rules: PermissionRule[]) => void
@@ -17,14 +17,14 @@ interface Props {
 }
 
 /**
- * A szabály szerkeszthető előnézete. Amíg egy sor nem értelmezhető, nem lehet beküldeni: egy
- * csendben „javított" szabály más engedélyt adna, mint amit a felhasználó lát.
+ * The editable preview of the rule. While a line cannot be parsed it cannot be submitted: a
+ * silently "fixed" rule would grant a different permission than the one the user sees.
  */
 export function RuleEditor({ initial, multilineSuggestions, machine, busy, onSubmit, onCancel }: Props): JSX.Element {
   const [text, setText] = useState(initial)
   const [machineConfirmed, setMachineConfirmed] = useState(false)
-  // Melyik széles szabálylistát erősítette meg a felhasználó. Ha a lista változik, a pipa nem
-  // viheti át a megerősítést egy másik, általa még nem látott szabályra.
+  // Which broad rule list the user confirmed. If the list changes, the checkbox must not carry the
+  // confirmation over to another rule the user has not seen yet.
   const [broadConfirmedFor, setBroadConfirmedFor] = useState<string | undefined>()
 
   const parsed = parseRules(text)

@@ -39,8 +39,8 @@ describe('rendererCsp', () => {
   })
 
   it('allows the inline sources the dev server injects only in dev', () => {
-    // A @vitejs/plugin-react a React Refresh preamble-t inline modul-scriptként szúrja be, a Vite
-    // dev szerver pedig a CSS-t <style> elemként.
+    // @vitejs/plugin-react injects the React Refresh preamble as an inline module script, and the
+    // Vite dev server injects the CSS as a <style> element.
     const devPolicy = directives(rendererCsp({ daemonPort: DAEMON_PORT, dev: true }))
     expect(devPolicy.get('script-src')).toBe("'self' 'unsafe-inline'")
     expect(devPolicy.get('style-src')).toBe("'self' 'unsafe-inline'")

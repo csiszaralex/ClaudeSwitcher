@@ -7,12 +7,12 @@ describe('showsDetails', () => {
     expect(showsDetails({ kind: 'tool', toolName: 'mcp__github__create_issue', toolInput: { title: 't' } })).toBe(true)
   })
 
-  it('offers none for a shell command — the command already is the content', () => {
+  it('offers none for a shell command: the command already is the content', () => {
     expect(showsDetails({ kind: 'tool', toolName: 'Bash', toolInput: { command: 'ls', description: 'd' } })).toBe(false)
     expect(showsDetails({ kind: 'tool', toolName: 'PowerShell', toolInput: { command: 'ls' } })).toBe(false)
   })
 
-  it('offers none for the other kinds — they have their own view', () => {
+  it('offers none for the other kinds: they have their own view', () => {
     for (const kind of ['edit', 'question', 'plan'] as const) {
       expect(showsDetails({ kind, toolName: 'X', toolInput: { a: 1 } })).toBe(false)
     }
@@ -20,7 +20,7 @@ describe('showsDetails', () => {
 
   it('offers none for an empty or malformed input', () => {
     expect(showsDetails({ kind: 'tool', toolName: 'X', toolInput: {} })).toBe(false)
-    // A daemon üzenete futásidőben bármi lehet; a sanitizeState a toolInput-ot nem ellenőrzi.
+    // At runtime the daemon's message can be anything; sanitizeState does not check toolInput.
     expect(showsDetails({ kind: 'tool', toolName: 'X', toolInput: null })).toBe(false)
   })
 })
@@ -65,7 +65,7 @@ describe('formatToolInput', () => {
   })
 })
 
-describe('toolDetails — parancsot futtató eszköz', () => {
+describe('toolDetails: a tool that runs a command', () => {
   it('shows every field of a shell request except the command and its description', () => {
     const decision = {
       kind: 'tool' as const,

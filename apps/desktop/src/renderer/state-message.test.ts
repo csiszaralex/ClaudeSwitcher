@@ -3,7 +3,7 @@ import { parseDaemonMessage, parseStateMessage, sanitizeState } from './state-me
 import { DAEMON_PROTOCOL } from '@claudeswitcher/core/browser'
 import { parsedPayload } from '@claudeswitcher/core/testing'
 
-/** Egy függő döntés úgy, ahogy a daemon küldi: a valódi payload értelmezve, broker-mezőkkel. */
+/** A pending decision as the daemon sends it: the real payload parsed, with the broker's fields. */
 function decisionFrom(name: string): Record<string, unknown> {
   return { ...parsedPayload(name), id: `id-${name}`, createdAt: 1, released: false }
 }
@@ -27,8 +27,8 @@ describe('parseStateMessage', () => {
   })
 
   it('drops a malformed session instead of handing it to the renderer', () => {
-    // Enélkül az App a `view.sessionId`-n dobna, és mivel az ErrorBoundary nem áll vissza
-    // magától, az overlay onnantól véglegesen hibaszöveget mutatna.
+    // Without this App would throw on `view.sessionId`, and the ErrorBoundary would show an error
+    // text instead of the list until a state without the bad element arrives.
     const message = JSON.stringify({
       type: 'state',
       protocol: DAEMON_PROTOCOL,
@@ -38,7 +38,8 @@ describe('parseStateMessage', () => {
   })
 
   it('keeps a session carrying stoppedAt, and drops one whose stoppedAt is not a number', () => {
-    // A part B ebből számol „épp végzett" állapotot; egy szöveges érték ott NaN-t adna.
+    // The status marker shows "just finished" from it (session-marker.ts `statusMarker`); the field
+    // must keep the number type `SessionView` declares.
     const message = JSON.stringify({
       type: 'state',
       protocol: DAEMON_PROTOCOL,
@@ -50,7 +51,7 @@ describe('parseStateMessage', () => {
   })
 
   it('keeps a session carrying an entrypoint string, and drops one whose entrypoint is not a string', () => {
-    // Opcionális a `SessionView`-ban (a registry rekordjából jön, ha van). Ha jön, szövegnek kell lennie.
+    // Optional in `SessionView` (it comes from the registry record when there is one). If present it must be a string.
     const message = JSON.stringify({
       type: 'state',
       protocol: DAEMON_PROTOCOL,
@@ -70,7 +71,8 @@ describe('parseStateMessage', () => {
   })
 
   it('keeps a session carrying well-formed subagents, and drops one whose subagents are malformed', () => {
-    // Opcionális a `SessionView`-ban (csak aktív subagent mellett van). Ha jön, minden elemének a sor által olvasott alakja kell legyen.
+    // Optional in `SessionView` (present only with an active subagent). If present, every element
+    // must have the shape the row reads.
     const good = { agentId: 'a1', agentType: 'general-purpose', description: 'd', runningTool: 'Grep', toolDetail: 'x', updatedAt: 5 }
     const bare = { agentId: 'a2', updatedAt: 6 }
     const message = JSON.stringify({
@@ -113,8 +115,8 @@ describe('sanitizeState', () => {
   })
 
   it('keeps a well-formed decision and drops the malformed ones', () => {
-    // Egy hibás elem a panelen renderelési hibát dobna, és az ErrorBoundary miatt az egész
-    // overlay hibaszövegbe fagyna — itt csendben kiesik.
+    // A bad element would throw a render error in the panel, and an ErrorBoundary would replace it
+    // with an error text: here it silently drops out.
     const good = decisionFrom('permissionRequest_askMulti')
     const clean = sanitizeState({
       sessions: [],
@@ -131,7 +133,7 @@ describe('sanitizeState', () => {
   })
 
   it('keeps a decision carrying a description, and drops one whose description is not a string', () => {
-    // A panel a leírást szövegként rendereli; egy objektum ott dobna.
+    // The panel renders the description as text; an object would throw there.
     const good = decisionFrom('permissionRequest_bash')
     expect(good['description']).toBe('Write spike-a to a.txt')
     const clean = sanitizeState({
@@ -142,7 +144,7 @@ describe('sanitizeState', () => {
   })
 
   it('keeps an unreadable decision, and drops one whose readable flag is missing or not a boolean', () => {
-    // A panel ebből dönti el, kínál-e engedélyezést; egy hiányzó jelző nem számíthat olvashatónak.
+    // From it the panel decides whether to offer allowing; a missing flag must not count as readable.
     const good = decisionFrom('permissionRequest_bash')
     expect(good['readable']).toBe(true)
     const blind = { ...good, id: 'blind', readable: false }
@@ -163,8 +165,9 @@ describe('sanitizeState', () => {
   })
 
   it('rejects an array where an object is expected, even one carrying the right named fields', () => {
-    // Szándékos változás: korábban a renderer `isObject`-je tömböt is elfogadott, a többi őr nem.
-    // JSON-ból ilyen tömb nem jöhet, de az IPC-s út `unknown`-t ad, és az őr mindenhol ugyanaz legyen.
+    // A deliberate change: the renderer's former `isObject` accepted an array too, the other guards
+    // did not. Such an array cannot come from JSON, but the IPC path gives `unknown`, and the guard
+    // should be the same everywhere.
     const arraySession = Object.assign([], { sessionId: 'array' })
     const arrayDecision = Object.assign([], decisionFrom('permissionRequest_bash'))
     const clean = sanitizeState({ sessions: [arraySession, { sessionId: 'a' }], decisions: [arrayDecision] })

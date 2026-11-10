@@ -9,9 +9,10 @@ interface Props {
 }
 
 /**
- * A terv a teljes szövegével. Elutasítani itt is lehet, visszajelzéssel: abból tervez újra a
- * session (mérve, spike K3). Jóváhagyni csak a VSCode-ban: a hookból adott jóváhagyást a Claude
- * Code figyelmen kívül hagyja (három független mérés, spike K2/K2b/K2c).
+ * The plan with its full text. It can be rejected here too, with feedback: the session plans again
+ * from it (measured, case K3 in spikes/m2-permission/RESULTS.md). Approving works only in VS Code:
+ * Claude Code ignores an approval given from the hook (three independent measurements, cases
+ * K2/K2b/K2c there).
  */
 export function PlanPanel({ plan, busy, onReject, onJump }: Props): JSX.Element {
   const [feedback, setFeedback] = useState('')
@@ -34,7 +35,7 @@ export function PlanPanel({ plan, busy, onReject, onJump }: Props): JSX.Element 
             setFeedback(event.target.value)
           }}
           onKeyDown={(event) => {
-            // Mint a szabályszerkesztőben: Ctrl+Enter küld a mezőből, a sima Enter új sort kezd.
+            // As in the rule editor: Ctrl+Enter submits from the field, a plain Enter starts a new line.
             if (isSubmitChord(event) && canReject) {
               event.preventDefault()
               onReject(feedback)

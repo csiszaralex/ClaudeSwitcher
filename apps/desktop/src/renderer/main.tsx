@@ -5,9 +5,9 @@ import { ErrorBoundary } from './ErrorBoundary.js'
 import { useDaemonState } from './useDaemonState.js'
 
 const container = document.getElementById('root')
-if (container === null) throw new Error('A #root elem hiányzik az index.html-ből')
+if (container === null) throw new Error('The #root element is missing from index.html')
 
-/** @param retries Igaz, ha a határ a következő állapotüzenetkor magától újrapróbálja. */
+/** @param retries True if the boundary retries on its own at the next state message. */
 function overlayFailed(message: string, retries: boolean): JSX.Element {
   return (
     <div className="empty">
@@ -18,8 +18,8 @@ function overlayFailed(message: string, retries: boolean): JSX.Element {
 }
 
 /**
- * A daemon-kapcsolat a hibahatár FÖLÖTT él: egy renderelési hiba így nem bontja a kapcsolatot, és a
- * következő állapotüzenet (`stateVersion`) újra megpróbálja az App renderelését.
+ * The daemon connection lives ABOVE the error boundary: so a render error does not break the
+ * connection, and the next state message (`stateVersion`) retries rendering App.
  */
 function Root(): JSX.Element {
   const overlay = useDaemonState()
@@ -34,7 +34,8 @@ function Root(): JSX.Element {
   )
 }
 
-// A külső határ a Root saját hibájára: ez nem áll vissza magától, de üres ablak helyett megmondja, mi történt.
+// The outer boundary is for Root's own error: it does not recover on its own, but instead of an
+// empty window it says what happened.
 createRoot(container).render(
   <ErrorBoundary label="root" fallback={(message) => overlayFailed(message, false)}>
     <Root />

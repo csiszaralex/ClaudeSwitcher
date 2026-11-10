@@ -44,8 +44,8 @@ describe('buildRows', () => {
   })
 
   it('shows a held request whose session is not in the snapshot as its own waiting row', () => {
-    // Spec §8: a jóváhagyás a felderítés nélkül is működik — egy új session első másodperceiben,
-    // vagy ha a registry formátuma megváltozott.
+    // Design doc, section 8: approval works without the session discovery too, in a new session's
+    // first seconds or when the registry format has changed.
     const rows = buildRows([session('known', 'idle')], [decision('d1', 'ghost', 7, false, 'P:\\08_Apps\\Ghost\\')])
     const orphan = rows.find((r) => r.sessionId === 'ghost')
     expect(orphan).toMatchObject({ name: 'Ghost', status: 'waiting', waitingSince: 7, session: undefined })
@@ -79,7 +79,7 @@ describe('buildRows', () => {
 
 describe('waitsOutsideApp', () => {
   it('is true for a waiting session without a held request (registry or Notification wait)', () => {
-    // Pl. az app újraindult, miközben a session már várt: a kérés a régi daemonhoz ment.
+    // E.g. the app restarted while the session was already waiting: the request went to the old daemon.
     const [row] = buildRows([session('r', 'waiting', 4)], [])
     expect(row !== undefined && waitsOutsideApp(row)).toBe(true)
   })
@@ -96,7 +96,7 @@ describe('waitsOutsideApp', () => {
 })
 
 describe('selection with a registry-only wait', () => {
-  it('selects the registry-only waiting session on show — it is the oldest waiting', () => {
+  it('selects the registry-only waiting session on show: it is the oldest waiting', () => {
     const rows = buildRows([session('r', 'waiting', 2), session('i', 'idle')], [])
     expect(selectOnShow(rows, [], 'i')).toBe('r')
   })

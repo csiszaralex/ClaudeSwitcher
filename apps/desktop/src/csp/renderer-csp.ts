@@ -1,20 +1,22 @@
 /**
- * A renderer Content-Security-Policyje. Egyetlen forrás: az `index.html` csak egy helyőrzőt
- * tartalmaz, amit a build (electron.vite.config.ts) ennek a kimenetével cserél le.
+ * The renderer's Content-Security-Policy. The single source: the pages (`index.html`, `setup.html`)
+ * hold only a placeholder, which the build (electron.vite.config.ts `rendererCspPlugin`) replaces
+ * with this module's output.
  *
- * Miért a buildben: a daemon portja egy helyen él (`DAEMON_PORT`), az `index.html` viszont
- * statikus. Így a WebSocket a pontos portra szűkül, és a port nem kerül két helyre.
+ * Why in the build: the daemon port lives in one place (`DAEMON_PORT`), but the HTML pages are
+ * static. So the WebSocket is narrowed to the exact port, and the port is not kept in two places.
  */
 
-/** A helyőrző az `index.html` CSP meta tagjének `content` attribútumában. */
+/** The placeholder in the `content` attribute of each page's CSP meta tag. */
 export const CSP_PLACEHOLDER = '__CLAUDESWITCHER_CSP__'
 
 export interface CspOptions {
   daemonPort: number
   /**
-   * `electron-vite dev`: a dev szerver inline forrásokat szúr be. A @vitejs/plugin-react a React
-   * Refresh preamble-t inline modul-scriptként, a Vite a CSS-t `<style>` elemként. A lefordított
-   * oldal egyiket sem használja: a script és a CSS külön fájl, inline `style=` attribútum nincs.
+   * `electron-vite dev`: the dev server injects inline sources. @vitejs/plugin-react injects the
+   * React Refresh preamble as an inline module script, Vite the CSS as a `<style>` element. The
+   * built page uses neither: the script and the CSS are separate files, and there is no inline
+   * `style=` attribute.
    */
   dev: boolean
 }
@@ -27,17 +29,17 @@ export function rendererCsp({ daemonPort, dev }: CspOptions): string {
     `style-src 'self'${inline}`,
     // The host is core `DAEMON_HOST`; this module cannot import core, a test ties the two.
     `connect-src 'self' ws://127.0.0.1:${daemonPort}`,
-    // Az alábbiak közül a `base-uri` és a `form-action` nem esik vissza a `default-src`-re.
+    // Of the following, `base-uri` and `form-action` do not fall back to `default-src`.
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
-    // A `frame-ancestors` szándékosan hiányzik: meta tagben a böngésző figyelmen kívül hagyja.
+    // `frame-ancestors` is left out on purpose: the browser ignores it in a meta tag.
   ].join('; ')
 }
 
 /**
- * Beírja a CSP-t a helyőrző helyére. Dob, ha a helyőrző nincs meg pontosan egyszer: egy csendben
- * kimaradt csere CSP nélküli (érvénytelen szabályú) oldalt adna.
+ * Writes the CSP in place of the placeholder. Throws if the placeholder is not there exactly once:
+ * a silently skipped replacement would give a page without a CSP (with an invalid policy).
  */
 export function injectCsp(html: string, csp: string): string {
   const parts = html.split(CSP_PLACEHOLDER)

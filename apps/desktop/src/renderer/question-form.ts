@@ -6,7 +6,7 @@ interface QuestionState {
   other: string
 }
 
-/** Kérdésenként a választás: kulcs a kérdés szövege, mint a hook válaszában. */
+/** The choice per question: the key is the question text, as in the hook reply. */
 export type FormState = Record<string, QuestionState>
 
 const EMPTY: QuestionState = { selected: [], other: '' }
@@ -19,7 +19,7 @@ function stateOf(state: FormState, question: AskQuestion): QuestionState {
   return state[question.question] ?? EMPTY
 }
 
-/** Egyválasztósnál a választás lecseréli az előzőt és törli a szabad szöveget; többválasztósnál ki-be kapcsol. */
+/** For single choice the pick replaces the previous one and clears the free text; for multiple choice it toggles. */
 export function toggleOption(state: FormState, question: AskQuestion, label: string): FormState {
   const current = stateOf(state, question)
   if (!question.multiSelect) return { ...state, [question.question]: { selected: [label], other: '' } }
@@ -29,7 +29,7 @@ export function toggleOption(state: FormState, question: AskQuestion, label: str
   return { ...state, [question.question]: { selected, other: current.other } }
 }
 
-/** Egyválasztósnál a szabad szöveg kizárja a választott opciót, a natív „Other" is így viselkedik. */
+/** For single choice the free text excludes the picked option; the native "Other" behaves the same. */
 export function setOtherText(state: FormState, question: AskQuestion, text: string): FormState {
   const current = stateOf(state, question)
   const selected = question.multiSelect || text.trim() === '' ? current.selected : []
@@ -37,8 +37,9 @@ export function setOtherText(state: FormState, question: AskQuestion, text: stri
 }
 
 /**
- * A válaszok a hook formátumában (mérve, spike K1 és R1): kulcs a kérdés szövege, érték az opció
- * label-je; több opció a kérdés sorrendjében `", "`-vel; a szabad szöveg szó szerint.
+ * The answers in the hook's format (measured, cases K1 and R1 in spikes/m2-permission/RESULTS.md):
+ * the key is the question text, the value the option's label; several options in the question's
+ * order joined with `", "`; the free text verbatim.
  */
 export function buildAnswers(questions: readonly AskQuestion[], state: FormState): Record<string, string> {
   const answers: Record<string, string> = {}
@@ -56,8 +57,8 @@ export function buildAnswers(questions: readonly AskQuestion[], state: FormState
 }
 
 /**
- * Igaz, ha minden kérdésre van nem üres válasz: csak ekkor küldhető el. Üres listánál soha: az
- * azt jelenti, hogy a kérdéseket nem tudtuk kiolvasni, és egy „üres" válasz nem válasz.
+ * True if every question has a non-empty answer: only then can it be sent. Never for an empty list:
+ * that means the questions could not be read, and an "empty" answer is no answer.
  */
 export function isComplete(questions: readonly AskQuestion[], state: FormState): boolean {
   if (questions.length === 0) return false

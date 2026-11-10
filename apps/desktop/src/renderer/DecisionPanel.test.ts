@@ -25,7 +25,7 @@ function bashDecision(overrides: Partial<PendingDecisionView> = {}): PendingDeci
   }
 }
 
-/** A panel első renderje, effektek nélkül: ezt látja a felhasználó a megjelenés pillanatában. */
+/** The panel's first render, without effects: what the user sees at the moment it appears. */
 function render(decision: PendingDecisionView, shownArmedAt = 0): string {
   return renderToStaticMarkup(
     createElement(DecisionPanel, {
@@ -100,7 +100,7 @@ describe('Ctrl+Enter label', () => {
 })
 
 describe('rule suggestion mark', () => {
-  /** A P és a G gomb teljes markupja, a nyitótagtól a `</button>`-ig. */
+  /** The full markup of the P and the G button, from the opening tag to `</button>`. */
   function ruleButtons(html: string): string[] {
     return [...html.matchAll(/<button[^>]*>(?:(?!<\/button>).)*?<kbd[^>]*>[PG]<\/kbd>(?:(?!<\/button>).)*<\/button>/g)].map(
       (match) => match[0],
@@ -128,14 +128,14 @@ describe('rule suggestion mark', () => {
 })
 
 describe('arming a newly selected request', () => {
-  /** Az A (engedélyez) gomb teljes markupja. */
+  /** The full markup of the A (allow) button. */
   function allowButton(html: string): string | undefined {
     return /<button[^>]*><kbd>A<\/kbd>[^<]*<\/button>/.exec(html)?.[0]
   }
 
   it('keeps the allow button disabled on a freshly mounted panel, even long after the overlay was shown', () => {
-    // A kijelölés ugrásakor a panel új kéréssel mountol (az App `key={decision.id}`-ja): a
-    // megjelenés régi élesítése nem élesíti az új kérést.
+    // When the selection jumps, the panel mounts with the new request (App's `key={decision.id}`):
+    // the old arming from the overlay's appearance does not arm the new request.
     const html = render(bashDecision(), Date.now() - 60_000)
     expect(allowButton(html)).toContain('disabled=""')
   })

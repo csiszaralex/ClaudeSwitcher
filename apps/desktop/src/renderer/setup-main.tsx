@@ -5,7 +5,7 @@ import { SetupWindow } from './SetupWindow.js'
 import './styles.css'
 
 const container = document.getElementById('root')
-if (container === null) throw new Error('A #root elem hiányzik a setup.html-ből')
+if (container === null) throw new Error('The #root element is missing from setup.html')
 
 function setupFailed(message: string): JSX.Element {
   return <div className="empty">A beállítások ablak hibába futott: {message}</div>

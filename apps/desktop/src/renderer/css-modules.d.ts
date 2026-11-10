@@ -1,6 +1,6 @@
 /**
- * A renderer CSS-ét a Vite mellékhatásként importálja (`import './styles.css'`). A
- * `noUncheckedSideEffectImports` mellett a típusellenőrző ezt csak akkor fogadja el, ha a
- * modulnak van deklarációja. Értéket nem exportál: a stílus a betöltéssel érvényesül.
+ * Vite imports the renderer's CSS as a side effect (`import './styles.css'`). With
+ * `noUncheckedSideEffectImports` the type checker accepts this only if the module has a
+ * declaration. It exports no value: the style takes effect by being loaded.
  */
 declare module '*.css'

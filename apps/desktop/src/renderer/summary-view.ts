@@ -1,23 +1,23 @@
 import { DETAILS_LIMIT } from './tool-details.js'
 
-/** Az összefoglaló egy darabja: látható szöveg, vagy egy láthatatlan karakter escape-je. */
+/** A piece of the summary: visible text, or the escape of an invisible character. */
 export interface TextSegment {
   text: string
-  /** Igaz, ha a darab egy láthatatlan karakter `⟨U+XXXX⟩` alakja; a panel kiemelve mutatja. */
+  /** True if the piece is the `⟨U+XXXX⟩` form of an invisible character; the panel highlights it. */
   hidden: boolean
 }
 
 /**
- * A láthatatlan vagy a szöveget átrendező karakterek, a `\n` és a `\t` kivételével (azok a
- * parancs részei, a `<pre>` meg is mutatja őket):
- * - C0 és C1 vezérlők, DEL;
- * - feltételes elválasztó (U+00AD), mongol magánhangzó-elválasztó (U+180E);
- * - nulla szélességű jelek (U+200B–U+200D, U+2060–U+2064, U+FEFF);
- * - irányjelek és felülírások (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069);
- * - sor- és bekezdéselválasztó (U+2028, U+2029);
- * - a címke-blokk (U+E0000–U+E007F) és a kiegészítő változatválasztók (U+E0100–U+E01EF), amelyekbe
- *   láthatatlanul szöveg rejthető.
- * Az emoji változatválasztója (U+FE0F) nem tartozik ide: egy emojit tördelne szét.
+ * The invisible or text-reordering characters, except `\n` and `\t` (those are part of the
+ * command, and the `<pre>` shows them):
+ * - C0 and C1 controls, DEL;
+ * - soft hyphen (U+00AD), Mongolian vowel separator (U+180E);
+ * - zero-width marks (U+200B–U+200D, U+2060–U+2064, U+FEFF);
+ * - direction marks and overrides (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069);
+ * - line and paragraph separator (U+2028, U+2029);
+ * - the tag block (U+E0000–U+E007F) and the variation selectors supplement (U+E0100–U+E01EF), in
+ *   which text can be hidden invisibly.
+ * The emoji variation selector (U+FE0F) is not included: it would break an emoji apart.
  */
 const INVISIBLE_RANGES: readonly (readonly [number, number])[] = [
   [0x0000, 0x0008],
@@ -44,13 +44,13 @@ function escape(code: number): string {
 }
 
 /**
- * A szöveg darabokra bontva: a láthatatlan karakterek mindegyike egy látható `⟨U+202E⟩` lesz.
- * Egy irányfelülírás vagy egy nulla szélességű szóköz mögé így nem bújhat el egy parancsrész.
+ * The text split into pieces: every invisible character becomes a visible `⟨U+202E⟩`. So no part
+ * of a command can hide behind a direction override or a zero-width space.
  */
 export function revealInvisible(text: string): TextSegment[] {
   const segments: TextSegment[] = []
   let visible = ''
-  // Kódpontonként, hogy a címke-blokk két UTF-16 egységből álló karakterei is egyben maradjanak.
+  // By code point, so that the tag block's characters of two UTF-16 units stay whole.
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0
     if (!isInvisible(code)) {
@@ -65,22 +65,22 @@ export function revealInvisible(text: string): TextSegment[] {
   return segments
 }
 
-/** Hány sorból áll a szöveg. A panel efölött egy „N sor" jelzést mutat. */
+/** How many lines the text has. Above one the panel header shows an "N lines" mark. */
 export function lineCount(text: string): number {
   return text.split('\n').length
 }
 
 export interface SummaryView {
   segments: TextSegment[]
-  /** A TELJES összefoglaló sorainak száma, a levágott részé is. */
+  /** The line count of the WHOLE summary, the cut part included. */
   lines: number
-  /** Igaz, ha a megjelenítés a `limit`-nél levágódott. Az adat maga teljes marad. */
+  /** True if the display was cut at `limit`. The data itself stays complete. */
   truncated: boolean
 }
 
 /**
- * Az összefoglaló megjelenítése. Egy heredoc-os, több száz kilobájtos parancs egészében a
- * `<pre>`-ben megfagyasztaná az overlayt, ezért a látható rész `DETAILS_LIMIT`-nél vágódik.
+ * The summary's display. A heredoc command of several hundred kilobytes shown whole in the `<pre>`
+ * would freeze the overlay, so the visible part is cut at `DETAILS_LIMIT`.
  */
 export function summaryView(summary: string, limit: number = DETAILS_LIMIT): SummaryView {
   const truncated = summary.length > limit

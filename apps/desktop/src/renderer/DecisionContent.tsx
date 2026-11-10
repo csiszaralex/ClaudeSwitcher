@@ -12,8 +12,8 @@ interface Props {
 
 /** The scrolling middle of the decision panel: warning, description, command, preview and details. */
 export function DecisionContent({ decision, summary }: Props): JSX.Element {
-  // Az App másodpercenként újrarenderel (az órák miatt); egy nagy szkript formázása vagy egy
-  // fájl soronkénti összevetése ne fusson le minden tikkre.
+  // App re-renders every second (for its clocks); formatting a big script or comparing a file line
+  // by line must not run on every tick.
   const { preview, details } = useMemo(() => panelContent(decision), [decision])
   const limitNote = (
     <p className="muted">
@@ -27,11 +27,11 @@ export function DecisionContent({ decision, summary }: Props): JSX.Element {
       {sandboxDisabled(decision.toolInput) && (
         <p className="decision-warning">Sandbox nélkül futna (dangerouslyDisableSandbox: true).</p>
       )}
-      {/* A leírás a parancs fölött: egy hosszú parancs alatt görgetés nélkül nem látszana. */}
+      {/* The description above the command: below a long command it would not show without scrolling. */}
       {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
       <pre className="decision-summary">
         {summary.segments.map((segment, index) =>
-          // A láthatatlan karakter escape-je kiemelve, hogy ne lehessen a parancs részének nézni.
+          // The escape of an invisible character is highlighted, so it cannot be taken for part of the command.
           segment.hidden ? (
             <span key={index} className="invisible-char">
               {segment.text}
@@ -43,7 +43,7 @@ export function DecisionContent({ decision, summary }: Props): JSX.Element {
       </pre>
       {summary.truncated && limitNote}
       {preview !== undefined && (
-        // Alapból nyitva: ez maga a jóváhagyandó tartalom. Natív <details>, hogy összecsukható legyen.
+        // Open by default: this is the content to approve itself. A native <details>, so it can be collapsed.
         <details className="decision-details edit-preview" open>
           <summary>Előnézet</summary>
           {preview.blocks.map((block) => (
@@ -55,9 +55,9 @@ export function DecisionContent({ decision, summary }: Props): JSX.Element {
               {block.lines.length > 0 && (
                 <pre>
                   {block.lines.map((line, index) => (
-                    // A <pre> tartalma csak szövegszintű elem lehet: blokk-span, nem <div>.
-                    // Az előjel egy CSS pszeudo-elem (`data-mark`), nem szöveg: így a kimásolt
-                    // sorok pontosan a fájl tartalmát adják, előjel- és szóközoszlop nélkül.
+                    // The content of a <pre> may only be phrasing elements: a block span, not a <div>.
+                    // The sign is a CSS pseudo-element (`data-mark`), not text: so copied lines give
+                    // exactly the file's content, without the sign and space column.
                     <span key={index} className={`diff-line diff-${line.sign}`} data-mark={LINE_MARK[line.sign]}>
                       {line.text}
                     </span>
@@ -73,7 +73,7 @@ export function DecisionContent({ decision, summary }: Props): JSX.Element {
         </details>
       )}
       {details !== undefined && details.blocks.length > 0 && (
-        // Natív <details>: billentyűzetről (Tab, Szóköz) saját kód nélkül nyitható.
+        // A native <details>: it opens from the keyboard (Tab, Space) without code of our own.
         <details className="decision-details">
           <summary>Részletek</summary>
           {details.blocks.map((block) => (

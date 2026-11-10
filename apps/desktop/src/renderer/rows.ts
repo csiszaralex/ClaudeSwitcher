@@ -16,39 +16,39 @@ interface SessionLike {
   waitingSince?: number | undefined
 }
 
-/** A lista egy sora: egy ismert session, vagy egy függő kérés, aminek a sessionjét még nem látjuk. */
+/** A row of the list: a known session, or a pending request whose session is not seen yet. */
 export interface Row<S extends SessionLike, D extends DecisionLike> {
   sessionId: string
   status: SessionStatus
   name: string
   waitingSince?: number | undefined
-  /** A registry-ből ismert session; `undefined`, ha a sor csak a függő kérésből áll. */
+  /** The session known from the registry; `undefined` if the row is only the pending request. */
   session?: S | undefined
-  /** A sor függő kérései, a legrégebbi elöl. */
+  /** The row's pending requests, the oldest first. */
   decisions: D[]
 }
 
 /**
- * A panel kérése egy sor kérései közül: a legrégebbi, amit az app még eldönthet. Egy elengedett
- * kérés (`PERMISSION_RELEASE_AFTER_MS`) ne takarja el a mögötte várót: onnan már csak a VSCode dönthet. Ha mind
- * elengedett, a legrégebbi, hogy legalább az „Ugrás a VSCode-ba" látsszon.
+ * The panel's request among a row's requests: the oldest one the app can still decide. A released
+ * request (`PERMISSION_RELEASE_AFTER_MS`) must not hide the one waiting behind it: from there only
+ * VS Code can decide. If all are released, the oldest, so that at least the jump to VS Code shows.
  */
 export function activeDecision<D extends { released: boolean }>(list: readonly D[]): D | undefined {
   return list.find((decision) => !decision.released) ?? list[0]
 }
 
 /**
- * A sor vár, de az appnak nincs róla eldönthető kérése: a várakozást csak a registry vagy egy
- * Notification ismeri (pl. az app újraindult, miközben a session már várt, vagy a
- * PermissionRequest nem ehhez a daemonhoz ment). Ilyenkor csak a VSCode dönthet.
+ * The row waits, but the app has no request about it that it can decide: only the registry or a
+ * Notification knows about the wait (e.g. the app restarted while the session was already waiting,
+ * or the PermissionRequest went to another daemon). Then only VS Code can decide.
  */
 export function waitsOutsideApp(row: { status: SessionStatus; decisions: readonly unknown[] }): boolean {
   return row.status === 'waiting' && row.decisions.length === 0
 }
 
 /**
- * A sor „N vár" jelzése, ha az appból egynél több kérése dönthető. Az elengedett kérés nem
- * számít: azt már csak a VSCode döntheti el, és az állapotjel úgyis mutatja.
+ * The row's "N waiting" badge when more than one of its requests can be decided in the app. A released
+ * request does not count: only VS Code can decide it now, and the status marker shows it anyway.
  */
 export function pendingBadge(decisions: readonly { released: boolean }[]): string | undefined {
   const count = decisions.filter((decision) => !decision.released).length
@@ -56,15 +56,16 @@ export function pendingBadge(decisions: readonly { released: boolean }[]): strin
 }
 
 /**
- * A sessionök és a függő kérések egy listában.
+ * The sessions and the pending requests in one list.
  *
- * Egy kérés, aminek a sessionje nincs a pillanatképben, saját sort kap (spec §8: a jóváhagyás a
- * felderítés nélkül is működik). Ez egy új session első másodperceiben természetes (a hook
- * azonnal jön, a registry-t csak pár másodpercenként olvassuk), de egy megváltozott registry-
- * formátumnál is. A neve a kérés `cwd`-jének utolsó tagja, és várakozónak számít.
+ * A request whose session is not in the snapshot gets a row of its own (design doc, section 8:
+ * approval works without the session discovery too). This is natural in a new session's first
+ * seconds (the hook comes at once, the registry is read only every few seconds), but also with a
+ * changed registry format. Its name is the last segment of the request's `cwd`, and it counts as
+ * waiting.
  *
- * A daemon a várakozókat a várakozás kezdete szerint előre rendezi; az ilyen sor ugyanebbe a
- * sorrendbe kerül, a legrégebbi kérése szerint, a nem-várók elé.
+ * The daemon sorts the waiting sessions first by the start of their wait; such a row goes into the
+ * same order by its oldest request, before the non-waiting ones.
  */
 export function buildRows<S extends SessionLike, D extends DecisionLike>(
   sessions: readonly S[],

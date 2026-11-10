@@ -1,30 +1,30 @@
 import { errorMessage } from '../shared/error-message.js'
 
 /**
- * Az `ErrorBoundary` állapota és a visszaállás döntése, React nélkül, hogy tesztelhető legyen.
+ * The `ErrorBoundary` state and the reset decision, without React, so it can be tested.
  *
- * - `message`: a hibaüzenet, amíg a határ le van állva; `undefined`, ha egészséges.
- * - `failedAt`: a visszaállító kulcs (`resetKey`) értéke a hiba pillanatában.
+ * - `message`: the error message while the boundary is down; `undefined` when healthy.
+ * - `failedAt`: the value of the reset key (`resetKey`) at the moment of the error.
  */
 export interface BoundaryState {
   message: string | undefined
   failedAt: number | undefined
 }
 
-/** A hibát követő állapot. A kulcsot a következő `nextBoundaryState` jegyzi fel. */
+/** The state after an error. The next `nextBoundaryState` records the key. */
 export function failedState(error: unknown): BoundaryState {
   return { message: errorMessage(error), failedAt: undefined }
 }
 
 /**
- * A határ állapota az aktuális visszaállító kulccsal (React `getDerivedStateFromProps`).
+ * The boundary's state with the current reset key (React `getDerivedStateFromProps`).
  *
- * A határ akkor áll vissza, ha a kulcs a hiba óta megváltozott, vagyis új állapotüzenet jött. Ha a
- * hiba ugyanannál a kulcsnál ismétlődne, a határ lent marad a következő üzenetig: így egy mindig
- * hibás állapot nem pörgeti végtelen ciklusban a renderelést.
+ * The boundary recovers when the key has changed since the error, that is, a new state message
+ * came. If the error repeated at the same key, the boundary stays down until the next message: so
+ * a state that always fails does not spin the render in an endless loop.
  *
- * Kulcs nélkül (`undefined`) a határ soha nem áll vissza magától. Ilyen a döntési panel határa,
- * amit a React `key`-e (a kérés azonosítója) épít újra.
+ * Without a key (`undefined`) the boundary never recovers on its own. The decision panel's boundary
+ * is such a one; React's `key` (the request id) rebuilds it.
  */
 export function nextBoundaryState(state: BoundaryState, resetKey: number | undefined): BoundaryState {
   if (state.message === undefined || resetKey === undefined) return state

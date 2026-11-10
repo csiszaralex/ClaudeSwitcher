@@ -1,31 +1,31 @@
 import type { PermissionRule } from '@claudeswitcher/core'
 import { formatRule } from '@claudeswitcher/core/browser'
 
-/** A szabályszerkesztő legalább ennyi soros. */
+/** The rule editor has at least this many rows. */
 export const RULE_EDITOR_MIN_ROWS = 3
-/** Legfeljebb ennyi sorig nő; afölött a mező görget, hogy a gombok a panelen maradjanak. */
+/** It grows to at most this many rows; above that the field scrolls, so the buttons stay on the panel. */
 export const RULE_EDITOR_MAX_ROWS = 12
 
-/** A szerkesztő magassága a szöveg sorszámához igazítva: az alá csúszó szabály se bújhasson el. */
+/** The editor height fitted to the text's line count: a rule slipping below must not hide either. */
 export function editorRows(text: string): number {
   const lines = text.split('\n').length
   return Math.min(RULE_EDITOR_MAX_ROWS, Math.max(RULE_EDITOR_MIN_ROWS, lines))
 }
 
 export interface RuleSeed {
-  /** A szerkesztő kezdőszövege, soronként egy szabály. */
+  /** The editor's initial text, one rule per line. */
   text: string
-  /** Hány javaslat maradt ki, mert sortörés van benne. */
+  /** How many suggestions were left out because they contain a line break. */
   multiline: number
 }
 
 const LINE_BREAK = /[\r\n]/
 
 /**
- * A szerkesztő kezdőszövege a Claude Code javaslataiból. A szerkesztő soronként egy szabályt
- * olvas (`parseRules`), így egy sortörést tartalmazó javaslat (pl. egy heredoc-os parancs
- * szabálya) több, mást engedélyező szabállyá esne szét. Az ilyen javaslat kimarad, és a
- * szerkesztő ezt ki is írja.
+ * The editor's initial text from Claude Code's suggestions. The editor reads one rule per line
+ * (`parseRules`), so a suggestion containing a line break (e.g. the rule of a heredoc command)
+ * would fall apart into several rules that allow something else. Such a suggestion is left out,
+ * and the editor says so.
  */
 export function ruleEditorSeed(rules: readonly PermissionRule[]): RuleSeed {
   const kept = rules.filter(
@@ -35,9 +35,10 @@ export function ruleEditorSeed(rules: readonly PermissionRule[]): RuleSeed {
 }
 
 /**
- * A szabálygombok tooltipje, ha a Claude Code szabályt javasol (`permission_suggestions`): a
- * javaslat pontosan úgy, ahogy a szerkesztő kezdőszövege lesz (`ruleEditorSeed`), és hogy hány
- * többsoros javaslat marad ki belőle. `undefined`, ha nincs javaslat: ilyenkor a gombok nem változnak.
+ * The rule buttons' tooltip when Claude Code suggests a rule (`permission_suggestions`): the
+ * suggestion exactly as the editor's initial text will be (`ruleEditorSeed`), and how many
+ * multi-line suggestions are left out of it. `undefined` if there is no suggestion: then the
+ * buttons do not change.
  */
 export function suggestionTooltip(rules: readonly PermissionRule[]): string | undefined {
   if (rules.length === 0) return undefined
@@ -48,25 +49,25 @@ export function suggestionTooltip(rules: readonly PermissionRule[]): string | un
   return lines.join('\n')
 }
 
-/** „Egy javasolt szabály" vagy „N javasolt szabály": a tooltip és a szerkesztő közös szava. */
+/** "One suggested rule" or "N suggested rules": the wording shared by the tooltip and the editor. */
 export function suggestionCount(count: number): string {
   return count === 1 ? 'Egy javasolt szabály' : `${String(count)} javasolt szabály`
 }
 
 export interface BroadRule {
-  /** A szabály a szerkesztő írásmódjával. */
+  /** The rule in the editor's notation. */
   rule: string
-  /** Kell-e hozzá külön megerősítés. MCP-toolnál nem: ott a puszta név a szabály szokásos alakja. */
+  /** Whether it needs a separate confirmation. Not for an MCP tool: there the bare name is the usual rule form. */
   confirm: boolean
 }
 
-/** Csak csillag, kettőspont és szóköz: a tool minden hívására illeszkedik. */
+/** Only asterisks, colons and spaces: matches every call of the tool. */
 const WILDCARD_ONLY = /^[\s*:]*$/
 
 /**
- * A tool MINDEN hívását engedélyező szabályok: a puszta tool név (`Bash`, `Write`) és a csak
- * helyettesítő karakterből álló tartalom (`Bash(*)`, `Bash(:*)`). A szerkesztő ezekre piros
- * figyelmeztetést ad, és az MCP-toolok kivételével megerősítést kér.
+ * The rules that allow EVERY call of the tool: the bare tool name (`Bash`, `Write`) and content made
+ * of wildcards only (`Bash(*)`, `Bash(:*)`). The editor gives a red warning for these and, except
+ * for MCP tools, asks for a confirmation.
  */
 export function broadRules(rules: readonly PermissionRule[]): BroadRule[] {
   return rules

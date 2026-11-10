@@ -2,45 +2,45 @@ import type { DecisionKind } from '@claudeswitcher/core'
 import { COMMAND_TOOLS, isRecord } from '@claudeswitcher/core/browser'
 
 /**
- * Ennyi karakter jelenik meg legfeljebb a lenyitható részletekben. Egy több száz kilobájtos
- * Workflow-szkript a `<pre>`-ben másodpercekre megfagyasztaná az overlayt, az a döntéshez
- * úgysem kell egészében, a teljes szöveg a VSCode-ban megvan.
+ * At most this many characters show in the expandable details. A Workflow script of several
+ * hundred kilobytes in the `<pre>` would freeze the overlay for seconds; the decision does not need
+ * all of it anyway, and the full text is there in VS Code.
  */
 export const DETAILS_LIMIT = 20_000
 
-/** Efölött egy egysoros szöveg is külön blokkba kerül, ne egy végtelen JSON-sorba. */
+/** Above this a single-line string also gets a block of its own, not one endless JSON line. */
 const LONG_STRING = 120
 
 /**
- * Parancsot futtató eszközök: náluk a parancs (az összefoglaló) és a leírás már a panel tetején
- * áll, a részletek ezeket nem ismétlik. Minden más mezőjük (timeout, háttérfutás, a sandbox
- * kikapcsolása) a részletekbe kerül: egy rejtett mező mellett a sandbox nélküli futás ugyanúgy
- * nézne ki, mint a sandboxos.
+ * Tools that run a command: for them the command (the summary) and the description are already at
+ * the top of the panel, and the details do not repeat them. Every other field (timeout, background
+ * run, turning off the sandbox) goes into the details: with a hidden field, a run without the
+ * sandbox would look the same as one with it.
  */
 const SHOWN_ABOVE: Readonly<Record<string, ReadonlySet<string>>> = Object.fromEntries(
   COMMAND_TOOLS.map((tool) => [tool, new Set(['command', 'description'])]),
 )
 
 interface DetailBlock {
-  /** A mező neve, ha a blokk egyetlen szöveges mező; a JSON-blokknak nincs. */
+  /** The field name if the block is a single string field; the JSON block has none. */
   label?: string | undefined
   text: string
 }
 
 export interface ToolDetails {
   blocks: DetailBlock[]
-  /** Igaz, ha a `DETAILS_LIMIT` miatt valami lemaradt. A panel ezt ki is írja. */
+  /** True if something was left out because of `DETAILS_LIMIT`. The panel says so. */
   truncated: boolean
 }
 
 interface DetailSource {
   kind: DecisionKind
   toolName: string
-  /** A `toolInput`-ot a sanitizeState nem ellenőrzi, ezért `unknown`. */
+  /** sanitizeState does not check `toolInput`, hence `unknown`. */
   toolInput: unknown
 }
 
-/** A részletekbe kerülő mezők: a bemenet, a panel tetején már látható mezők nélkül. */
+/** The fields that go into the details: the input without the fields already shown at the top of the panel. */
 function detailFields(toolName: string, input: Record<string, unknown>): Record<string, unknown> {
   const above = SHOWN_ABOVE[toolName]
   if (above === undefined) return input
@@ -48,8 +48,9 @@ function detailFields(toolName: string, input: Record<string, unknown>): Record<
 }
 
 /**
- * Kap-e a kérés lenyitható részleteket. Csak `tool` fajtánál: a fájlírásnak, a kérdésnek és a
- * tervnek saját nézete van. Parancsnál csak akkor, ha a parancson és a leíráson kívül is van mező.
+ * Whether the request gets expandable details. Only for the `tool` kind: the file write, the
+ * question and the plan have views of their own. For a command only if it has a field besides the
+ * command and the description.
  */
 export function showsDetails(decision: DetailSource): boolean {
   return (
@@ -59,26 +60,26 @@ export function showsDetails(decision: DetailSource): boolean {
   )
 }
 
-/** A `tool` fajtájú kérés részletei a `showsDetails` szerint; `undefined`, ha nincs mit mutatni. */
+/** The details of a `tool` kind request as `showsDetails` decides; `undefined` if there is nothing to show. */
 export function toolDetails(decision: DetailSource): ToolDetails | undefined {
   if (!showsDetails(decision) || !isRecord(decision.toolInput)) return undefined
   return formatToolInput(detailFields(decision.toolName, decision.toolInput))
 }
 
 /**
- * A Bash `dangerouslyDisableSandbox: true` mezője: a parancs a sandboxon kívül futna. A panel
- * ezt piros sorban, a részletek lenyitása nélkül is mutatja. Csak a kifejezett `true` számít.
+ * The Bash field `dangerouslyDisableSandbox: true`: the command would run outside the sandbox. The
+ * panel shows this in a red line, without expanding the details. Only an explicit `true` counts.
  */
 export function sandboxDisabled(toolInput: unknown): boolean {
   return isRecord(toolInput) && toolInput['dangerouslyDisableSandbox'] === true
 }
 
 /**
- * A `toolInput` olvasható szövegként, méretkorláttal. Soha nem dob.
+ * The `toolInput` as readable text, with a size limit. Never throws.
  *
- * A többsoros vagy hosszú szöveges mezők (a Workflow `script`-je, egy MCP-hívás promptja)
- * külön blokkba kerülnek a saját sortöréseikkel: JSON-ban egyetlen, `\n`-ekkel teli sor
- * lennének, amit senki nem tud elolvasni. A többi mező szép JSON-ként, elöl.
+ * Multi-line or long string fields (the Workflow `script`, the prompt of an MCP call) get blocks of
+ * their own with their own line breaks: in JSON they would be a single line full of `\n`s that
+ * nobody can read. The other fields come first, as pretty JSON.
  */
 export function formatToolInput(input: unknown, limit: number = DETAILS_LIMIT): ToolDetails {
   if (!isRecord(input)) return { blocks: [], truncated: false }
@@ -98,12 +99,12 @@ export function formatToolInput(input: unknown, limit: number = DETAILS_LIMIT): 
     try {
       all.push({ text: JSON.stringify(rest, null, 2) })
     } catch {
-      // IPC-n jött JSON-ból ez nem fordulhat elő; ha mégis, a szöveges blokkok attól még jók.
+      // This cannot happen with JSON that came over IPC; if it does, the text blocks are still fine.
     }
   }
   all.push(...texts)
 
-  // A korlát az ÖSSZES blokkra együtt vonatkozik: sok közepes mező is összeadódik.
+  // The limit applies to ALL blocks together: many medium fields add up too.
   const blocks: DetailBlock[] = []
   let budget = limit
   for (const block of all) {

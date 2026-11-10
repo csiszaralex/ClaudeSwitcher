@@ -3,21 +3,21 @@ import { failedState, nextBoundaryState, type BoundaryState } from './error-boun
 
 interface Props {
   children: ReactNode
-  /** A naplósorban: melyik határ kapta el a hibát. */
+  /** In the log line: which boundary caught the error. */
   label: string
-  /** Amit a hiba helyén mutatunk; a hibaüzenetet kapja. */
+  /** What is shown in place of the error; it gets the error message. */
   fallback: (message: string) => ReactNode
   /**
-   * Visszaállító kulcs: ha a hiba óta megváltozik, a határ újra a gyerekeit rendereli (lásd
-   * `nextBoundaryState`). Nélküle a határ csak a React `key`-ével építhető újra.
+   * The reset key: if it changes after the error, the boundary renders its children again (see
+   * `nextBoundaryState`). Without it the boundary can be rebuilt only through React's `key`.
    */
   resetKey?: number | undefined
 }
 
 /**
- * Egy renderelési hiba különben az egész overlayt leszedné, és üres ablakot hagyna. Egy
- * monitorozó eszközben ez a legrosszabb kimenet: pont akkor nem mutat semmit, amikor
- * ránézel, és úgy néz ki, mintha nem lenne futó session.
+ * Otherwise a render error would take down the whole overlay and leave an empty window. In a
+ * monitoring tool that is the worst outcome: it shows nothing exactly when you look at it, and it
+ * looks as if no session were running.
  */
 export class ErrorBoundary extends Component<Props, BoundaryState> {
   override state: BoundaryState = { message: undefined, failedAt: undefined }

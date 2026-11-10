@@ -1,49 +1,49 @@
 /**
- * A döntési panel betűjeleinek őre: mikor dönthet egy leütött betű.
+ * The guard on the decision panel's key letters: when a pressed letter may decide.
  *
- * A betűjelek egyetlen leütéssel döntenek, és a panel a felhasználó keze alatt cserélődhet: a
- * kérés máshol lezárul, vagy egy döntés után a kijelölés a következő várakozóra lép. Ezért a
- * friss panel nem élesedik azonnal, a szövegmezőbe gépelt mondat folytatása nem dönt, és a
- * nyomva tartott billentyű ismétlése soha nem számít leütésnek.
+ * The key letters decide with a single keystroke, and the panel can change under the user's hand:
+ * the request is settled elsewhere, or after a decision the selection steps to the next waiting
+ * one. So a fresh panel does not arm at once, the rest of a sentence typed into a text field does
+ * not decide, and the auto-repeat of a held key never counts as a keystroke.
  */
 
-/** Ennyi ideig nem hatnak a betűjelek (és nem nyomhatók az engedélyező gombok) a panel megjelenése után. */
+/** For this long after the panel appears the key letters have no effect (and the allowing buttons cannot be pressed). */
 export const SHORTCUT_ARM_MS = 400
 
-/** Ennyi ideig nem hatnak a betűjelek az utolsó, szövegmezőbe ütött billentyű után. */
+/** For this long after the last key typed into a text field the key letters have no effect. */
 export const TYPING_COOLDOWN_MS = 1500
 
-/** Egy keydown esemény az őr szemével. */
+/** A keydown event as the guard sees it. */
 export interface ShortcutKey {
-  /** A böngésző automatikus ismétlése (nyomva tartott billentyű). */
+  /** The browser's auto-repeat (a held key). */
   repeat: boolean
   ctrlKey: boolean
   altKey: boolean
   metaKey: boolean
-  /** A célja szövegmező (`isTypingTarget`). */
+  /** Its target is a text field (`isTypingTarget`). */
   typingTarget: boolean
 }
 
 export interface ShortcutClock {
-  /** Az az időpont, amely előtt a betűjelek nem hatnak (`armUntil`). */
+  /** The time before which the key letters have no effect (`armUntil`). */
   armedAt: number
-  /** Az utolsó olyan keydown ideje, amelynek a célja szövegmező volt; `undefined`, ha még nem volt ilyen. */
+  /** The time of the last keydown whose target was a text field; `undefined` if there was none yet. */
   lastTypedAt: number | undefined
   now: number
 }
 
 /**
- * Az App billentyű-előzménye, amit a panel olvas. Ref-ben él, nem állapotban: a panel
- * keydown-kezelője még azelőtt lássa a friss értéket, hogy a React újrarenderelt volna.
+ * App's key history, which the panel reads. It lives in a ref, not in state: the panel's keydown
+ * handler must see the fresh value even before React has re-rendered.
  */
 export interface KeyHistory {
-  /** Az utolsó `overlay:shown` utáni élesedés időpontja (`armUntil`); 0, ha még nem jelent meg. */
+  /** The arming time after the last `overlay:shown` (`armUntil`); 0 if the overlay has not appeared yet. */
   shownArmedAt: number
-  /** Lásd `ShortcutClock.lastTypedAt`. */
+  /** See `ShortcutClock.lastTypedAt`. */
   lastTypedAt: number | undefined
 }
 
-/** Az élesedés időpontja egy `now`-kor megjelent panelnél vagy overlaynél. */
+/** The arming time for a panel or overlay that appeared at `now`. */
 export function armUntil(now: number): number {
   return now + SHORTCUT_ARM_MS
 }
@@ -52,18 +52,18 @@ export function isArmed(armedAt: number, now: number): boolean {
   return now >= armedAt
 }
 
-/** Gépelt-e a felhasználó szövegmezőbe az utolsó `TYPING_COOLDOWN_MS`-ben. */
+/** Whether the user typed into a text field in the last `TYPING_COOLDOWN_MS`. */
 export function recentlyTyped(lastTypedAt: number | undefined, now: number): boolean {
   return lastTypedAt !== undefined && now - lastTypedAt < TYPING_COOLDOWN_MS
 }
 
 /**
- * Hathat-e a betűjel. Minden feltételnek teljesülnie kell:
- * - nem ismétlés;
- * - nincs Ctrl, Alt vagy Meta (a magyar kiosztás AltGr-je Ctrl+Altként érkezik, és egy `@` ne döntsön);
- * - a célja nem szövegmező;
- * - a panel élesedett;
- * - a legutóbbi szövegmezős gépelés óta eltelt `TYPING_COOLDOWN_MS`.
+ * Whether the key letter may take effect. Every condition must hold:
+ * - not an auto-repeat;
+ * - no Ctrl, Alt or Meta (AltGr on the Hungarian layout arrives as Ctrl+Alt, and an `@` must not decide);
+ * - its target is not a text field;
+ * - the panel is armed;
+ * - `TYPING_COOLDOWN_MS` has passed since the last typing in a text field.
  */
 export function shortcutAllowed(key: ShortcutKey, clock: ShortcutClock): boolean {
   if (key.repeat || key.ctrlKey || key.altKey || key.metaKey || key.typingTarget) return false

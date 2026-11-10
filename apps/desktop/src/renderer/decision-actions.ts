@@ -40,8 +40,8 @@ export const ACTION_BUTTONS: Readonly<Record<DecisionKind, readonly ActionButton
 }
 
 /**
- * Olvashatatlan kérésnél (`readable === false`) csak a tiltás marad: engedélyezést a core
- * `buildHookResponse` úgyis elutasítana.
+ * For an unreadable request (`readable === false`) only deny remains: the core's
+ * `buildHookResponse` would reject allowing anyway.
  */
 export function shortcutFor(kind: DecisionKind, key: string, readable: boolean): DecisionAction | undefined {
   const lower = key.toLowerCase()
@@ -50,14 +50,14 @@ export function shortcutFor(kind: DecisionKind, key: string, readable: boolean):
 }
 
 /**
- * Kérdés, aminek a kérdéseit nem tudtuk kiolvasni (megváltozott `tool_input` alak). Válaszolni
- * rá innen nem lehet. A panel ilyenkor a kiutat kínálja: ugrás a VSCode-ba, vagy tiltás üzenettel.
+ * A question whose questions could not be read (a changed `tool_input` shape). It cannot be
+ * answered from here. The panel then offers the way out: the jump to VS Code, or a deny with a message.
  */
 export function isUnreadableQuestion(decision: { kind: DecisionKind; questions: readonly unknown[] }): boolean {
   return decision.kind === 'question' && decision.questions.length === 0
 }
 
-/** Igaz, ha a billentyű egy szövegmezőé: ott a gépelés az övé, nem a listáé vagy a panelé. */
+/** True if the key belongs to a text field: the typing there is the field's, not the list's or the panel's. */
 export function isTypingTarget(target: unknown): boolean {
   if (typeof target !== 'object' || target === null) return false
   const element = target as { tagName?: unknown; isContentEditable?: unknown }
@@ -70,10 +70,10 @@ export function isTypingTarget(target: unknown): boolean {
 }
 
 /**
- * Igaz, ha a cél egy gomb, egy `<summary>`, egy link vagy egy `role="button"` elem, vagy ezek
- * egyikén belül van (pl. a gomb `<kbd>`-ja). Ott az Enter az elemé: megnyomja, illetve nyitja.
- * A szülőláncot a `parentElement` mentén járja be, a szerepet az ARIA-tükrözésű `role`
- * tulajdonságból olvassa, így DOM nélkül is tesztelhető.
+ * True if the target is a button, a `<summary>`, a link or a `role="button"` element, or is inside
+ * one of them (e.g. the button's `<kbd>`). There Enter belongs to the element: it presses or opens
+ * it. It walks the parent chain along `parentElement` and reads the role from the ARIA-reflecting
+ * `role` property, so it can be tested without a DOM.
  */
 export function isActivationTarget(target: unknown): boolean {
   let current: unknown = target
@@ -86,18 +86,18 @@ export function isActivationTarget(target: unknown): boolean {
   return false
 }
 
-/** A többsoros mezők beküldő billentyűje: Ctrl+Enter. A sima Enter új sort kezd. */
+/** The submit key of the multi-line fields: Ctrl+Enter. A plain Enter starts a new line. */
 export function isSubmitChord(event: { key: string; ctrlKey: boolean }): boolean {
   return event.key === 'Enter' && event.ctrlKey
 }
 
 /**
- * Az `isSubmitChord` felirata a többsoros mezők küldő gombján. Ahol a mező egysoros és az Enter
- * küld (a tiltás indoklása, a kérdések szabad szövege), ott nincs felirat.
+ * The `isSubmitChord` label on the submit button of the multi-line fields. Where the field is
+ * single-line and Enter submits (the deny reason, the questions' free text), there is no label.
  */
 export const SUBMIT_CHORD_LABEL = 'Ctrl+Enter'
 
-/** A main processz `DecideResult`-ja, ellenőrizve, mert az IPC-n át bármi jöhet. */
+/** The main process's `DecideResult`, checked, because anything can come over the IPC. */
 export function readDecideResult(raw: unknown): DecideOutcome {
   if (isRecord(raw)) {
     if (raw['ok'] === true) return { ok: true }
@@ -108,7 +108,7 @@ export function readDecideResult(raw: unknown): DecideOutcome {
 }
 
 export interface OverlaySettings {
-  /** Elrejtőzzön-e az overlay az utolsó várakozó appból hozott eldöntése után. */
+  /** Whether the overlay hides after the last waiting request is decided in the app. */
   hideAfterLastDecision: boolean
 }
 

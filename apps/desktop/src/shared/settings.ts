@@ -7,13 +7,12 @@
 import { isRecord } from '@claudeswitcher/core/browser'
 
 /**
- * Az overlay gyorsbillentyűjének alapértéke.
+ * The default of the overlay hotkey.
  *
- * Szándékosan NEM `Control+Alt+Space`: azt a Claude desktop alkalmazás foglalja (ezen a
- * gépen lemérve: a regisztráció következetesen elbukott), és Windowson a `Control+Alt`
- * amúgy is azonos az `AltGr`-rel, ami magyar kiosztáson elnyelné az `AltGr+Space`-t: `@`
- * írása közben (`AltGr+V`) egy szóköz felhozná az overlayt. A `Shift+Alt` mindkettőt
- * elkerüli.
+ * Deliberately NOT `Control+Alt+Space`: the Claude desktop app holds it (measured live: the
+ * registration failed every time), and on Windows `Control+Alt` is the same as `AltGr` anyway,
+ * which on the Hungarian layout would swallow `AltGr+Space`: while typing `@` (`AltGr+V`) a space
+ * would bring up the overlay. `Shift+Alt` avoids both.
  */
 export const DEFAULT_HOTKEY = 'Shift+Alt+Space'
 

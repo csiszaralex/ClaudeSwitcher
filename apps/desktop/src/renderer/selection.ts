@@ -1,12 +1,12 @@
 import { recentlyTyped } from './key-guard.js'
 
 /**
- * A kiválasztott session indexe a jelenlegi listában, vagy -1, ha a lista üres.
+ * The index of the selected session in the current list, or -1 if the list is empty.
  *
- * A kiválasztást session-azonosító szerint követjük, nem index szerint. A lista
- * rendezett (a várakozó sessionök felülre ugranak), így egy index-alapú kiválasztás
- * egy átrendeződéskor csendben egy MÁSIK sessionre mutatna, és az Enter rossz ablakra
- * ugrana. Ha a kiválasztott session eltűnt, az elsőre esünk vissza.
+ * The selection is tracked by session id, not by index. The list is sorted (waiting sessions jump
+ * to the top), so an index-based selection would silently point to a DIFFERENT session after a
+ * reorder, and Enter would jump to the wrong window. If the selected session is gone, it falls
+ * back to the first one.
  */
 export function resolveSelectedIndex(
   ids: readonly string[],
@@ -17,7 +17,7 @@ export function resolveSelectedIndex(
   return index === -1 ? 0 : index
 }
 
-/** A kiválasztás mozgatása `delta` lépéssel, a lista végein megállva. */
+/** Moves the selection by `delta` steps, stopping at the ends of the list. */
 export function moveSelection(
   ids: readonly string[],
   selectedId: string | undefined,
@@ -37,20 +37,21 @@ interface SessionLike {
 interface DecisionLike {
   id: string
   sessionId: string
-  /** Az app már elengedte (`PERMISSION_RELEASE_AFTER_MS`): innen csak a VSCode dönthet. */
+  /** The app has already released it (`PERMISSION_RELEASE_AFTER_MS`): from here only VS Code can decide. */
   released: boolean
 }
 
 /**
- * Az első várakozó session azonosítója a lista sorrendjében, két szinten. A daemon a várakozókat
- * előre, a legrégebben várót legelőre rendezi, tehát szinten belül az első a legrégebben váró.
+ * The id of the first waiting session in list order, on two tiers. The daemon sorts the waiting
+ * sessions first and the longest-waiting one to the very front, so within a tier the first is the
+ * one waiting longest.
  *
- * 1. szint: az app még eldönthet valamit. Van nem elengedett döntése, vagy nincs tartott döntése,
- *    de a `status`-a `waiting` (Notification-várakozás, pl. kérdés a terminálban). Egy tartott
- *    döntés akkor is várakozás, ha a `status` még nem követte.
- * 2. szint: minden tartott döntése elengedett. A daemon az ilyet is `waiting`-nek mutatja (a
- *    `#pending` az elengedett döntést is tartja), ezért a `status` itt nem számít: ide csak akkor
- *    esünk vissza, ha az 1. szinten senki nincs.
+ * Tier 1: the app can still decide something. The session has a decision that is not released, or
+ *    it has no held decision but its `status` is `waiting` (a Notification wait, e.g. a question in
+ *    the terminal). A held decision counts as waiting even if the `status` has not caught up yet.
+ * Tier 2: every held decision of the session is released. The daemon shows such a session as
+ *    `waiting` too (its `#pending` keeps the released decision as well), so the `status` does not
+ *    matter here: this tier is the fallback only when nobody is on tier 1.
  */
 function firstWaiting(
   sessions: readonly SessionLike[],
@@ -71,9 +72,9 @@ function firstWaiting(
 }
 
 /**
- * Kijelölés az overlay megjelenésekor: a legrégebben várakozó session, a felhasználó
- * munkamenete „megnyitom, eldöntöm a legrégebbit". Elengedett kérésre csak akkor ugrik, ha más nem
- * vár (lásd `firstWaiting`). Ha senki nem vár, marad a mostani.
+ * The selection when the overlay appears: the session waiting longest, matching the user's flow
+ * "open it, decide the oldest". It jumps to a released request only if nothing else waits (see
+ * `firstWaiting`). If nobody waits, the current selection stays.
  */
 export function selectOnShow(
   sessions: readonly SessionLike[],
@@ -84,21 +85,21 @@ export function selectOnShow(
 }
 
 export interface AfterDecision {
-  /** Erre lépjen a kijelölés; ha nincs, marad, ahol volt. */
+  /** The selection moves here; if absent, it stays where it was. */
   select?: string | undefined
-  /** Rejtőzzön-e el az overlay. */
+  /** Whether the overlay hides. */
   hide: boolean
 }
 
 /**
- * Mi történjen egy appból hozott SIKERES döntés után.
+ * What happens after a SUCCESSFUL decision made in the app.
  *
- * A `sessions` és a `decisions` lehet egy lépéssel lemaradva: a döntés válasza és a daemon
- * következő állapota külön utazik. Ezért az eldöntött kérést azonosító szerint kizárjuk, és az
- * eldöntött sessiont sem tekintjük várakozónak, a daemon úgyis a nem-várók tetejére teszi.
- * Kivétel, ha ugyanannak a sessionnek van MÁSIK, még eldönthető kérése (párhuzamos tool-hívások): akkor
- * ott maradunk, és el sem rejtőzünk, mert van még mit eldönteni. Egy elengedett testvér nem ok a
- * maradásra.
+ * `sessions` and `decisions` can be one step behind: the decision's reply and the daemon's next
+ * state travel separately. So the decided request is excluded by id, and the decided session is
+ * not taken as waiting either; the daemon puts it on top of the non-waiting ones anyway.
+ * The exception is when the same session has ANOTHER request that can still be decided (parallel
+ * tool calls): then the selection stays there and the overlay does not hide, because there is still
+ * something to decide. A released sibling is no reason to stay.
  */
 export function nextAfterDecision(
   sessions: readonly SessionLike[],
@@ -107,7 +108,7 @@ export function nextAfterDecision(
   hideEnabled: boolean,
 ): AfterDecision {
   const rest = decisions.filter((d) => d.id !== decided.id)
-  // Csak a még eldönthető testvér tart helyben: egy elengedettet az app már nem dönthet el.
+  // Only a sibling that can still be decided holds the selection: the app can no longer decide a released one.
   if (rest.some((d) => d.sessionId === decided.sessionId && !d.released)) return { select: decided.sessionId, hide: false }
   const next = firstWaiting(sessions, rest, decided.sessionId)
   if (next !== undefined) return { select: next, hide: false }
@@ -115,31 +116,31 @@ export function nextAfterDecision(
 }
 
 interface ArrivalState {
-  /** A sorok a lista sorrendjében (rows.ts `buildRows`). */
+  /** The rows in list order (rows.ts `buildRows`). */
   sessions: readonly SessionLike[]
   decisions: readonly DecisionLike[]
-  /** A kijelölt sor azonosítója, ahogy a lista feloldja (`resolveSelectedIndex`). */
+  /** The id of the selected row, as the list resolves it (`resolveSelectedIndex`). */
   selectedId: string | undefined
-  /** Lásd key-guard.ts `KeyHistory.lastTypedAt`. */
+  /** See key-guard.ts `KeyHistory.lastTypedAt`. */
   lastTypedAt: number | undefined
   now: number
 }
 
 interface ArrivalInput extends ArrivalState {
-  /** Az előző állapotban már ismert kérések azonosítói: ami nincs köztük, az most érkezett. */
+  /** The ids of the requests already known in the previous state: anything not among them just arrived. */
   known: ReadonlySet<string>
 }
 
 /**
- * Hova ugorjon a kijelölés, ha új, appból eldönthető kérés érkezett; `undefined`, ha maradjon.
+ * Where the selection jumps when a new request the app can decide has arrived; `undefined` if it stays.
  *
- * Csak akkor ugrik, ha a kijelölt sornak nincs tartott döntése (elengedett sem: az a felhasználó
- * olvasnivalója), és a felhasználó nem gépelt az utolsó `TYPING_COOLDOWN_MS`-ben. Nyitott űrlap
- * (tiltás, szabály, kérdés, terv) csak tartott döntésnél van, azt tehát az első feltétel fedi. A cél
- * soha nem elengedett kérés. Több új kérésnél a lista sorrendjében első sor nyer.
+ * It jumps only if the selected row has no held decision (not even a released one: that is for the
+ * user to read), and the user has not typed in the last `TYPING_COOLDOWN_MS`. An open form (deny,
+ * rule, question, plan) exists only with a held decision, so the first condition covers it. The
+ * target is never a released request. With several new requests the first row in list order wins.
  *
- * Az ugrás nem dönthet véletlenül: az új kérés panelje újra mountol (az App `key={decision.id}`-ja),
- * és az engedélyező gombjai meg a betűjelei `SHORTCUT_ARM_MS`-ig nem élesek (DecisionPanel `mountArmedAt`).
+ * The jump cannot decide by accident: the new request's panel mounts again (App's `key={decision.id}`),
+ * and its allowing buttons and key letters are not armed for `SHORTCUT_ARM_MS` (DecisionPanel `mountArmedAt`).
  */
 export function selectOnArrival(input: ArrivalInput): string | undefined {
   const arrived = new Set(input.decisions.filter((d) => !d.released && !input.known.has(d.id)).map((d) => d.sessionId))
@@ -151,9 +152,10 @@ export function selectOnArrival(input: ArrivalInput): string | undefined {
 }
 
 /**
- * A `selectOnArrival` az előző állapot emlékével: minden hívás az addig látott kérésekhez méri az
- * újakat, és megjegyzi a mostaniakat. Egy kérés csak az érkezésekor ránthat: ha akkor maradni
- * kellett, később sem ugrunk rá: a sora a listában jelzi, hogy vár.
+ * `selectOnArrival` with a memory of the previous state: every call measures the new requests
+ * against the ones seen so far and remembers the current ones. A request can pull the selection
+ * only on arrival: if the selection had to stay then, it does not jump there later either; its row
+ * in the list shows that it waits.
  */
 export function trackArrivals(): (state: ArrivalState) => string | undefined {
   let known: ReadonlySet<string> = new Set()

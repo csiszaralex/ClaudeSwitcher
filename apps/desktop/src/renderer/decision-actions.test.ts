@@ -28,11 +28,11 @@ describe('shortcutFor', () => {
     expect(shortcutFor('edit', 'g', true)).toBeUndefined()
   })
 
-  it('has no key for a question — it can only be answered through the form', () => {
+  it('has no key for a question: it can only be answered through the form', () => {
     for (const key of ['a', 'd', 'p', 'g', 's']) expect(shortcutFor('question', key, true)).toBeUndefined()
   })
 
-  it('has no key for a plan — a stray key must not reject it, and approval happens in VS Code', () => {
+  it('has no key for a plan: a stray key must not reject it, and approval happens in VS Code', () => {
     for (const key of ['a', 'd', 'p', 'g', 's']) expect(shortcutFor('plan', key, true)).toBeUndefined()
   })
 })
@@ -53,7 +53,7 @@ describe('isTypingTarget', () => {
 })
 
 describe('isActivationTarget', () => {
-  // A DOM-elem alakja, amit a függvény olvas: tagName, role (ARIA-tükrözés) és a szülő.
+  // The DOM element's shape the function reads: tagName, role (ARIA reflection) and the parent.
   function element(tagName: string, parentElement: unknown = null, role: string | null = null): unknown {
     return { tagName, role, parentElement }
   }
@@ -109,7 +109,7 @@ describe('readOverlaySettings', () => {
     expect(readOverlaySettings({ hideAfterLastDecision: true })).toEqual({ hideAfterLastDecision: true })
   })
 
-  it('falls back to the default (hide) for anything else — the IPC can carry anything', () => {
+  it('falls back to the default (hide) for anything else: the IPC can carry anything', () => {
     for (const raw of [undefined, null, 'x', {}, { hideAfterLastDecision: 'false' }]) {
       expect(readOverlaySettings(raw)).toEqual({ hideAfterLastDecision: true })
     }
@@ -129,7 +129,7 @@ describe('isUnreadableQuestion', () => {
   })
 })
 
-describe('shortcutFor — olvashatatlan kérés', () => {
+describe('shortcutFor: unreadable request', () => {
   it('leaves only deny on the keyboard, since no allow can go out for it', () => {
     expect(['a', 'd', 'p', 'g'].map((key) => shortcutFor('tool', key, false))).toEqual([undefined, 'deny', undefined, undefined])
     expect(['a', 'd', 's'].map((key) => shortcutFor('edit', key, false))).toEqual([undefined, 'deny', undefined])

@@ -13,8 +13,8 @@ import type { OverlayState } from './useDaemonState.js'
 import './styles.css'
 
 /**
- * A panel helye, amikor az appból nem lehet dönteni: egy sor magyarázat és az ugrás a VSCode-ba,
- * hogy a sor ne legyen zsákutca.
+ * Stands in for the panel when the app cannot decide: one line of explanation and the jump to VS Code,
+ * so the row is not a dead end.
  */
 function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): JSX.Element {
   return (
@@ -34,43 +34,43 @@ function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): J
 }
 
 /**
- * @param overlay A daemon élő állapota. Kívülről jön (`main.tsx` `Root`), nem itt olvassuk: így
- * egy renderelési hiba után is él a kapcsolat, és a következő állapot visszaállíthatja a felületet.
+ * @param overlay The daemon's live state. It comes from outside (`main.tsx` `Root`) and is not read
+ * here: so the connection lives on after a render error, and the next state can restore the UI.
  */
 export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
-  // Session-azonosító, nem index: a lista átrendeződésekor a kiválasztás a sessionnel
-  // együtt mozog. Lásd a selection.ts dokumentációját.
+  // A session id, not an index: when the list reorders, the selection moves with the session.
+  // See the selection.ts documentation.
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [now, setNow] = useState(Date.now())
 
-  // A sorok: a sessionök, és külön sorként azok a függő kérések, amelyek sessionjét a
-  // pillanatkép még nem ismeri (rows.ts). Minden kijelölés és léptetés ezen a listán megy.
+  // The rows: the sessions, plus a row of its own for each pending request whose session the
+  // snapshot does not know yet (rows.ts). All selection and stepping works on this list.
   const rows = buildRows(sessions, decisions)
   const ids = rows.map((row) => row.sessionId)
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedRowView = selected === -1 ? undefined : rows[selected]
 
-  // A panel a legrégebbi, appból még dönthető kérést mutatja; az állapotjelnek mind kell.
+  // The panel shows the oldest request the app can still decide; the status marker needs all of them.
   const decision = selectedRowView === undefined ? undefined : activeDecision(selectedRowView.decisions)
 
-  // A legutóbbi állapot az aszinkron kezelőknek (megjelenés, döntés utáni léptetés). Egy
-  // renderkori closure a döntés válaszáig vagy a megjelenésig elavulhat: a lépést a
-  // legfrissebb listán kell kiszámolni, különben egy közben eltűnt sessionre ugorhatna.
+  // The latest state for the async handlers (show, the step after a decision). A closure from
+  // render time can go stale before the decision's reply or the show: the step has to be computed
+  // on the freshest list, else it could jump to a session that has disappeared meanwhile.
   const latest = useRef({ rows, decisions })
   useEffect(() => {
     latest.current = { rows, decisions }
   })
 
-  // A panel betűjeleinek őréhez (key-guard.ts): mikor jelent meg az overlay, és mikor gépeltünk
-  // utoljára szövegmezőbe.
+  // For the guard on the panel's key letters (key-guard.ts): when the overlay appeared, and when
+  // the user last typed into a text field.
   const keyHistory = useRef<KeyHistory>({ shownArmedAt: 0, lastTypedAt: undefined })
-  // Csak újrarenderelést vált ki megjelenéskor: a panel ebből tompítja az engedélyező gombokat.
+  // Only triggers a re-render on show: from it the panel dims the allowing buttons.
   const [, rerenderOnShow] = useState(0)
 
-  // Új, appból eldönthető kérésnél a kijelölés rá ugrik, ha a kijelölt sornál nincs döntés, és a
-  // felhasználó nem gépel (selection.ts `selectOnArrival`). Csak akkor fut, ha a kérések listája
-  // változott; az előző állapot kéréseit a `trackArrivals` tartja.
+  // On a new request the app can decide, the selection jumps to it if the selected row has no
+  // decision and the user is not typing (selection.ts `selectOnArrival`). Runs only when the list
+  // of requests changed; `trackArrivals` keeps the requests of the previous state.
   const arrivals = useRef(trackArrivals())
   useEffect(() => {
     const next = arrivals.current({
@@ -83,9 +83,9 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
     if (next !== undefined) setSelectedId(next)
   }, [decisions])
 
-  // Megjelenéskor a legrégebben várakozó sessionre ugrunk, és a panel újra élesedik: az első
-  // leütés még a régi kijelölésre mehetne. A jel a main `show` eseménye (az indoklás a main
-  // createOverlay-ében).
+  // On show, jump to the session that has been waiting longest, and the panel arms again: the first
+  // keystroke could still go to the old selection. The signal is the main process's `show` event
+  // (the reason is in `createOverlay` in the main process).
   useEffect(
     () =>
       window.claudeswitcher.onShown(() => {
@@ -97,8 +97,8 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
     [],
   )
 
-  // Minden szövegmezős leütés ideje, a capture fázisban: akkor is megvan, ha a mező a következő
-  // pillanatban eltűnik (a kérés máshol lezárult), és a fókusz a body-ra esik.
+  // The time of every keystroke in a text field, in the capture phase: it is recorded even if the
+  // field disappears the next moment (the request was settled elsewhere) and focus falls to the body.
   useEffect(() => {
     function onTyped(event: KeyboardEvent): void {
       if (isTypingTarget(event.target)) keyHistory.current.lastTypedAt = Date.now()
@@ -109,10 +109,10 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
     }
   }, [])
 
-  /** Egy appból hozott SIKERES döntés után: a következő várakozóra lép, vagy elrejtőzik. */
+  /** After a SUCCESSFUL decision made in the app: steps to the next waiting one, or hides. */
   async function afterDecision(decided: PendingDecisionView): Promise<void> {
-    // Minden döntésnél frissen kérdezzük: a tálcapipa bármikor átállhat, és egy gyorsítótár
-    // ehhez külön értesítési csatornát kívánna. Ha az IPC elbukik, az alapérték (elrejtés) jön.
+    // Asked fresh on every decision: the tray checkbox can flip at any time, and a cache would need
+    // its own notification channel for that. If the IPC fails, the default (hide) applies.
     const raw = await window.claudeswitcher.settings().catch((error: unknown) => {
       console.error('[overlay] could not read the settings', error)
       return undefined
@@ -132,30 +132,31 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
     }
   }, [])
 
-  // A kijelölt sor legördítése. A lista scrollozható, tehát nélküle a nyilakkal a
-  // kijelölés kifuthat a látható területről, és az Enter egy olyan sessiont aktiválna,
-  // amit a felhasználó nem is lát. Ez a legrosszabb fajta hiba ebben az appban, mert
-  // ugyanúgy „működik", csak nem azt teszi, amit vártál.
+  // Scrolls the selected row into view. The list scrolls, so without this the arrows could move
+  // the selection out of the visible area, and Enter would activate a session the user cannot
+  // even see. That is the worst kind of bug in this app, because it "works" just the same, it
+  // just does not do what you expected.
   const selectedRow = useRef<HTMLLIElement | null>(null)
   useEffect(() => {
     selectedRow.current?.scrollIntoView({ block: 'nearest' })
   }, [selected])
 
-  // Függőséglista nélkül: a sorlista minden renderben új tömb, a kezelő tehát úgyis minden
-  // renderben cserélődne, így legalább biztosan a legfrissebb sorokat látja.
+  // No dependency list: the row list is a new array on every render, so the handler would be
+  // replaced on every render anyway, and this way it surely sees the freshest rows.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      // Szövegmezőben a gépelés az övé: se a nyilak, se az Enter, se az Esc ne vezérelje a listát.
+      // In a text field the typing belongs to the field: neither the arrows nor Enter nor Esc
+      // control the list.
       if (isTypingTarget(event.target)) return
-      // Egy fókuszált gombon vagy <summary>-n az Enter az elemé (megnyomja, nyitja), nem ugrás.
+      // On a focused button or <summary>, Enter belongs to the element (presses or opens it), not a jump.
       if (event.key === 'Enter' && isActivationTarget(event.target)) return
       if (event.key === 'Escape') void window.claudeswitcher.hide()
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        // Enélkül a nyíl a listát is elscrollozná a kijelölés mozgatása mellett.
+        // Without this the arrow would also scroll the list besides moving the selection.
         event.preventDefault()
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
-      // Nyitott döntési panelnél a Tab a gombok között lép, ott nem ugrás.
+      // With the decision panel open, Tab moves between the buttons there, not a jump.
       if (event.key === 'Enter' || (event.key === 'Tab' && decision === undefined)) {
         event.preventDefault()
         const id = ids[resolveSelectedIndex(ids, selectedId)]
@@ -172,15 +173,15 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
     <div className="overlay">
       <ul className="sessions">
         {rows.length === 0 && (
-          // „Nincs session" és „nem érjük el a daemont" nem ugyanaz: a felhasználónak
-          // látnia kell, melyikről van szó.
+          // "No session" and "the daemon cannot be reached" are not the same: the user has to see
+          // which one it is.
           <li className="empty">
             {connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
           </li>
         )}
         {rows.map((row, index) => {
           const pending = activeDecision(row.decisions)
-          // A pillanatképből még ismeretlen session sora: a függő kérés tartja, tehát várakozó.
+          // The row of a session the snapshot does not know yet: the pending request holds it, so it is waiting.
           const marker = statusMarker(row.session ?? { status: row.status }, row.decisions)
           const badge = pendingBadge(row.decisions)
           return (
@@ -199,7 +200,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
                 {marker.glyph}
               </span>
               <span className="name">
-                {/* Csak a szöveg csonkolódik (…), a pötty soha: hosszú névnél is látszania kell. */}
+                {/* Only the text is truncated (…), never the dot: it must show with a long name too. */}
                 <span className="name-text" title={row.name}>
                   {row.name}
                 </span>
@@ -216,7 +217,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
               </span>
               <span
                 className="summary"
-                // A függő döntés felülírja a sort; a tooltip addig is az összes aktív subagentet sorolja.
+                // A pending decision overrides the row; the tooltip still lists every active subagent.
                 title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
               >
                 {pending !== undefined
@@ -234,8 +235,8 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
       </ul>
 
       {decision !== undefined && selectedRowView !== undefined && (
-        // Saját határ, a kérés azonosítójával kulcsolva: egy hibás kérés csak a saját panelját viszi
-        // el, a lista és a többi kérés működik tovább. Egy másik kérés új határt kap.
+        // A boundary of its own, keyed by the request id: a faulty request takes down only its own
+        // panel, the list and the other requests keep working. Another request gets a new boundary.
         <ErrorBoundary
           key={decision.id}
           label="decision panel"
@@ -252,8 +253,8 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
               })
             }}
             onJump={() => {
-              // A session-azonosítóval, mint eddig. Ismeretlen sessionnél a main nem talál ablakot,
-              // és nem ugrik. A natív prompt a VSCode-ban attól még ott van.
+              // By the session id. For an unknown session the main process finds no window and does
+              // not jump. The native prompt is still there in VS Code.
               void window.claudeswitcher.focusSession(selectedRowView.sessionId)
             }}
           />
@@ -261,8 +262,8 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
       )}
 
       {decision === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
-        // Nincs tartott kérés, tehát nincs mit eldönteni, de a sor ne legyen zsákutca: a natív
-        // prompt a VSCode-ban ott van.
+        // No held request, so nothing to decide, but the row must not be a dead end: the native
+        // prompt is there in VS Code.
         <JumpNotice
           text="A VSCode-ban vár jóváhagyásra. Az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett)."
           sessionId={selectedRowView.sessionId}
@@ -271,9 +272,9 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
 
       <div className="status-bar">
         {/*
-          Az életjel ideje. Ez az egyetlen jel, amiből látszik, hogy a lista ÉL, csak nincs
-          változás. A daemon az azonos pillanatképet nem küldi újra, tehát egy tétlen gépen
-          a mozdulatlan lista és a megállt poll különben pont ugyanúgy néz ki.
+          The time of the heartbeat. It is the only sign that the list is ALIVE and just has no
+          change. The daemon does not resend an identical snapshot, so on an idle machine a still
+          list and a stopped poll would otherwise look exactly the same.
         */}
         <span className="muted">
           {checkedAt === undefined

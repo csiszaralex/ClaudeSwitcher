@@ -14,9 +14,9 @@ function isQuestion(value: unknown): boolean {
 }
 
 /**
- * Egy függő döntés a daemontól. Csak azt engedjük át, amit a panel biztonságosan meg tud
- * jeleníteni: egy hibás elem itt csendben kiesik, ahelyett hogy a renderelésnél dobna, és az
- * ErrorBoundary miatt az egész overlayt hibaszövegbe fagyasztaná.
+ * A pending decision from the daemon. Only what the panel can safely display gets through: a bad
+ * element silently drops out here instead of throwing at render time, where an ErrorBoundary would
+ * replace the panel or the whole overlay with an error text.
  */
 function isDecision(value: unknown): value is PendingDecisionView {
   if (!isRecord(value)) return false
@@ -27,10 +27,11 @@ function isDecision(value: unknown): value is PendingDecisionView {
     typeof value['sessionId'] === 'string' &&
     typeof value['toolName'] === 'string' &&
     typeof value['summary'] === 'string' &&
-    // Opcionális a `PermissionRequestInfo`-ban: nincs, ha az eszköz nem ad leírást. Ha jön, szövegnek kell lennie, a panel annak rendereli.
+    // Optional in `PermissionRequestInfo`: absent when the tool gives no description. If present it
+    // must be a string, the panel renders it as one.
     optionalString(value['description']) &&
     typeof value['released'] === 'boolean' &&
-    // Kötelező: ebből dönti el a panel, kínál-e engedélyezést. Hiányzó jelző nem számíthat olvashatónak.
+    // Required: from it the panel decides whether to offer allowing. A missing flag must not count as readable.
     typeof value['readable'] === 'boolean' &&
     isDecisionKind(value['kind']) &&
     Array.isArray(questions) &&
@@ -45,9 +46,9 @@ function optionalString(value: unknown): boolean {
 }
 
 /**
- * Egy aktív subagent a daemontól. Szigorú: egy rossz típusú mező a sor szövegébe `[object Object]`-et
- * vagy számot írna, és a hiányzó kötelező mező (`agentId`, `updatedAt`) hibás alakot jelez.
- * Mint a többi mezőnél: a hibás session kiesik, nem a renderelés dob.
+ * An active subagent from the daemon. Strict: a field of the wrong type would write `[object Object]`
+ * or a number into the row text, and a missing required field (`agentId`, `updatedAt`) signals a
+ * bad shape. As with the other fields: the bad session drops out, the render does not throw.
  */
 function isSubagent(value: unknown): value is SubagentView {
   return (
@@ -62,16 +63,16 @@ function isSubagent(value: unknown): value is SubagentView {
 }
 
 /**
- * Megtisztít egy állapot-payloadot, vagy `undefined`-ot ad. Soha nem dob.
+ * Cleans a state payload, or returns `undefined`. Never throws.
  *
- * MINDKÉT szállítási út ezen megy át: a WebSocket üzenet és az IPC-n kért kezdőállapot is.
- * Ez a lényeg: a kezdőállapot nem a WebSocketen jön, tehát ha csak a `parseStateMessage`
- * szűrne, az IPC-s út továbbra is beengedne hibás alakot.
+ * BOTH transport paths go through this: the WebSocket message and the initial state requested over
+ * IPC. That is the point: the initial state does not come over the WebSocket, so if only
+ * `parseDaemonMessage` filtered, the IPC path would still let a bad shape in.
  *
- * Az ELEMEKET is szűri, nem csak a konténereket. Egy `sessions: [null]` egy puszta
- * `Array.isArray` ellenőrzésen túljutna, az App pedig a `view.sessionId`-n dobna, és mivel
- * az ErrorBoundary nem áll vissza magától, az overlay onnantól véglegesen hibaszöveget
- * mutatna. Egy rossz alakú elemet inkább eldobunk, mint hogy az egész listát elveszítsük.
+ * It filters the ELEMENTS too, not just the containers. A `sessions: [null]` would pass a bare
+ * `Array.isArray` check, App would throw on `view.sessionId`, and the ErrorBoundary would show an
+ * error text instead of the list until a state without the bad element arrives. Dropping one
+ * malformed element is better than losing the whole list.
  */
 export function sanitizeState(payload: unknown): DaemonState | undefined {
   if (!isRecord(payload)) return undefined
@@ -85,26 +86,29 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
       (view: unknown): view is SessionView =>
         isRecord(view) &&
         typeof view['sessionId'] === 'string' &&
-        // Opcionális a `SessionView`-ban: csak az „épp végzett" sessionnél van. Ha jön, számnak kell lennie, időt számolnak belőle.
+        // Optional in `SessionView`: present only on a session that "just finished" (session-marker.ts
+        // `statusMarker` reads it). If present it must be a number, the time the type declares.
         (view['stoppedAt'] === undefined || typeof view['stoppedAt'] === 'number') &&
-        // Opcionális: a registry rekordjából jön, ha ott van. Ha jön, szöveg, a nyers `entrypoint` érték.
+        // Optional: comes from the registry record when it is there. If present, a string, the raw
+        // `entrypoint` value.
         optionalString(view['entrypoint']) &&
-        // Opcionális: csak aktív subagent mellett van. Ha jön, minden eleme olyan alakú, amit a sor összefoglalója olvas.
+        // Optional: present only with an active subagent. If present, every element has the shape
+        // the row summary reads.
         (view['subagents'] === undefined || (Array.isArray(view['subagents']) && view['subagents'].every(isSubagent))),
     ),
-    // A daemon mindig küldi; a hiánya itt sem dobja el a sessionöket, hanem „nincs függő döntés".
+    // The daemon always sends it; its absence does not drop the sessions either, it means "no pending decision".
     decisions: Array.isArray(decisions) ? decisions.filter(isDecision) : [],
   }
 }
 
-/** Amit a daemontól érthetünk: egy új állapot, vagy egy életjel. */
+/** What the daemon can tell us: a new state, or a heartbeat. */
 export type DaemonMessage = { kind: 'state'; state: DaemonState } | { kind: 'tick' }
 
 /**
- * Egy WebSocket üzenet értelmezése, vagy `undefined`. Soha nem dob.
+ * Parses a WebSocket message, or returns `undefined`. Never throws.
  *
- * A `tick` azért kell, mert a daemon nem küldi újra az azonos pillanatképet: nélküle a
- * kliens nem tudná megkülönböztetni azt, hogy „él, de nincs változás", attól, hogy „megállt".
+ * The `tick` is needed because the daemon does not resend an identical snapshot: without it the
+ * client could not tell "alive, but no change" from "stopped".
  */
 export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
   let message: unknown
@@ -113,7 +117,7 @@ export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
   } catch {
     return undefined
   }
-  // Más protokollverzió (vagy hiányzó) üzenetét nem értelmezzük: az alakja eltérhet attól, amit itt olvasunk.
+  // A message with another (or no) protocol version is not parsed: its shape may differ from what is read here.
   if (!isRecord(message) || message['protocol'] !== DAEMON_PROTOCOL) return undefined
   if (message['type'] === 'tick') return { kind: 'tick' }
   if (message['type'] !== 'state') return undefined
@@ -121,7 +125,7 @@ export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
   return state === undefined ? undefined : { kind: 'state', state }
 }
 
-/** Egy WebSocket üzenetből kiolvassa az állapotot, vagy `undefined`-ot ad. Soha nem dob. */
+/** Reads the state from a WebSocket message, or returns `undefined`. Never throws. */
 export function parseStateMessage(data: unknown): DaemonState | undefined {
   const parsed = parseDaemonMessage(data)
   return parsed?.kind === 'state' ? parsed.state : undefined

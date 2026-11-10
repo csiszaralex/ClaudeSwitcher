@@ -4,33 +4,31 @@ import { useEffect, useState } from 'react'
 import { parseDaemonMessage, sanitizeState } from './state-message.js'
 
 export interface OverlayState extends DaemonState {
-  /** Hamis, amíg nincs élő kapcsolat a daemonnal: a lista ilyenkor állott lehet. */
+  /** False while there is no live connection to the daemon: the list may be stale then. */
   connected: boolean
   /**
-   * Mikor jelzett utoljára a daemon, hogy végigszkennelte a sessionöket (`Date.now()`).
-   * `undefined`, amíg nem jött jel. Nem az utolsó VÁLTOZÁS ideje: a daemon az azonos
-   * pillanatképet nem küldi újra, tehát a „nincs változás" és a „megállt" csak ezen a
-   * jelen keresztül különböztethető meg.
+   * When the daemon last signalled that it scanned the sessions (`Date.now()`). `undefined` until a
+   * signal came. Not the time of the last CHANGE: the daemon does not resend an identical snapshot,
+   * so "no change" and "stopped" can be told apart only through this signal.
    */
   checkedAt: number | undefined
   /**
-   * Hányadik alkalmazott állapotüzenet (élő `state` üzenet vagy a kezdeti IPC-lekérés). A legfelső
-   * ErrorBoundary ebből tudja, hogy új állapot jött, és újra megpróbálhatja a renderelést. Az
-   * életjel (`tick`) nem növeli: az azonos állapot ugyanúgy hibázna.
+   * The count of applied state messages (a live `state` message or the initial IPC request). From it
+   * the top ErrorBoundary knows a new state came and can retry rendering. The heartbeat (`tick`)
+   * does not increase it: the same state would fail the same way.
    */
   stateVersion: number
 }
 
 /**
- * Várakozás a hányadik újracsatlakozási próbálkozás előtt. Negyed másodpercről indul, és
- * tíz másodpercnél megáll: egy alvásból ébredt gép gyorsan visszakapcsolódik, egy tartósan
- * halott daemont viszont nem ostromlunk.
+ * The wait before the given reconnect attempt. It starts at a quarter second and stops at ten
+ * seconds: a machine woken from sleep reconnects fast, but a daemon that stays dead is not hammered.
  */
 export function retryDelayMs(attempt: number): number {
   return Math.min(10_000, 250 * 2 ** Math.max(0, attempt - 1))
 }
 
-/** Élő állapot a daemon WebSocket hubjáról, újracsatlakozással. */
+/** Live state from the daemon's WebSocket hub, with reconnecting. */
 export function useDaemonState(): OverlayState {
   const [state, setState] = useState<DaemonState>({ sessions: [], decisions: [] })
   const [connected, setConnected] = useState(false)
@@ -43,13 +41,13 @@ export function useDaemonState(): OverlayState {
     const isClosed = (): boolean => closed
     let attempt = 0
     let retry: ReturnType<typeof setTimeout> | undefined
-    // Ha már érkezett élő üzenet, egy később befutó IPC-lekérés nem írhatja felül: a két
-    // csatorna külön utazik, és nincs köztük sorrendi garancia.
+    // Once a live message has arrived, an IPC request that lands later must not overwrite it: the
+    // two channels travel separately, with no ordering guarantee between them.
     let receivedLive = false
-    // Kapcsolat-nemzedék. Újracsatlakozáskor nő, és minden kezelő a SAJÁT nemzedékére
-    // ellenőriz. Enélkül egy előző, már lezárt kapcsolat közben indított állapot-lekérés
-    // később futhatna be, mint egy újabb kapcsolat adata, és felülírná frissebbel. A
-    // `receivedLive` önmagában nem véd ettől: azt az `onclose` nullázza.
+    // The connection generation. It grows on reconnect, and every handler checks against ITS OWN
+    // generation. Without it, a state request started during an earlier, already closed connection
+    // could land later than a newer connection's data and overwrite the fresher data. `receivedLive`
+    // alone does not protect against this: `onclose` resets it.
     let generation = 0
 
     const scheduleRetry = (): void => {
@@ -63,8 +61,8 @@ export function useDaemonState(): OverlayState {
       const myGeneration = ++generation
 
       const { port, token } = await window.claudeswitcher.connection()
-      // Az `await` alatt a `closed` megváltozhat; a függvényhívás megakadályozza, hogy a
-      // fordító a korábbi `if (closed)` után végleg hamisnak vegye.
+      // `closed` can change during the `await`; the function call keeps the compiler from taking it
+      // as false for good after the earlier `if (closed)`.
       if (isClosed() || myGeneration !== generation) return
 
       const next = new WebSocket(daemonWsUrl(port, token))
@@ -74,14 +72,13 @@ export function useDaemonState(): OverlayState {
         if (closed || myGeneration !== generation) return
         attempt = 0
         setConnected(true)
-        // Az állapotot szándékosan CSAK a kapcsolat megnyílása után kérjük le. Egy
-        // megnyílás előtti lekérés és a socket élete között érkező változás elveszne, és
-        // mivel a daemon az azonos pillanatképeket nem küldi újra, az overlay addig
-        // állott maradna, amíg valami ÚJRA meg nem változik.
-        // A sanitizeState itt sem hagyható el: az IPC-s út nem megy át a
-        // parseStateMessage-en, tehát e nélkül csak a WebSocket lenne védve a hibás
-        // alaktól. A `.catch` azért van, mert egy elkapatlan elutasítás a rendererben
-        // néma lenne.
+        // The state is deliberately requested ONLY after the connection opened. A change arriving
+        // between a request made before the open and the socket going live would be lost, and since
+        // the daemon does not resend identical snapshots, the overlay would stay stale until
+        // something changes AGAIN.
+        // sanitizeState cannot be left out here either: the IPC path does not go through
+        // parseDaemonMessage, so without it only the WebSocket would be protected from a bad shape.
+        // The `.catch` is there because an uncaught rejection in the renderer would be silent.
         void window.claudeswitcher
           .state()
           .then((fresh) => {
@@ -95,9 +92,9 @@ export function useDaemonState(): OverlayState {
           .catch((error: unknown) => {
             console.error('[overlay] could not read the initial state', error)
           })
-        // A korlátos indítás ezt a sort keresi: a rejtett overlay is betölti az oldalát,
-        // így ez bizonyítja, hogy a React lefutott, az IPC válaszolt, és a WebSocket a
-        // tokennel kapcsolódott. Tokent nem ír ki.
+        // A time-limited test launch looks for this line: the hidden overlay loads its page too, so the
+        // line proves that React ran, the IPC answered, and the WebSocket connected with the token.
+        // It does not print the token.
         console.info('[overlay] live updates connected')
       }
 
@@ -105,7 +102,7 @@ export function useDaemonState(): OverlayState {
         if (closed || myGeneration !== generation) return
         const parsed = parseDaemonMessage(event.data)
         if (parsed === undefined) return
-        // Bármelyik érthető üzenet azt bizonyítja, hogy a daemon épp most szkennelt.
+        // Any message that parses proves the daemon has just scanned.
         setCheckedAt(Date.now())
         if (parsed.kind !== 'state') return
         receivedLive = true
@@ -115,24 +112,24 @@ export function useDaemonState(): OverlayState {
 
       next.onclose = () => {
         if (closed || myGeneration !== generation) return
-        // Kapcsolatvesztés után az overlay némán állott maradna, és egy monitorozó
-        // eszközben ez ugyanolyan rossz, mint a hibás adat. Újracsatlakozunk, és addig
-        // a felhasználó is látja, hogy nincs élő kapcsolat.
+        // After a lost connection the overlay would silently stay stale, and in a monitoring tool
+        // that is as bad as wrong data. It reconnects, and meanwhile the user sees that there is no
+        // live connection.
         setConnected(false)
         receivedLive = false
         scheduleRetry()
       }
 
       next.onerror = () => {
-        // A `close` mindig követi; az újracsatlakozást ott ütemezzük.
+        // `close` always follows; the reconnect is scheduled there.
         next.close()
       }
     }
 
-    // MINDEN próbálkozás ezen megy át, az újraütemezettek is. Ha csak az első kapna
-    // `catch`-et, egy későbbi próbálkozás elutasítása (például ha az IPC nem válaszol)
-    // elkapatlan maradna, ÉS a ciklus némán leállna: több újraütemezés nem történne, az
-    // overlay pedig örökre „nincs kapcsolat" állapotban maradna.
+    // EVERY attempt goes through this, the rescheduled ones too. If only the first got a `catch`,
+    // the rejection of a later attempt (for example when the IPC does not answer) would stay
+    // uncaught, AND the loop would stop silently: no more retries would be scheduled, and the
+    // overlay would stay "no connection" forever.
     function attemptConnect(): void {
       connect().catch((error: unknown) => {
         console.error('[overlay] could not reach the daemon', error)

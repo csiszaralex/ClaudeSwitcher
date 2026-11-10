@@ -1,8 +1,9 @@
 import type { ClaudeSwitcherApi } from '../preload/api.js'
 
 /**
- * A preload által kitett API típusa a rendererben. Egyetlen forrása a `ClaudeSwitcherApi`, amit a
- * preload `api` objektuma megvalósít; innen csak típus jön, a renderer csomagjába kód nem kerül.
+ * The type of the API the preload exposes, in the renderer. Its single source is
+ * `ClaudeSwitcherApi`, which the preload's `api` object implements; only a type comes from there,
+ * no code goes into the renderer bundle.
  */
 declare global {
   interface Window {

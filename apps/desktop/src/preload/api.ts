@@ -6,24 +6,25 @@ interface DaemonConnection {
 }
 
 /**
- * A renderernek kitett API, egyetlen deklarációban. A preload `api` objektuma ezt valósítja meg, a
- * renderer `window.claudeswitcher` típusa ez (lásd `renderer/window-api.ts`). Külön fájlban van,
- * mert a preload az `electron` modult importálja, annak típusai pedig a Node típusait húznák be a
- * renderer típusellenőrzésébe. Ami `unknown`-t ad, azt a renderer ellenőrizve olvassa.
+ * The API exposed to the renderer, in a single declaration. The preload's `api` object implements
+ * it, and it is the type of the renderer's `window.claudeswitcher` (see `renderer/window-api.ts`).
+ * It lives in its own file because the preload imports the `electron` module, whose types would
+ * pull the Node types into the renderer's type check. Whatever returns `unknown`, the renderer
+ * reads with a check.
  */
 export interface ClaudeSwitcherApi {
   connection: () => Promise<DaemonConnection>
-  /** A daemon állapota; a renderer a `sanitizeState`-tel olvassa. */
+  /** The daemon's state; the renderer reads it with `sanitizeState`. */
   state: () => Promise<unknown>
   focusSession: (sessionId: string) => Promise<boolean>
   hide: () => Promise<void>
-  /** A választ a main processz `DecideResult`-ként adja; a renderer ellenőrizve olvassa. */
+  /** The main process gives the reply as a `DecideResult`; the renderer reads it with a check. */
   decide: (id: string, decision: UserDecision) => Promise<unknown>
-  /** A main `{ hideAfterLastDecision }`-t ad; a renderer ellenőrizve olvassa (`readOverlaySettings`). */
+  /** The main process gives `{ hideAfterLastDecision }`; the renderer reads it with a check (`readOverlaySettings`). */
   settings: () => Promise<unknown>
   /**
-   * Feliratkozás az overlay megjelenésére; a visszaadott függvény leiratkozik. A renderer csak a
-   * saját callbackjét kapja meg, az `IpcRendererEvent`-et nem: azon át az `ipcRenderer` elérhető lenne.
+   * Subscribes to the overlay's appearance; the returned function unsubscribes. The renderer gets
+   * only its own callback, not the `IpcRendererEvent`: through that `ipcRenderer` would be reachable.
    */
   onShown: (callback: () => void) => () => void
 }

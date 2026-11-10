@@ -22,7 +22,7 @@ describe('statusMarker', () => {
   })
 
   it('prefers a still-held decision over a released one of the same session', () => {
-    // Amíg van az appból eldönthető kérés, az a fontosabb jel.
+    // While there is a request the app can decide, that is the more important sign.
     expect(statusMarker(session('waiting'), [{ released: true }, { released: false }]).tone).toBe('waiting')
   })
 
@@ -51,7 +51,7 @@ describe('statusMarker', () => {
       statusMarker(session('idle', 1), []),
       statusMarker(session('idle'), []),
     ]
-    // Színvak felhasználónak is meg kell különböztetnie: a jel alakja is más, nem csak a színe.
+    // A color-blind user must tell them apart too: the glyph's shape differs, not just its color.
     expect(new Set(markers.map((m) => m.glyph)).size).toBe(markers.length)
     for (const marker of markers) expect(marker.title.trim()).not.toBe('')
   })
@@ -68,7 +68,7 @@ describe('hasRemoteControl', () => {
     }
   })
 
-  it('is false for a non-string at runtime — the daemon message can be anything', () => {
+  it('is false for a non-string at runtime: the daemon message can be anything', () => {
     expect(hasRemoteControl({ bridgeSessionId: 42 })).toBe(false)
   })
 })
