@@ -2,9 +2,9 @@ import type { IdeLock, SessionRecord } from './types.js'
 import { isRecord } from './guards.js'
 
 /**
- * Toleráns parse: ismeretlen mezőket figyelmen kívül hagy, hiányzó kötelező
- * mezőnél null-t ad. Soha nem dob: a formátum nem dokumentált, verzióváltásnál
- * változhat, és egy rossz fájl nem viheti magával a többi sessiont.
+ * Tolerant parse: ignores unknown fields and returns null when a required field is missing. Never
+ * throws: the format is undocumented and may change between versions, and one bad file must not
+ * take the other sessions down with it.
  */
 export function parseSessionRecord(raw: unknown): SessionRecord | null {
   if (!isRecord(raw)) return null
@@ -24,7 +24,7 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
       typeof raw['bridgeSessionId'] === 'string' ? raw['bridgeSessionId']
       : raw['bridgeSessionId'] === null ? null
       : undefined,
-    // Ismeretlen `status` szöveget változatlanul átengedünk (lásd a SessionRecord-ot).
+    // An unknown `status` text passes through unchanged (see `SessionRecord`).
     status: typeof raw['status'] === 'string' ? raw['status'] : undefined,
     waitingFor:
       typeof raw['waitingFor'] === 'string' ? raw['waitingFor']

@@ -7,12 +7,13 @@ import { flatText, isRecord, lastPathSegment, truncate } from './guards.js'
 export const TOOL_DETAIL_MAX = 60
 
 /**
- * Röviden, min dolgozik egy tool: a parancs, a keresett minta, a fájl neve, az URL, a keresés, a
- * subagent leírása vagy a skill neve: az első, ami van. Egysoros és `TOOL_DETAIL_MAX`-ra vágott.
+ * In short, what a tool is working on: the command, the search pattern, the file name, the URL, the
+ * query, the subagent's description or the skill name, whichever comes first. One line, cut to
+ * `TOOL_DETAIL_MAX`.
  *
- * A tool_input nem dokumentált és toolonként más, ezért a mezők szerint megy, nem a tool neve
- * szerint: egy új tool, amelynek ugyanilyen mezője van, magától is kap részletet. Ha semmi nem
- * illik, nincs részlet, és soha nem dob.
+ * `tool_input` is undocumented and differs per tool, so this goes by the fields, not by the tool
+ * name: a new tool with the same field gets a detail on its own. When nothing fits there is no
+ * detail; it never throws.
  */
 export function toolDetail(input: unknown): string | undefined {
   if (!isRecord(input)) return undefined

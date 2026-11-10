@@ -63,8 +63,8 @@ describe('readActivityFromLines', () => {
   })
 
   it('survives a null entry inside a content array', () => {
-    // Valid JSON, és a `.type` olvasása rajta TypeError-t dobna. Ez a fajta
-    // meglepetés az, amiért ez a modul egyáltalán toleráns.
+    // Valid JSON, and reading `.type` on it would throw a TypeError. This kind of surprise is why
+    // this module is tolerant at all.
     const line = JSON.stringify({
       type: 'assistant',
       timestamp: '2026-09-04T10:00:00.000Z',
@@ -137,7 +137,7 @@ describe('readActivityFromLines', () => {
   })
 
   it('reads a subagent transcript, skipping its non-message lines', () => {
-    // Konstruált sorok a mért subagent-alakban: agentId, isSidechain, és api-request zaj.
+    // Constructed lines in the measured subagent shape: agentId, isSidechain, and api-request noise.
     const sidechain = { agentId: 'a1', isSidechain: true, sessionId: 'sid-1' }
     const lines = [
       JSON.stringify({ ...sidechain, type: 'api-request', timestamp: '2026-10-21T10:00:00.000Z', request: {} }),
@@ -207,8 +207,8 @@ describe('tailLines', () => {
   })
 
   it('drops the truncated first line instead of returning mangled text', async () => {
-    // A transcriptek nem ASCII szöveget tartalmaznak, tehát a seek egy több
-    // bájtos karakter közepére eshet. A megtartott soroknak épnek kell lenniük.
+    // Transcripts hold non-ASCII text, so the seek may land in the middle of a multi-byte
+    // character. The lines kept must be intact.
     const lines = ['árvíztűrő tükörfúrógép', 'öt szép szűzlány', 'hűtőházi rendszer']
     const file = await fileWith(lines.join('\n'))
     const tail = await tailLines(file, 40)
@@ -218,17 +218,15 @@ describe('tailLines', () => {
   })
 
   it('returns nothing when file size is zero (early return before buffer allocation)', async () => {
-    // A Windows-on `open()` egy könyvtárra is működik, és az stat().size nulla.
-    // Az `if (length === 0)` korai visszatérés ezt kezeli, nem a catch blokk.
-    // Ez a test azt bizonyítja, hogy a korai return működik.
+    // On Windows `open()` works on a directory too, and its stat().size is zero. The early return
+    // on `length === 0` handles it, not the catch block. This test proves the early return works.
     const dir = await tempDir('cs-tail-')
     expect(await tailLines(dir)).toEqual([])
   })
 
   it('catches and logs buffer allocation failure', async () => {
-    // Szintetikus kiváltó: a maxBytes = -1 miatt length < 0 lesz, és
-    // Buffer.alloc(negative) RangeError-t dob. Ez az egyetlen módja annak, hogy
-    // az I/O catch blokkot minden platformon ki tudjuk váltani a tesztből.
+    // A synthetic trigger: maxBytes = -1 makes length < 0, and Buffer.alloc(negative) throws a
+    // RangeError. It is the only way to reach the I/O catch block from a test on every platform.
     const file = await fileWith('content')
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {

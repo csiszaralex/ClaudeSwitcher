@@ -1,8 +1,8 @@
 /**
- * Azok az időzítések, amelyeket több modul használ, vagy amelyekre más modulok időzítése épül.
+ * The timings that several modules use, or that other modules' timings are derived from.
  *
- * Ami egyetlen modulban él, és sehol nincs másolata, az ott maradt, ahol használják (például a
- * `LATE_PROMPT_WINDOW_MS` a session-store-ban, a `PRE_TOOL_USE_TTL_MS` a DecisionBrokerben). IO-mentes.
+ * A timing that lives in one module and has no copy elsewhere stays where it is used (for example
+ * `LATE_PROMPT_WINDOW_MS` in the session store, `PRE_TOOL_USE_TTL_MS` in the DecisionBroker). IO-free.
  */
 
 /**
@@ -14,8 +14,8 @@
 export const POLL_INTERVAL_MS = 3000
 
 /**
- * Ennyi ideig érvényes egy sikeres processz-pillanatkép (`createSnapshotProbe` `ttlMs` alapértéke,
- * a PowerShell és a natív probe is ezt kapja). Kisebb a `POLL_INTERVAL_MS`-nél, így minden poll
- * friss pillanatképet kér. Mért alapja nincs.
+ * How long a successful process snapshot stays valid (the default `ttlMs` of `createSnapshotProbe`;
+ * both the PowerShell and the native probe get it). It is shorter than `POLL_INTERVAL_MS`, so every
+ * poll asks for a fresh snapshot. No measurement behind this value.
  */
 export const PROBE_TTL_MS = 2000

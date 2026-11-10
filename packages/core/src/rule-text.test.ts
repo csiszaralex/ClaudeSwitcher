@@ -25,8 +25,8 @@ describe('parseRules', () => {
   })
 
   it('reports the first bad line with its 1-based number instead of guessing', () => {
-    // Egy elgépelt szabály csendes javítása veszélyes lenne: más engedélyt adna, mint amit a
-    // felhasználó lát. Inkább megmondjuk, melyik sor rossz.
+    // Silently fixing a mistyped rule would be dangerous: it would grant a different permission than
+    // the one the user sees. Better to say which line is wrong.
     expect(parseRules('Bash(ls *)\nBash()\nWebFetch(domain:x)')).toEqual({ ok: false, line: 2, text: 'Bash()' })
     expect(parseRules('Bash(ls *')).toEqual({ ok: false, line: 1, text: 'Bash(ls *' })
     expect(parseRules('két szó')).toEqual({ ok: false, line: 1, text: 'két szó' })

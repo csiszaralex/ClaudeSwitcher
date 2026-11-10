@@ -1,43 +1,44 @@
 /**
- * A Claude Code hookjai és a daemon végpontjai közötti szerződés, egy helyen.
+ * The contract between Claude Code's hooks and the daemon's endpoints, in one place.
  *
- * Innen veszi a desktop telepítője a settings.json bejegyzéseit és a „mienk-e" felismerést, a daemon
- * a route-jai útvonalát, a renderer pedig az elengedés idejét a tooltiphez. IO-mentes, a
- * `/browser` belépési pont is exportálja.
+ * The desktop installer takes the settings.json entries and the "is this hook ours" test from here,
+ * the daemon its route paths, and the renderer the release time for its tooltip. IO-free, also
+ * exported by the `/browser` entry point.
  */
 
-/** Minden hook-végpontunk ez alatt az előtag alatt él. */
+/** Every hook endpoint of ours lives under this prefix. */
 const HOOK_PATH_PREFIX = '/hooks/'
 
 /**
- * A `PermissionRequest` hook timeoutja másodpercben. Ez az egyetlen hook, ami döntést tart: a
- * DecisionBroker `PERMISSION_RELEASE_AFTER_MS` után elengedi a kérést, hogy a lezárást mindig mi
- * kezdeményezzük, ne a Claude Code timeoutja.
+ * The `PermissionRequest` hook's timeout in seconds. It is the only hook that holds a decision: the
+ * DecisionBroker releases the request after `PERMISSION_RELEASE_AFTER_MS`, so the close always
+ * comes from us, never from Claude Code's timeout.
  */
 export const PERMISSION_REQUEST_TIMEOUT_S = 600
 
 /**
- * Ennyivel a hook timeoutja előtt engedi el a broker a tartott kérést, üres 200-zal. A natív prompt
- * ettől nem tűnik el, és utána is válaszolható (mérve: 2,5 perccel az elengedés után is).
+ * How long before the hook's timeout the broker releases a held request, with an empty 200. The
+ * native prompt stays, and it can still be answered afterwards (measured: 2.5 minutes after the
+ * release).
  */
 export const PERMISSION_RELEASE_MARGIN_MS = 10_000
 
-/** A tartott PermissionRequest elengedésének ideje: a hook timeoutja mínusz a tartalék. */
+/** When a held PermissionRequest is released: the hook's timeout minus the margin. */
 export const PERMISSION_RELEASE_AFTER_MS = PERMISSION_REQUEST_TIMEOUT_S * 1000 - PERMISSION_RELEASE_MARGIN_MS
 
 /**
- * A telepített hookok: esemény, route (a `/hooks/` utáni rész) és timeout másodpercben.
+ * The installed hooks: event, route (the part after `/hooks/`) and timeout in seconds.
  *
- * A `PermissionRequest` kivételével mind display-only, rövid timeouttal. A `PreToolUse` /
- * `PostToolUse` / `SubagentStop` azért kell, mert a VSCode-ban vagy a telefonon hozott döntést csak
- * ezekből lehet felismerni (spec §7).
+ * All but `PermissionRequest` are display-only, with a short timeout. `PreToolUse`, `PostToolUse`
+ * and `SubagentStop` are needed because a decision made in VS Code or on the phone can only be
+ * recognised from them (design doc, section 7).
  *
- * A két hibás végű esemény a sikeres párja route-ját kapja, mert ennek az appnak ugyanazt jelenti.
- * A `PostToolUseFailure` egy elindult, de hibával zárult tool: a döntés megvolt, a sor zárul. A
- * route csak a `session_id`-t és a `tool_use_id`-t olvassa, és a hookdokumentáció szerint mindkettő
- * benne van. A `StopFailure` a Stop helyett jön, ha a kör API-hibával ért véget (rate limit,
- * overloaded): a fő kör ugyanúgy véget ért. A válaszát a Claude Code a `terminalSequence`
- * kivételével figyelmen kívül hagyja, így az üres 200 elég.
+ * The two failure events get the route of their success counterpart, because to this app they mean
+ * the same. `PostToolUseFailure` is a tool that started but ended in an error: the decision was
+ * made, the row closes. That route reads only `session_id` and `tool_use_id`, and the hook
+ * documentation says both are present. `StopFailure` comes instead of Stop when the turn ended in
+ * an API error (rate limit, overloaded): the main turn ended all the same. Claude Code ignores its
+ * response except for `terminalSequence`, so an empty 200 is enough.
  */
 export const HOOK_CONTRACT = [
   { event: 'Notification', route: 'notification', timeoutSeconds: 5 },
@@ -51,26 +52,27 @@ export const HOOK_CONTRACT = [
   { event: 'SubagentStop', route: 'subagent-stop', timeoutSeconds: 5 },
 ] as const
 
-/** Egy telepített hook a szerződésből. */
+/** One installed hook of the contract. */
 export type HookContractEntry = (typeof HOOK_CONTRACT)[number]
 
 /**
- * Egy telepített hook route-ja. A daemon a fix route-jai útvonalát a `hookPath`-tal írja, így ott egy
- * elírás fordítási hiba. A paraméteres `lifecycle/:kind` route-ot a daemon tesztje fedi.
+ * The route of an installed hook. The daemon writes the paths of its fixed routes with `hookPath`,
+ * so a typo there is a compile error. The daemon's tests cover the parameterised `lifecycle/:kind`
+ * route.
  */
 export type HookRoute = HookContractEntry['route']
 
 /**
- * Egy korábbi verzió telepítette, azóta kivezetve. A `SessionStart` HTTP-hookként soha nem tüzel
- * (mérve, M2 spike). Csak azért van itt, hogy a telepítés és az eltávolítás felismerje és kivegye
- * a régi bejegyzést.
+ * Installed by an earlier version, retired since. `SessionStart` never fires as an HTTP hook
+ * (measured in the M2 spike). It is kept only so that install and uninstall recognise and remove
+ * the old entry.
  */
 export const LEGACY_HOOK_CONTRACT = [{ event: 'SessionStart', route: 'lifecycle/start' }] as const
 
-/** Egy kivezetett hook route-ja. */
+/** The route of a retired hook. */
 export type LegacyHookRoute = (typeof LEGACY_HOOK_CONTRACT)[number]['route']
 
-/** Egy route URL-útvonala, például `/hooks/permission-request`. */
+/** The URL path of a route, for example `/hooks/permission-request`. */
 export function hookPath(route: HookRoute | LegacyHookRoute): string {
   return `${HOOK_PATH_PREFIX}${route}`
 }
@@ -102,7 +104,7 @@ export function lifecyclePath<Kind extends string>(kind: Kind): `${typeof HOOK_P
   return `${HOOK_PATH_PREFIX}${LIFECYCLE_SEGMENT}${kind}`
 }
 
-/** A saját hook-végpontjaink útvonalai, a kivezetettekkel együtt: ezekről ismerjük fel a mieinket. */
+/** The paths of our hook endpoints, retired ones included: this is how we recognise our own hooks. */
 export const OUR_HOOK_PATHS: ReadonlySet<string> = new Set(
   [...HOOK_CONTRACT, ...LEGACY_HOOK_CONTRACT].map((hook) => hookPath(hook.route)),
 )

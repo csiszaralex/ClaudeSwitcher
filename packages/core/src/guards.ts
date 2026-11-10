@@ -1,19 +1,19 @@
 /**
- * Apró, mindenhol használt őrök a nem megbízható bemenethez (hook-törzs, registry-fájl, IPC,
- * WebSocket üzenet). IO-mentes, a `/browser` belépési pont is exportálja.
+ * Small guards for untrusted input (hook body, registry file, IPC, WebSocket message), used
+ * everywhere. IO-free, also exported by the `/browser` entry point.
  */
 
-/** Igaz, ha az érték egy objektum, de nem `null` és nem tömb: kulcs szerint olvasható. */
+/** True for an object that is neither `null` nor an array, so it can be read by key. */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** A szöveg, ha nem üres; minden más `undefined`. A csak szóközből álló szöveget átengedi. */
+/** The string if it is not empty, otherwise `undefined`. A whitespace-only string passes. */
 export function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-/** Egysoros szöveg: a szóközök és sortörések egy szóközzé lapítva, a két vége vágva. Üresen `undefined`. */
+/** One-line text: whitespace and line breaks collapsed to one space, both ends trimmed. `undefined` when empty. */
 export function flatText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const flat = value.replace(/\s+/g, ' ').trim()
@@ -25,7 +25,7 @@ export function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-/** Egy útvonal utolsó nem üres tagja, `/` és `\` mentén is. Ha nincs ilyen, `undefined`. */
+/** The last non-empty segment of a path, split on both `/` and `\`. `undefined` when there is none. */
 export function lastPathSegment(path: string): string | undefined {
   const parts = path.split(/[\\/]/).filter((part) => part !== '')
   return parts[parts.length - 1]

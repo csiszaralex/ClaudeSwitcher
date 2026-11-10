@@ -1,4 +1,4 @@
-/** Nyers rekord a ~/.claude/sessions/<pid>.json fájlból. Nem dokumentált formátum. */
+/** A raw record from the `~/.claude/sessions/<pid>.json` file. An undocumented format. */
 export interface SessionRecord {
   pid: number
   sessionId: string
@@ -9,27 +9,27 @@ export interface SessionRecord {
   name?: string | undefined
   bridgeSessionId?: string | null | undefined
   /**
-   * A session állapota a Claude Code szerint (2.1.296+, mérve: `idle`, `busy`, `waiting`).
-   * Nem dokumentált, ezért nyers szövegként tartjuk meg: egy ismeretlen új érték se dobjon el
-   * semmit; a fogyasztó csak az általa ismert értékekre reagál.
+   * The session's state according to Claude Code (2.1.296+, measured: `idle`, `busy`, `waiting`).
+   * Undocumented, so it is kept as raw text: an unknown new value must not drop anything; a
+   * consumer reacts only to the values it knows.
    */
   status?: string | undefined
-  /** Mire vár (`permission prompt`), ha `status === 'waiting'`; különben `null` vagy hiányzik. */
+  /** What it waits for (`permission prompt`) when `status === 'waiting'`; otherwise `null` or absent. */
   waitingFor?: string | null | undefined
-  /** Mikor váltott utoljára a `status` (epoch ms). */
+  /** When `status` last changed (epoch ms). */
   statusUpdatedAt?: number | undefined
 }
 
-/** Nyers rekord a ~/.claude/ide/<port>.lock fájlból. Nem dokumentált formátum. */
+/** A raw record from the `~/.claude/ide/<port>.lock` file. An undocumented format. */
 export interface IdeLock {
   port: number
   pid: number
   workspaceFolders: string[]
   ideName?: string | undefined
   /**
-   * A lock fájl utolsó írása (epoch ms, a fájl `mtimeMs`-e), ha a szkenner le tudta kérdezni.
-   * Nem a fájl tartalmából jön: a lock nem tárol időt. Ebből látszik, ha a pid azóta egy később
-   * indult processzé lett (lásd `lockPredatesProcess`).
+   * The lock file's last write (epoch ms, the file's `mtimeMs`), when the scanner could read it.
+   * It does not come from the file's content: the lock stores no time. It shows when the pid has
+   * since been reused by a process started later (see `lockPredatesProcess`).
    */
   mtimeMs?: number | undefined
 }
@@ -39,19 +39,19 @@ export type SessionStatus = 'waiting' | 'working' | 'idle'
 export interface SessionActivity {
   lastAssistantText?: string | undefined
   runningTool?: string | undefined
-  /** Röviden, min dolgozik a futó tool (parancs, minta, fájlnév…), lásd `toolDetail`. */
+  /** In short, what the running tool works on (command, pattern, file name…); see `toolDetail`. */
   toolDetail?: string | undefined
   lastEventAt?: number | undefined
 }
 
-/** Egy aktív subagent, ahogy a UI kapja: mit csinál épp a session háttérmunkása. */
+/** An active subagent as the UI gets it: what the session's background worker is doing now. */
 export interface SubagentView {
   agentId: string
   agentType?: string | undefined
   description?: string | undefined
   runningTool?: string | undefined
   toolDetail?: string | undefined
-  /** A subagent transcriptjének utolsó írása (ms). */
+  /** The last write of the subagent's transcript (ms). */
   updatedAt: number
 }
 
@@ -60,7 +60,7 @@ export interface LiveSession {
   window?: IdeLock | undefined
 }
 
-/** Amit a daemon a UI-nak küld. */
+/** What the daemon sends to the UI. */
 export interface SessionView {
   sessionId: string
   name: string
@@ -71,23 +71,25 @@ export interface SessionView {
   workspaceFolder?: string | undefined
   bridgeSessionId?: string | null | undefined
   /**
-   * Honnan indult a session a registry szerint (`claude-vscode`, `cli`, …), nyers szövegként.
-   * A tab-fókusz ebből tudja, hogy a session a VSCode bővítményben fut-e: egy CLI sessionre a
-   * bővítmény URI-ja egy ÚJ tabot nyitna.
+   * Where the session was started according to the registry (`claude-vscode`, `cli`, …), as raw
+   * text. Tab focus uses it to tell whether the session runs in the VS Code extension: for a CLI
+   * session the extension's URI would open a NEW tab.
    */
   entrypoint?: string | undefined
   waitingSince?: number | undefined
   notificationText?: string | undefined
   /**
-   * A session utolsó `Stop` eseményének ideje (ms), amíg azóta nem mutatott új tevékenységet
-   * (PreToolUse, PermissionRequest, várakozó Notification, futó tool a pillanatképben). Ebből
-   * látszik, hogy „épp végzett", a `status` maga ilyenkor is `idle`. Aktív subagent mellett
-   * nincs: a háttérmunka a fő kör Stop-ja után is tart, és egy subagent futó toolja törli is.
+   * The time of the session's last `Stop` event (ms), as long as it has shown no new activity since
+   * (PreToolUse, PermissionRequest, a waiting Notification, a running tool in the snapshot). It
+   * shows that the session "just finished"; `status` itself is `idle` then too. Absent while a
+   * subagent is active: background work goes on after the main turn's Stop, and a running tool of
+   * a subagent clears it as well.
    */
   stoppedAt?: number | undefined
   /**
-   * A session aktív subagentjei, a legutóbb írt elöl; csak ha van ilyen. Aktív: a meta-ja nem
-   * mondja, hogy kész, és a transcriptje `SUBAGENT_STALE_MS`-en belül íródott. Csak megjelenítés.
+   * The session's active subagents, most recently written first; present only when there is one.
+   * Active: its meta does not say finished, and its transcript was written within
+   * `SUBAGENT_STALE_MS`. Display only.
    */
   subagents?: SubagentView[] | undefined
 }

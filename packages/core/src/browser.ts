@@ -1,8 +1,8 @@
 /**
- * A core IO-mentes része: a renderer (böngészős környezet) ezt importálja.
+ * The IO-free part of core: the renderer (a browser environment) imports this entry point.
  *
- * A fő `index.ts` Node-modulokat is behúz (fs, child_process), amit a renderer csomagja nem
- * tud lefordítani. Ide csak olyan modul kerülhet, ami semmilyen `node:` modult nem importál.
+ * The main `index.ts` also pulls in Node modules (fs, child_process), which the renderer bundle
+ * cannot compile. Only a module that imports no `node:` module may be exported here.
  */
 export * from './decision.js'
 export * from './decision-response.js'

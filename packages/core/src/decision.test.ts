@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parsePermissionRequest, type PermissionRequestInfo } from './decision.js'
 import { parsedPayload } from './testing.js'
 
-describe('parsePermissionRequest — a spike valódi payloadjai', () => {
+describe('parsePermissionRequest: the real payloads from the spike', () => {
   it.each([
     ['permissionRequest_bash', 'Bash', 'tool', 'echo spike-a > a.txt'],
     ['permissionRequest_write', 'Write', 'edit', 'P:\\08_Apps\\cs-spike\\b.txt'],
@@ -21,7 +21,7 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
   })
 
   it('identifies a subagent by agent_id, since it shares the parent session_id', () => {
-    // Mérve: a subagent kérése a SZÜLŐ session_id-jával jön, csak ez különbözteti meg.
+    // Measured: a subagent's request comes with its PARENT's session_id; only agent_id tells them apart.
     const subagent = parsedPayload('permissionRequest_subagent')
     const parent = parsedPayload('permissionRequest_bash')
     expect(subagent.sessionId).toBe(parent.sessionId)
@@ -46,7 +46,7 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
   })
 
   it('offers no rule for a file write, whose suggestion is a mode change', () => {
-    // A Write/Edit javaslata `setMode: acceptEdits` a sessionre, nem fájlba írható szabály.
+    // The suggestion for Write/Edit is `setMode: acceptEdits` for the session, not a rule to write to a file.
     expect(parsedPayload('permissionRequest_write').suggestedRules).toEqual([])
   })
 
@@ -78,14 +78,14 @@ describe('parsePermissionRequest — a spike valódi payloadjai', () => {
   })
 })
 
-/** Egy Bash-kérés a megadott bemenettel — a sortörés-esetekhez nincs valódi payload. */
+/** A Bash request with the given input: there is no real payload for the line-break cases. */
 function bash(toolInput: Record<string, unknown>): PermissionRequestInfo | undefined {
   return parsePermissionRequest({ session_id: 's', tool_name: 'Bash', tool_input: toolInput })
 }
 
-describe('parsePermissionRequest — a parancs sortörései és a leírás', () => {
+describe('parsePermissionRequest: command line breaks and the description', () => {
   it('keeps the line breaks of a multi-line command, normalising CRLF and trimming the ends', () => {
-    // Mérve (Task 10 C): a többsoros parancs egy sorba folyt a panelen.
+    // Measured live: a multi-line command ran into one line on the panel.
     const info = bash({ command: '\n  git add -A\r\n  git commit -m "x"\n\n' })
     expect(info?.summary).toBe('git add -A\n  git commit -m "x"')
   })
@@ -130,7 +130,7 @@ describe('parsePermissionRequest — Workflow', () => {
   })
 
   it('does not take a name from outside the meta block', () => {
-    // A meta-blokkban nincs név; a szkript későbbi `name:`-je nem a workflow neve.
+    // The meta block has no name; a later `name:` in the script is not the workflow's name.
     const info = workflow("export const meta = {\n  description: 'Only a description',\n}\nrun({ name: 'step' })")
     expect(info?.summary).toBe('Workflow')
     expect(info?.description).toBe('Only a description')
@@ -145,14 +145,14 @@ describe('parsePermissionRequest — Workflow', () => {
   })
 })
 
-/** Egy kérés tetszőleges eszközzel és bemenettel — a formátumváltás eseteihez nincs valódi payload. */
+/** A request with any tool and input: there is no real payload for the changed-format cases. */
 function request(toolName: string, toolInput: unknown): PermissionRequestInfo {
   const info = parsePermissionRequest({ session_id: 's', tool_name: toolName, tool_input: toolInput })
   if (info === undefined) throw new Error(`request did not parse: ${toolName}`)
   return info
 }
 
-describe('parsePermissionRequest — olvasható-e a kérés', () => {
+describe('parsePermissionRequest: whether the request is readable', () => {
   it('marks every measured payload readable', () => {
     for (const name of [
       'permissionRequest_bash',
@@ -208,7 +208,7 @@ describe('parsePermissionRequest — olvasható-e a kérés', () => {
   })
 })
 
-describe('parsePermissionRequest — a szabályjavaslatok', () => {
+describe('parsePermissionRequest: the rule suggestions', () => {
   const suggesting = (permission_suggestions: unknown): PermissionRequestInfo => {
     const info = parsePermissionRequest({
       session_id: 's',

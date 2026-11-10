@@ -4,42 +4,41 @@ import type { IdeLock, LiveSession, SessionRecord } from './types.js'
 
 export interface ProcessProbe {
   /**
-   * Igaz, ha a pid létezik ÉS (ha `procStart` meg van adva) a process
-   * indulási ideje egyezik. A pid önmagában nem elég: a Windows újrahasznosítja
-   * a pideket, és az elárvult lock fájlok miatt rossz ablakra ugranánk.
+   * True when the pid exists AND (when `procStart` is given) the process's start time matches. The
+   * pid alone is not enough: Windows reuses pids, and orphaned lock files would make us jump to
+   * the wrong window.
    */
   isAlive(pid: number, procStart?: string): boolean
   /**
-   * A processz image neve (a `Get-Process` `Name` oszlopa), vagy `undefined`,
-   * ha a pid nem él. A lock fájlok nem tárolnak `procStart`-ot, így náluk ez és a
-   * `startedAtMs` a két fogódzó annak eldöntésére, hogy a pid tényleg a bejegyzett
-   * IDE-hez tartozik-e, vagy időközben újrahasznosították.
+   * The process's image name (the `Name` column of `Get-Process`), or `undefined` when the pid is
+   * not alive. Lock files store no `procStart`, so for them this and `startedAtMs` are the two clues
+   * to whether the pid really belongs to the recorded IDE or has been reused since.
    */
   imageName(pid: number): string | undefined
   /**
-   * A processz indulása epoch ms-ban, vagy `undefined`, ha a pid nem él, vagy az indulási ideje
-   * nem kérdezhető le. A lock fájloknál ezzel vehető észre, ha a pidet a lock írása után egy
-   * újonnan indult processz kapta meg (lásd `lockPredatesProcess`).
+   * The process's start in epoch ms, or `undefined` when the pid is not alive or its start time
+   * cannot be read. For lock files it reveals a pid taken over by a process started after the lock
+   * was written (see `lockPredatesProcess`).
    */
   startedAtMs(pid: number): number | undefined
   /**
-   * Új pillanatképet vesz, ha az előző elavult. Az `isAlive` és az `imageName` szinkron,
-   * és mindig a legutóbbi pillanatképből válaszol: a lekérdezés soha nem fut bennük,
-   * mert a probe az Electron főprocesszben él, és ott minden blokkoló hívás az egész
-   * appot megállítja. A szkennelés ezért egyszer, a sessionök feloldása előtt hívja.
-   * Soha nem utasít el: hibánál az előző pillanatkép marad érvényben.
+   * Takes a new snapshot when the previous one is stale. The other methods are synchronous and
+   * always answer from the latest snapshot: the query never runs inside them, because the probe
+   * lives in the Electron main process, where any blocking call stops the whole app. So the scan
+   * calls this once, before it resolves the sessions. Never rejects: on an error the previous
+   * snapshot stays in effect.
    */
   refresh(): Promise<void>
 }
 
-/** A `Get-Process` szerinti image nevek, amik VSCode ablakot jelentenek. */
+/** The image names (as `Get-Process` reports them) that mean a VS Code window. */
 const VSCODE_IMAGE_NAMES = new Set(['code', 'code - insiders'])
 
 function normalize(p: string): string {
   return p.replace(/[\\/]+/g, '\\').replace(/\\+$/, '').toLowerCase()
 }
 
-/** Igaz, ha `child` azonos `parent`-tel vagy alatta van. */
+/** True when `child` is `parent` or lies under it. */
 function isWithin(child: string, parent: string): boolean {
   const c = normalize(child)
   const p = normalize(parent)
@@ -47,20 +46,20 @@ function isWithin(child: string, parent: string): boolean {
 }
 
 /**
- * Ennyivel indulhat a processz a lock fájl utolsó írása UTÁN úgy, hogy a lockot még az övének
- * tekintjük. A fájl időbélyegét és a processz indulási idejét két külön mechanizmus rögzíti, eltérő
- * felbontással; néhány másodperc tűrés ezt elnyeli. Egy pid-újrahasznosítás ennél jóval nagyobb
- * különbséget ad: a review mérésén (2026-10-25) a 139 lockból 116 hét napnál régebbi volt.
+ * How long AFTER the lock file's last write the process may have started while the lock still
+ * counts as its own. The file's timestamp and the process's start time are recorded by two
+ * separate mechanisms with different resolutions; a few seconds of slack absorbs that. A reused pid
+ * gives a far larger gap: in a measurement on 2026-10-25, 116 of 139 locks were over a week old.
  */
 export const LOCK_MTIME_SLACK_MS = 5000
 
-/** A FILETIME (100 ns-os egységek 1601-01-01 óta) és az epoch közötti eltolás ms-ban. */
+/** The offset in ms between FILETIME (100 ns units since 1601-01-01) and the Unix epoch. */
 const FILETIME_EPOCH_OFFSET_MS = 11_644_473_600_000n
 
 /**
- * Egy decimális FILETIME string (a `ProcessSnapshot.startFileTime` formátuma) epoch ms-ban, vagy
- * `undefined`, ha nem csupa számjegy. BigInt-tel számol, mert a FILETIME nagyobb, mint amit egy
- * `number` pontosan tárol.
+ * A decimal FILETIME string (the format of `ProcessSnapshot.startFileTime`) in epoch ms, or
+ * `undefined` when it is not all digits. It computes with BigInt, because a FILETIME is larger
+ * than a `number` holds exactly.
  */
 export function fileTimeToEpochMs(fileTime: string): number | undefined {
   if (!/^\d+$/.test(fileTime)) return undefined
@@ -68,11 +67,11 @@ export function fileTimeToEpochMs(fileTime: string): number | undefined {
 }
 
 /**
- * Igaz, ha a lock fájlt azelőtt írták utoljára, hogy a pidje mostani processze elindult (a
- * `LOCK_MTIME_SLACK_MS` tűrésen túl). Ilyenkor a lockot egy azóta kilépett processz hagyta itt, és
- * a pidjét egy később indult processz kapta meg. A lockba írt pid processze az írás pillanatában
- * már futott, tehát egy élő lockra ez nem igaz. Ha bármelyik idő ismeretlen, hamis: tipp alapján
- * nem dobunk el lockot.
+ * True when the lock file was last written before its pid's current process started (beyond the
+ * `LOCK_MTIME_SLACK_MS` slack). Then a process that has exited since left the lock behind, and a
+ * later process got its pid. The process of the pid written into a lock was already running when
+ * it wrote it, so this is never true for a live lock. False when either time is unknown: a lock is
+ * not dropped on a guess.
  */
 function lockPredatesProcess(lockMtimeMs: number | undefined, processStartMs: number | undefined): boolean {
   if (lockMtimeMs === undefined || processStartMs === undefined) return false
@@ -80,15 +79,15 @@ function lockPredatesProcess(lockMtimeMs: number | undefined, processStartMs: nu
 }
 
 /**
- * Igaz, ha a lock pidje tényleg az a fajta processz, aminek a lock mondja.
+ * True when the lock's pid really is the kind of process the lock claims.
  *
- * A veszélyes eset, ami ellen véd: egy elárvult lock ugyanarra a workspace-re,
- * aminek a pidjét időközben egy független processz kapta meg. A pid él, az
- * útvonal egyezik. Két jel árulja el:
- * - az idő: a processz a lock utolsó írása után indult (`lockPredatesProcess`). Ez akkor is
- *   működik, ha a pidet egy másik `Code.exe` segédprocessz kapta meg, amin az image név átmenne;
- * - az image név: nem VSCode processz. Ismeretlen IDE-nél ezt nem nézzük: inkább párosítunk,
- *   mint hogy egy támogatott szerkesztőt kizárjunk egy tipp alapján.
+ * The dangerous case it guards against: an orphaned lock for the same workspace whose pid has been
+ * taken by an unrelated process meanwhile. The pid is alive and the path matches. Two signs give
+ * it away:
+ * - the time: the process started after the lock's last write (`lockPredatesProcess`). This works
+ *   even when another `Code.exe` helper process got the pid, which would pass the image name test;
+ * - the image name: not a VS Code process. For an unknown IDE this is not checked: better to match
+ *   than to exclude a supported editor on a guess.
  */
 function ownsLock(lock: IdeLock, probe: ProcessProbe): boolean {
   const image = probe.imageName(lock.pid)
@@ -127,26 +126,26 @@ export function resolveLiveSessions(
 }
 
 /**
- * Egy processzlista-pillanatkép, amiből a probe szinkron válaszol. A forrása lehet a natív
- * Toolhelp32 lista (desktop) vagy a PowerShell tartalék (lent).
+ * A snapshot of the process list that the probe answers from synchronously. Its source is either
+ * the native Toolhelp32 list (desktop) or the PowerShell fallback (below).
  */
 export interface ProcessSnapshot {
-  /** Hány processz szerepel benne. Az üres pillanatképet a probe hibának veszi. */
+  /** How many processes it lists. The probe treats an empty snapshot as a failure. */
   readonly size: number
-  /** A pid image neve (a `Get-Process` `Name` oszlopa), vagy `undefined`, ha nem szerepel. */
+  /** The pid's image name (the `Name` column of `Get-Process`), or `undefined` when it is not listed. */
   imageName(pid: number): string | undefined
   /**
-   * A processz creation FILETIME-ja decimális stringként (a `StartTime.ToFileTime()`
-   * formátuma), vagy `undefined`, ha a pid nem szerepel, vagy az indulási ideje nem
-   * kérdezhető le (access denied, közben kilépett).
+   * The process's creation FILETIME as a decimal string (the format of `StartTime.ToFileTime()`),
+   * or `undefined` when the pid is not listed or its start time cannot be read (access denied,
+   * exited meanwhile).
    */
   startFileTime(pid: number): string | undefined
 }
 
 export interface SnapshotProbeOptions {
-  /** Ennyi ideig érvényes egy sikeres pillanatkép, alapból `PROBE_TTL_MS`. */
+  /** How long a successful snapshot stays valid; `PROBE_TTL_MS` by default. */
   ttlMs?: number | undefined
-  /** Az óra, hogy a TTL tesztelhető legyen. */
+  /** The clock, so the TTL can be tested. */
   now?: (() => number) | undefined
 }
 
@@ -157,26 +156,25 @@ const EMPTY_SNAPSHOT: ProcessSnapshot = {
 }
 
 /**
- * Egy `ProcessProbe`, ami a legutóbbi sikeres pillanatképből válaszol szinkron, és csak a
- * `refresh()` vesz újat, aszinkron, a fő szál blokkolása nélkül.
+ * A `ProcessProbe` that answers synchronously from the latest successful snapshot; only `refresh()`
+ * takes a new one, asynchronously, without blocking the main thread.
  *
- * Ez a fagyás javítása: korábban az `isAlive`/`imageName` maga indította a lekérdezést egy
- * `execFileSync`-kel, ami az Electron főprocesszben az egész appot megállította (az overlayt,
- * a gyorsbillentyűt, a daemon HTTP szerverét és vele a hookokat), terhelés alatt 10 s-ig.
+ * This is the fix for the freeze: `isAlive`/`imageName` used to start the query themselves with
+ * `execFileSync`, which stopped the whole app in the Electron main process (the overlay, the hotkey,
+ * the daemon's HTTP server and with it the hooks), for up to 10 s under load.
  *
- * - Egyszerre csak egy lekérdezés fut; a közben érkező hívók ugyanazt az ígéretet kapják.
- * - Egy sikeres pillanatkép `ttlMs`-ig érvényes. Amíg egyszer sem sikerült, 250 ms-onként
- *   próbálkozunk: az üres pillanatkép minden sessiont halottnak mutatna, és a teljes TTL-t
- *   végigvárni ezzel a hazugsággal rosszabb, mint egy gyors újrapróbálkozás.
- * - Hiba vagy üres eredmény esetén az előzőt tartjuk meg: egy elbukott lekérdezés ne
- *   tüntesse el az összes sessiont a listáról. Hibasorozatonként egyszer naplózunk, nem
- *   minden pollnál.
- * - A `refresh()` soha nem utasít el.
+ * - Only one query runs at a time; callers arriving meanwhile get the same promise.
+ * - A successful snapshot is valid for `ttlMs`. Until one has succeeded, it retries every 250 ms:
+ *   the empty snapshot would show every session as dead, and waiting out a full TTL with that lie
+ *   is worse than a quick retry.
+ * - On an error or an empty result the previous snapshot is kept: one failed query must not wipe
+ *   every session off the list. It logs once per run of failures, not on every poll.
+ * - `refresh()` never rejects.
  *
- * `isAlive(pid, procStart)`: ha a pid listázva van, de az indulási ideje nem kérdezhető le,
- * az eredmény `false`. Nem tudjuk igazolni, hogy ugyanaz a processz, és a pid-újrahasznosítás
- * pont ilyen hamis pozitívot adna. A régi PowerShell pillanatkép ugyanígy viselkedett: azokat
- * a processzeket, amelyeknek a `StartTime`-ja nem olvasható, kihagyta.
+ * `isAlive(pid, procStart)`: when the pid is listed but its start time cannot be read, the result
+ * is `false`. We cannot prove it is the same process, and pid reuse would give exactly this false
+ * positive. The old PowerShell snapshot behaved the same way: it skipped the processes whose
+ * `StartTime` could not be read.
  */
 export function createSnapshotProbe(
   take: () => Promise<ProcessSnapshot>,
@@ -250,7 +248,7 @@ interface ProcessInfo {
   image: string
 }
 
-/** A PowerShell pillanatkép kimenete (`pid<TAB>FILETIME<TAB>Name` soronként) pillanatképként. */
+/** The PowerShell snapshot's output (`pid<TAB>FILETIME<TAB>Name` per line) as a snapshot. */
 export function parsePowerShellSnapshot(output: string): ProcessSnapshot {
   const processes = new Map<number, ProcessInfo>()
   for (const line of output.split('\n')) {
@@ -267,10 +265,10 @@ export function parsePowerShellSnapshot(output: string): ProcessSnapshot {
 }
 
 /**
- * A PowerShell-pillanatkép időkorlátja. Egy terheletlen gépen is lehet lassú: 2026-10-30-án egy
- * frissen beállított gépen egyedül 5,9 mp volt (az előzőn ~0,3 mp), a teljes tesztfutás terhelése
- * alatt pedig a korábbi 10 mp-et is túllépte. Az `execFile` aszinkron, a hosszabb korlát tehát semmit
- * nem tart fel, csak azt dönti el, mikor adjuk fel.
+ * The PowerShell snapshot's timeout. It can be slow even on an idle machine: on 2026-10-30 it took
+ * 5.9 s on its own on a freshly set up machine (about 0.3 s on the previous one), and under the
+ * load of a full test run it exceeded the former 10 s. `execFile` is asynchronous, so a longer
+ * limit holds nothing up; it only decides when to give up.
  */
 export const POWERSHELL_SNAPSHOT_TIMEOUT_MS = 30_000
 
@@ -289,14 +287,14 @@ function runPowerShellSnapshot(): Promise<ProcessSnapshot> {
 }
 
 /**
- * Windows process probe PowerShell-lel, csak TARTALÉK. Az app a desktop natív (koffi) probe-ját
- * használja; ez csak akkor fut, ha az nem tölthető be.
+ * A Windows process probe using PowerShell, a FALLBACK only. The app uses the desktop's native
+ * (koffi) probe; this one runs only when that cannot be loaded.
  *
- * A `procStart` a session fájlban a process creation FILETIME decimálisan; a PowerShell
- * `StartTime.ToFileTime()` ugyanezt adja. Egyetlen pillanatképet vesz az összes processzről,
- * mert pidenként egy PowerShell indítása (~200 ms) elfogadhatatlan. Aszinkron `execFile`-lal
- * fut, így a fő szálat nem blokkolja; a TTL-t, az egyetlen futó lekérdezést és a hibakezelést
- * a `createSnapshotProbe` adja.
+ * `procStart` in the session file is the process creation FILETIME in decimal; PowerShell's
+ * `StartTime.ToFileTime()` gives the same. It takes one snapshot of all processes, because
+ * starting PowerShell per pid (~200 ms) is unacceptable. It runs with an asynchronous `execFile`,
+ * so it does not block the main thread; `createSnapshotProbe` provides the TTL, the single
+ * running query and the error handling.
  */
 export function createWin32ProcessProbe(ttlMs = PROBE_TTL_MS): ProcessProbe {
   return createSnapshotProbe(runPowerShellSnapshot, { ttlMs })

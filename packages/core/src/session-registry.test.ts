@@ -60,8 +60,8 @@ describe('parseSessionRecord', () => {
   })
 
   it('never throws, whatever shape it is handed', () => {
-    // A never-throws szerződés globális megkötés: egy hibás fájl nem viheti
-    // magával a többi sessiont. Ez a teszt tartja életben.
+    // The never-throws contract is a global constraint: one bad file must not take the other
+    // sessions down with it. This test keeps it alive.
     for (const bad of [null, undefined, 'nonsense', 42, true, [], [REAL_SESSION]]) {
       expect(() => parseSessionRecord(bad)).not.toThrow()
       expect(parseSessionRecord(bad)).toBeNull()
@@ -69,7 +69,7 @@ describe('parseSessionRecord', () => {
   })
 })
 
-// A 2.1.301-es rekord (2026-10-20, mérve), a pipe útvonala rövidítve.
+// A record from 2.1.301 (measured on 2026-10-20), its pipe path shortened.
 const REAL_STATUS_SESSION = {
   pid: 13884,
   sessionId: '10cd5459-1375-4c8e-8c6a-ce86a7dc2a6e',

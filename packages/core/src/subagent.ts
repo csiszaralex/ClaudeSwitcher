@@ -1,45 +1,47 @@
 /**
- * A subagentek fájljai a session transcriptje mellett (mérve, Claude Code 2.1.30x, 2026-10-21):
+ * The subagents' files beside the session transcript (measured, Claude Code 2.1.30x, 2026-10-21):
  *
- *   projects/<projekt>/<sessionId>/subagents/agent-<agentId>.jsonl      ← a subagent transcriptje
- *   projects/<projekt>/<sessionId>/subagents/agent-<agentId>.meta.json  ← típus, leírás, kész-e
+ *   projects/<project>/<sessionId>/subagents/agent-<agentId>.jsonl      ← the subagent's transcript
+ *   projects/<project>/<sessionId>/subagents/agent-<agentId>.meta.json  ← type, description, finished
  *
- * Nem dokumentált formátum. Ez a modul IO-mentes: a daemon olvas, itt csak értelmezünk és választunk.
+ * An undocumented format. This module is IO-free: the daemon reads, this module parses and picks.
  */
 
 import { flatText, isRecord } from './guards.js'
 
 /**
- * Ennyi ideig számít aktívnak egy subagent az utolsó transcript-írása után, ha a meta-ja nem
- * mondja, hogy kész. Egy összeomlott (vagy régebbi verzióval futott) subagent sosem írja ki a
- * `finished`-et, enélkül örökké „futna". 5 perc: egy hosszú Bash- vagy build-futás alatt a
- * subagent nem ír, és addig se tűnjön el; ennél régebben néma subagent már nem érdekes.
+ * How long a subagent counts as active after its last transcript write when its meta does not say
+ * it is finished. A crashed subagent (or one run by an older version) never writes `finished`, and
+ * without this it would "run" forever. 5 minutes: a subagent writes nothing during a long Bash or
+ * build run and should not disappear meanwhile; one silent for longer is no longer of interest.
  */
 export const SUBAGENT_STALE_MS = 5 * 60_000
 
 /**
- * Sessionönként legfeljebb ennyi, legutóbb írt subagentet nézünk meg. A poll ~3 mp-enként fut
- * 15–20 sessionön: a sessionönkénti olvasás így legfeljebb ennyi meta-fájl és ennyi transcript-vég.
+ * At most this many of a session's most recently written unfinished subagents get their transcript
+ * tail read. The poll runs about every 3 s over 15 to 20 sessions, so a session's read is at most
+ * this many transcript tails (the meta files are bounded by `SUBAGENT_META_LIMIT`).
  */
 export const SUBAGENT_SCAN_LIMIT = 3
 
 /**
- * Sessionönként legfeljebb ennyi, az elavulási ablakon belül írt subagent meta-fájlját olvassuk
- * el. A `SUBAGENT_SCAN_LIMIT` a KÉSZ subagentek kiszűrése UTÁN hat, különben néhány frissen
- * befejezett subagent eltakarná a még futót, csak mert később írtak. A meta kicsi; ez a korlát
- * csak azt zárja ki, hogy egy sűrűn subagentező session minden pollnál tucatnyi fájlt olvasson.
+ * At most this many meta files of subagents written within the stale window are read per session.
+ * `SUBAGENT_SCAN_LIMIT` applies AFTER the finished subagents are filtered out; otherwise a few
+ * just-finished subagents would hide one still running, only because they wrote later. A meta file
+ * is small; this limit only keeps a session with many subagents from reading dozens of files on
+ * every poll.
  */
 export const SUBAGENT_META_LIMIT = 10
 
-/** A subagent-transcript végéből ennyit olvasunk: az utolsó tool_use-hoz bőven elég. */
+/** How much of a subagent transcript's end is read: plenty for the last tool_use. */
 export const SUBAGENT_TAIL_BYTES = 64 * 1024
 
 export interface SubagentMeta {
   agentType?: string | undefined
   description?: string | undefined
-  /** A fő transcript `Agent` tool_use-ának azonosítója. */
+  /** The id of the `Agent` tool_use in the main transcript. */
   toolUseId?: string | undefined
-  /** Csak a kifejezett `finished: true` jelenti, hogy kész; a futó subagentnek nincs ilyen kulcsa. */
+  /** Only an explicit `finished: true` means finished; a running subagent has no such key. */
   finished: boolean
 }
 
@@ -48,7 +50,7 @@ export interface SubagentFile {
   mtimeMs: number
 }
 
-/** A `meta.json` tartalma, értelmezve. Hiányzó vagy rossz típusú mező: nincs róla információ. Soha nem dob. */
+/** The parsed content of `meta.json`. A missing or mistyped field means no information. Never throws. */
 export function parseSubagentMeta(raw: unknown): SubagentMeta {
   if (!isRecord(raw)) return { finished: false }
   const meta: SubagentMeta = { finished: raw['finished'] === true }
@@ -69,15 +71,15 @@ export function subagentMetaFile(agentId: string): string {
   return `agent-${agentId}.meta.json`
 }
 
-/** `agent-<agentId>.jsonl` → `<agentId>`; minden más fájlnévre (a meta-ra is) `undefined`. */
+/** `agent-<agentId>.jsonl` → `<agentId>`; `undefined` for any other file name (the meta file too). */
 export function subagentIdFromFile(fileName: string): string | undefined {
   const match = /^agent-(.+)\.jsonl$/.exec(fileName)
   return match?.[1]
 }
 
 /**
- * Az olvasásra érdemes subagent-fájlok: a `staleMs`-en belül írtak közül a legfrissebb `limit`
- * darab, a legújabb elöl. A jövőbeli `mtime` (óraeltérés) frissnek számít.
+ * The subagent files worth reading: the `limit` most recent of those written within `staleMs`,
+ * newest first. An `mtime` in the future (clock skew) counts as fresh.
  */
 export function pickRecentSubagentFiles<T extends SubagentFile>(
   files: readonly T[],

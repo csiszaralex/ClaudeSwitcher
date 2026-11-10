@@ -8,7 +8,7 @@ import {
   subagentMetaFile,
 } from './subagent.js'
 
-// Konstruált meta-fájlok a mért alakban (Claude Code 2.1.30x, 2026-10-21) — nem valódi tartalom.
+// Constructed meta files in the measured shape (Claude Code 2.1.30x, 2026-10-21), not real content.
 const runningMeta = {
   agentType: 'general-purpose',
   description: 'Teszt hullám',

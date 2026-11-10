@@ -1,11 +1,11 @@
 /**
- * A daemon WebSocket üzeneteinek (`state`, `tick`) protokollverziója. A daemon minden üzenetbe
- * beírja, a renderer minden más értéket eldob.
+ * The protocol version of the daemon's WebSocket messages (`state`, `tick`). The daemon writes it
+ * into every message, and the renderer drops a message with any other value.
  *
- * Ma a daemon és a renderer egy Electron csomagban szállnak, tehát mindig egyeznek. A verzió azért
- * kell, hogy egy üzenetalak-változás ne csendben, mezőnként essen szét, ha a daemont egyszer külön
- * processzbe emelnék (spec §4: a modulhatár megvan hozzá). Ha az üzenet alakja összeférhetetlenül
- * változik, ezt kell növelni.
+ * Today the daemon and the renderer ship in one Electron package, so they always match. The version
+ * exists so that a change in the message shape fails loudly rather than silently, field by field,
+ * if the daemon is ever moved into its own process (design doc, section 4: the module boundary is
+ * already in place). Increment it on any incompatible change to the message shape.
  */
 export const DAEMON_PROTOCOL = 1
 

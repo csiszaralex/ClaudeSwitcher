@@ -1,9 +1,9 @@
 /**
- * A Claude Code eszköznevei, amelyekhez az app külön viselkedést köt. IO-mentes, a `/browser`
- * belépési pont is exportálja.
+ * The Claude Code tool names the app treats specially. IO-free, also exported by the `/browser`
+ * entry point.
  */
 
-/** Fájlt író eszközök: `edit` fajtájú döntés, a panel előnézetet mutat róluk. */
+/** Tools that write files: their decision kind is `edit`, and the panel shows a preview. */
 const EDIT_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'] as const
 
 export type EditTool = (typeof EDIT_TOOLS)[number]
@@ -14,7 +14,7 @@ export function isEditTool(toolName: string): toolName is EditTool {
   return EDIT_TOOL_SET.has(toolName)
 }
 
-/** Parancsot futtató eszközök: a részletük maga a parancs (és a leírása). */
+/** Tools that run a command: their detail is the command itself (and its description). */
 export const COMMAND_TOOLS = ['Bash', 'PowerShell'] as const
 
 export type CommandTool = (typeof COMMAND_TOOLS)[number]

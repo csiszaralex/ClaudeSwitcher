@@ -13,7 +13,7 @@ import {
 } from './settings-writer.js'
 import { tempDir } from './testing.js'
 
-/** A valódi fájlrendszer, amelynek egyes műveleteit a teszt felülírja. */
+/** The real file system, with some operations overridden by the test. */
 function fsWith(overrides: Partial<SettingsFs>): SettingsFs {
   return {
     readFile: (file, encoding) => realFs.readFile(file, encoding),
@@ -77,8 +77,8 @@ describe('mergeSettings', () => {
   })
 
   it('drops a __proto__ key instead of losing it into the prototype', () => {
-    // JSON.parse kell: az objektum-literál `__proto__` kulcsát a parser
-    // külön kezeli, és nem saját kulcsot hozna létre.
+    // JSON.parse is needed: the parser treats a `__proto__` key in an object literal specially, and
+    // it would not create an own key.
     const patch = JSON.parse('{"__proto__":{"polluted":true}}') as Record<string, unknown>
     const out = mergeSettings({ model: 'opus' }, patch)
     expect(out).toEqual({ model: 'opus' })
@@ -117,8 +117,8 @@ describe('updateSettingsFile', () => {
   })
 
   it('serialises concurrent updates instead of interleaving them', async () => {
-    // Sorbaállítás nélkül a három írás egymásba fésülődik, és a fájl
-    // olvashatatlan JSON lesz — a pontos katasztrófa, amit ez a modul megelőz.
+    // Without the queue the three writes interleave and the file becomes unreadable JSON: the very
+    // disaster this module prevents.
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ model: 'opus' }))
@@ -171,7 +171,7 @@ describe('transformSettingsFile', () => {
   })
 
   it('can remove nested keys, which a merge patch cannot express', async () => {
-    // Ezért kell egyáltalán: az eltávolítás kulcsokat töröl, a mergeSettings csak ad.
+    // The reason it exists at all: removal deletes keys, mergeSettings only adds.
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ env: { A: '1', B: '2' } }))
@@ -195,7 +195,7 @@ describe('transformSettingsFile', () => {
   })
 
   it('shares one write queue with updateSettingsFile', async () => {
-    // Közös sor nélkül egy telepítés és egy párhuzamos merge egymás írását dobná el.
+    // Without a shared queue an install and a concurrent merge would drop each other's writes.
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({}))
@@ -214,8 +214,8 @@ describe('transformSettingsFile never loses the existing settings', () => {
   const ORIGINAL = JSON.stringify({ model: 'opus', permissions: { allow: ['Bash(ls)'] } }, null, 2)
 
   it('refuses to write when the read fails with anything but ENOENT', async () => {
-    // Egy foglalt fájl (EBUSY) nem „nincs meg": régen `{}` lett belőle, és a telepítés csak a mi
-    // kulcsainkkal írta felül a felhasználó teljes beállítását.
+    // A busy file (EBUSY) is not "missing": it used to become `{}`, and the install overwrote the
+    // user's whole settings with only our keys.
     const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
@@ -235,7 +235,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   })
 
   it('retries an empty read and writes once the content shows up', async () => {
-    // Egy másik író épp csonkolta a fájlt: a következő olvasás már a teljes tartalmat látja.
+    // Another writer has just truncated the file: the next read already sees the full content.
     const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
@@ -276,8 +276,8 @@ describe('transformSettingsFile never loses the existing settings', () => {
   })
 
   it('redoes the write when another writer changed the file meanwhile, keeping its keys', async () => {
-    // Claude Code vagy egy szerkesztő a mi olvasásunk és átnevezésünk között ír a fájlba.
-    // Az átnevezés előtti tartalom-összevetés ezt észreveszi, és az ő tartalmára dolgozunk újra.
+    // Claude Code or an editor writes the file between our read and our rename. The content
+    // comparison before the rename notices it, and the cycle runs again on their content.
     const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, ORIGINAL)
@@ -366,7 +366,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
   })
 
   it('makes no backup for a file that did not exist', async () => {
-    // Egy vadonatúj gépen nincs settings.json (ENOENT): ez továbbra is üres beállításként indul.
+    // A brand-new machine has no settings.json (ENOENT): that still starts as empty settings.
     const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
     await updateSettingsFile(file, { a: 1 })

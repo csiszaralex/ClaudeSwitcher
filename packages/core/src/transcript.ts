@@ -17,18 +17,16 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
   if (!isRecord(message)) return []
   const content = message['content']
   if (!Array.isArray(content)) return []
-  // A nem-objektum elemeket itt dobjuk el, nem a hívóban. Egy `null` blokk
-  // valid JSON, és a `.type` olvasása rajta TypeError-t dobna, pontosan az a
-  // fajta összeomlás, amit ennek a modulnak meg kell előznie.
+  // Non-object items are dropped here, not in the caller. A `null` block is valid JSON, and reading
+  // `.type` on it would throw a TypeError: exactly the kind of crash this module must prevent.
   return content.filter(
     (block): block is ContentBlock => typeof block === 'object' && block !== null,
   )
 }
 
 /**
- * A transcript utolsó soraiból kiolvassa, mit csinál épp a session.
- * Ismeretlen rekordtípus némán kimarad: a formátum bővül, és egy új típus
- * nem törheti el a monitort.
+ * Reads from the transcript's last lines what the session is doing now. An unknown record type is
+ * skipped silently: the format grows, and a new type must not break the monitor.
  */
 export function readActivityFromLines(lines: string[]): SessionActivity {
   const activity: SessionActivity = {}
@@ -56,12 +54,12 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
         }
         if (block.type === 'tool_use' && typeof block.name === 'string') {
           activity.runningTool = block.name
-          // A részlet ugyanahhoz a blokkhoz tartozik: egy részlet nélküli új tool ne örökölje az előzőét.
+          // The detail belongs to the same block: a new tool without a detail must not inherit the previous one's.
           activity.toolDetail = toolDetail(block.input)
         }
       }
     } else if (rec['type'] === 'user') {
-      // Egy tool_result lezárja a futó toolt.
+      // A tool_result ends the running tool.
       if (blocks(rec).some((b) => b.type === 'tool_result')) {
         activity.runningTool = undefined
         activity.toolDetail = undefined
@@ -73,8 +71,8 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
 }
 
 /**
- * Megkeresi a session transcriptjét. Szándékosan glob-bal, nem a cwd-ből
- * képzett könyvtárnévvel: a kódolás nem dokumentált és változhat.
+ * Finds the session's transcript. It searches every project directory on purpose instead of
+ * deriving the directory name from the cwd: that encoding is undocumented and may change.
  */
 export async function findTranscriptPath(
   claudeDir: string,
@@ -93,24 +91,22 @@ export async function findTranscriptPath(
     try {
       const handle = await open(candidate, 'r')
       try {
-        // A puszta megnyithatóság nem elég: egy `<sessionId>.jsonl` nevű
-        // *könyvtár* is megnyílik, és utána a tailLines vagy üres eredményt ad,
-        // vagy EISDIR-rel száll el. A típusát is meg kell nézni.
+        // Opening is not enough: a *directory* named `<sessionId>.jsonl` opens too, and tailLines
+        // then returns nothing or fails with EISDIR. The type has to be checked as well.
         if ((await handle.stat()).isFile()) return candidate
       } finally {
         await handle.close()
       }
     } catch {
-      // Nem létezik, vagy nem olvasható. A kettőt nem különböztetjük meg: a
-      // visszatérési szerződés `string | undefined`, és egy jogosultsági hiba
-      // ugyanúgy azt jelenti, hogy ezt a transcriptet nem tudjuk olvasni.
+      // Missing or unreadable. The two are not told apart: the return contract is
+      // `string | undefined`, and a permission error also means this transcript cannot be read.
       continue
     }
   }
   return undefined
 }
 
-/** A fájl utolsó `maxBytes` bájtját olvassa, és eldobja az első, csonka sort. */
+/** Reads the file's last `maxBytes` bytes and drops the first, partial line. */
 export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promise<string[]> {
   let handle
   try {
@@ -130,9 +126,8 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
     if (start > 0) lines.shift()
     return lines
   } catch (error) {
-    // Egy I/O hiba vagy allocation failure-t nem szabad feldobni: a hívó
-    // (pl. scanSessions) helyzete az, hogy best-effort-ként működjön. Az
-    // allocationt csak szintetikus tesztből tudjuk kiváltani.
+    // An I/O error or an allocation failure must not propagate: the caller (e.g. scanSessions)
+    // works best-effort. The allocation failure can only be triggered by a synthetic test.
     console.error(`[transcript] tailLines failed for ${filePath}`, error)
     return []
   } finally {

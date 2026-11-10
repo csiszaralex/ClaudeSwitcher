@@ -1,22 +1,22 @@
 /**
- * A PermissionRequest hook bemenetének értelmezése. Tiszta függvények, IO nélkül.
+ * Parsing of the PermissionRequest hook's input. Pure functions, no IO.
  *
- * A bemenet alakja a VSCode bővítményben MÉRVE (spikes/m2-permission/RESULTS.md), nem a
- * dokumentációból: a tesztek a packages/core/fixtures/hook-payloads.json valódi törzseit
- * használják.
+ * The input shape was MEASURED with the VS Code extension (spikes/m2-permission/RESULTS.md), not
+ * taken from the documentation: the tests use the real bodies in
+ * packages/core/fixtures/hook-payloads.json.
  */
 
 import { flatText, isRecord, nonEmptyString } from './guards.js'
 import { isCommandTool, isEditTool } from './tool-names.js'
 
-/** Egy jogosultsági szabály, ahogy a Claude Code `permission_suggestions`-ben adja. */
+/** A permission rule as Claude Code gives it in `permission_suggestions`. */
 export interface PermissionRule {
   toolName: string
-  /** Pl. `echo spike-a *`. MCP-toolnál nincs: ott a szabály maga a tool neve. */
+  /** E.g. `echo spike-a *`. Absent for an MCP tool: there the rule is the tool name itself. */
   ruleContent?: string | undefined
 }
 
-/** Hova írja a Claude Code a szabályt: a projekt helyi beállításaiba, vagy a gépszintűbe. */
+/** Where Claude Code writes the rule: the project's local settings or the user-level settings. */
 export type RuleDestination = 'localSettings' | 'userSettings'
 
 interface AskOption {
@@ -32,11 +32,11 @@ export interface AskQuestion {
 }
 
 /**
- * Mit kínál az overlay a kérésre (spec §5 táblázata):
- * - `tool` (parancs, WebFetch, MCP): engedélyez / tilt / projekt- vagy gépszintű szabály
- * - `edit` (fájlírás): engedélyez / tilt / erre a sessionre automatikus szerkesztés
- * - `question` (AskUserQuestion): csak a felhasználó válaszával engedhető tovább
- * - `plan` (ExitPlanMode): elutasítható visszajelzéssel; jóváhagyni a hookból nem lehet
+ * What the overlay offers for a request (the table in the design doc, section 5):
+ * - `tool` (command, WebFetch, MCP): allow / deny / a project or user-level rule
+ * - `edit` (file write): allow / deny / accept edits automatically for this session
+ * - `question` (AskUserQuestion): goes through only with the user's answer
+ * - `plan` (ExitPlanMode): can be rejected with feedback; the hook cannot approve it
  */
 const DECISION_KINDS = ['tool', 'edit', 'question', 'plan'] as const
 
@@ -44,7 +44,7 @@ export type DecisionKind = (typeof DECISION_KINDS)[number]
 
 const DECISION_KIND_SET: ReadonlySet<unknown> = new Set(DECISION_KINDS)
 
-/** Igaz, ha az érték a `DECISION_KINDS` egyike; a renderer ezzel ellenőrzi a daemontól jött fajtát. */
+/** True for one of `DECISION_KINDS`; the renderer checks the kind sent by the daemon with it. */
 export function isDecisionKind(value: unknown): value is DecisionKind {
   return DECISION_KIND_SET.has(value)
 }
@@ -54,40 +54,41 @@ export interface PermissionRequestInfo {
   cwd: string
   toolName: string
   toolInput: Record<string, unknown>
-  /** Csak subagent kérésénél van. A subagent a SZÜLŐ session_id-jával jön; ez különbözteti meg. */
+  /** Present only on a subagent's request. A subagent comes with its PARENT's session_id; this tells them apart. */
   agentId?: string | undefined
   agentType?: string | undefined
   kind: DecisionKind
   /**
-   * Rövid leírás: a parancs, a fájl, az URL, az első kérdés, a terv címe vagy a Workflow neve.
-   * A parancs a sortöréseit MEGTARTJA (csak a két vége vágott, `\n` sorvéggel); a többi egysoros.
+   * A short summary: the command, the file, the URL, the first question, the plan's title or the
+   * Workflow's name. The command KEEPS its line breaks (only its ends are trimmed, with `\n` line
+   * ends); the others are one line.
    */
   summary: string
   /**
-   * Az eszköz saját, emberi leírása, egy sorban: a Bash `tool_input.description`-je (a VSCode a
-   * parancs alatt mutatja), Workflow-nál a szkript `meta.description`-je. Nincs, ha az eszköz nem ad.
+   * The tool's own human description, in one line: Bash's `tool_input.description` (VS Code shows
+   * it under the command), for Workflow the script's `meta.description`. Absent when the tool gives none.
    */
   description?: string | undefined
-  /** A Claude Code `addRules` javaslatai, kilapítva. Üres, ha nincs (pl. Write/Edit). */
+  /** Claude Code's `addRules` suggestions, flattened. Empty when there are none (e.g. Write/Edit). */
   suggestedRules: PermissionRule[]
-  /** Csak `question` fajtánál nem üres. */
+  /** Non-empty only for the `question` kind. */
   questions: AskQuestion[]
-  /** Csak `plan` fajtánál van. */
+  /** Present only for the `plan` kind. */
   plan?: string | undefined
   /**
-   * Hamis, ha a kérés lényegét nem tudtuk kiolvasni (megváltozott `tool_input` alak): a parancs,
-   * a fájl útvonala vagy az URL hiányzik. A panel ilyenkor csak az eszköz nevét mutatná, ezért a
-   * `buildHookResponse` minden engedélyezést elutasít rá; a tiltás és a VSCode marad.
+   * False when the essence of the request could not be read (a changed `tool_input` shape): the
+   * command, the file path or the URL is missing. The panel would show only the tool name, so
+   * `buildHookResponse` refuses every allow for it; deny and VS Code remain.
    */
   readable: boolean
 }
 
 /**
- * Eszközönként az a mező, ami nélkül a kérés vakon menne át: a parancs, a fájl útvonala, az URL.
- * A NotebookEdit a `notebook_path`-ban adja a fájlt. Erre nincs mért payload a fixture-ökben; a
- * mezőnév a Claude Code NotebookEdit bemenete, és a `toolDetail` (tool-detail.ts) is ezt olvassa.
- * Ami itt nincs, az olvashatónak számít: egy MCP-toolnak vagy egy ismeretlen eszköznek nincs
- * kötelező mezője, a nyers bemenete a részletekben látszik.
+ * Per tool, the field without which the request would go through blind: the command, the file
+ * path, the URL. NotebookEdit gives the file in `notebook_path`. The fixtures hold no measured
+ * payload for it; the field name is that of Claude Code's NotebookEdit input, and `toolDetail`
+ * (tool-detail.ts) reads it too. A tool not listed here counts as readable: an MCP tool or an
+ * unknown tool has no required field, and its raw input shows in the details.
  *
  * The tool sets come from `tool-names.ts`, so a new command or edit tool gets the check by itself.
  */
@@ -99,7 +100,7 @@ function requiredField(toolName: string): string | undefined {
   return undefined
 }
 
-/** A kötelező mező egy nem üres szöveg; csupa szóköz nem az, abból sem látszana semmi. */
+/** The required field is a non-empty string; whitespace only does not count, it would show nothing either. */
 function isReadable(toolName: string, input: Record<string, unknown>): boolean {
   const field = requiredField(toolName)
   if (field === undefined) return true
@@ -144,13 +145,13 @@ function parseQuestions(raw: unknown): AskQuestion[] {
 }
 
 /**
- * Csak az engedélyező (`behavior: 'allow'`) `addRules` javaslatok: a mért payloadokban a
- * `behavior` a javaslat szintjén áll. Egy tiltó vagy kérdező javaslat engedélyező szabályként
- * az ellenkezőjét adná annak, amit a Claude Code javasolt.
+ * Only the allowing (`behavior: 'allow'`) `addRules` suggestions: in the measured payloads
+ * `behavior` sits at the suggestion level. A deny or ask suggestion turned into an allow rule would
+ * grant the opposite of what Claude Code suggested.
  *
- * A `ruleContent` nélküli szabály a puszta tool (MCP-nél ez a természetes alak). Egy üres vagy nem
- * szöveges `ruleContent` viszont nem ugyanaz: abból puszta tool, vagyis a tool MINDEN hívására
- * szóló szabály lenne, ezért az ilyen szabály kiesik.
+ * A rule without `ruleContent` is the bare tool (the natural form for MCP). An empty or non-string
+ * `ruleContent` is not the same: it would become a bare tool, a rule for EVERY call of the tool,
+ * so such a rule is dropped.
  */
 function parseSuggestedRules(raw: unknown): PermissionRule[] {
   if (!Array.isArray(raw)) return []
@@ -174,7 +175,7 @@ function parseSuggestedRules(raw: unknown): PermissionRule[] {
   return rules
 }
 
-/** Egy idézett szöveg (', " vagy `), benne escape-elt karakterekkel. */
+/** A quoted string (', " or `) with escaped characters inside. */
 const QUOTED = String.raw`(['"\x60])((?:\\.|(?!\1)[^\\])*)\1`
 
 function metaField(meta: string, field: string): string | undefined {
@@ -185,13 +186,14 @@ function metaField(meta: string, field: string): string | undefined {
 }
 
 /**
- * A Workflow szkriptjének `export const meta = { name, description, … }` blokkja. A tool_input
- * csak `{ script, args }`, a javaslat null (mérve, Task 10 D), a nevet és a leírást csak innen
- * lehet kiolvasni. Tűrő minta, és ha nem illeszkedik, egyszerűen nincs eredmény: egy furcsa
- * szkript miatt a kérés nem eshet ki, legfeljebb „Workflow" marad a felirata.
+ * The `export const meta = { name, description, … }` block of a Workflow script. The tool_input is
+ * only `{ script, args }` and the suggestion is null (measured live), so the name and the
+ * description can only be read from here. A tolerant pattern, and when it does not match there is
+ * simply no result: an odd script must not drop the request, at worst its label stays "Workflow".
  *
- * A keresés a blokk első `}`-jéig tart, hogy a szkript későbbi `name:`-je (pl. egy lépés neve)
- * ne legyen a workflow neve. A név és a leírás a mintákban a blokk elején áll.
+ * The search stops at the block's first `}`, so that a later `name:` in the script (e.g. a step's
+ * name) does not become the workflow's name. In the samples the name and the description come
+ * first in the block.
  */
 function workflowMeta(input: Record<string, unknown>): { name?: string | undefined; description?: string | undefined } {
   const script = nonEmptyString(input['script'])
@@ -219,8 +221,8 @@ function summarize(
     return title === undefined ? toolName : (flatText(title.replace(/^#+\s*/, '')) ?? '')
   }
   if (toolName === 'Workflow') return workflowMeta(input).name ?? toolName
-  // A parancs sortörései jelentést hordoznak (többsoros szkript, heredoc): laposítva a panel
-  // mást mutatna, mint amit a felhasználó jóváhagy. Csak a két végét vágjuk.
+  // A command's line breaks carry meaning (a multi-line script, a heredoc): flattened, the panel
+  // would show something other than what the user approves. Only its ends are trimmed.
   const command = nonEmptyString(input['command'])
   if (command !== undefined) return command.replace(/\r\n?/g, '\n').trim()
   const target = nonEmptyString(input['file_path']) ?? nonEmptyString(input['notebook_path']) ?? nonEmptyString(input['url'])
@@ -228,14 +230,14 @@ function summarize(
   return target === undefined ? toolName : (flatText(target) ?? '')
 }
 
-/** Csak `tool` fajtánál: a fájlírásnak, a kérdésnek és a tervnek nincs ilyen leírása. */
+/** Only for the `tool` kind: a file write, a question and a plan have no such description. */
 function describeTool(kind: DecisionKind, toolName: string, input: Record<string, unknown>): string | undefined {
   if (kind !== 'tool') return undefined
   if (toolName === 'Workflow') return workflowMeta(input).description
   return flatText(input['description'])
 }
 
-/** A PermissionRequest hook törzse, értelmezve; `undefined`, ha nem használható. Soha nem dob. */
+/** The parsed body of the PermissionRequest hook; `undefined` when it is unusable. Never throws. */
 export function parsePermissionRequest(body: unknown): PermissionRequestInfo | undefined {
   if (!isRecord(body)) return undefined
   const sessionId = nonEmptyString(body['session_id'])

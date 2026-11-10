@@ -28,15 +28,15 @@ function lock(over: Partial<IdeLock> = {}): IdeLock {
 }
 
 interface FakeProcess {
-  /** A process creation FILETIME, ahogy a session fájl tárolja. */
+  /** The process creation FILETIME, as the session file stores it. */
   procStart?: string
-  /** A Get-Process `Name` megfelelője. */
+  /** The equivalent of Get-Process `Name`. */
   image?: string
-  /** A processz indulása epoch ms-ban; hiányzik, ha nem kérdezhető le. */
+  /** The process start in epoch ms; absent when it cannot be read. */
   startedAtMs?: number
 }
 
-/** Csak a felsorolt pidek élnek. Ami nincs a táblában, az halott. */
+/** Only the listed pids are alive. Whatever is not in the table is dead. */
 function probeFor(processes: Record<number, FakeProcess>): ProcessProbe {
   return {
     isAlive: (pid, procStart) => {
@@ -50,7 +50,7 @@ function probeFor(processes: Record<number, FakeProcess>): ProcessProbe {
   }
 }
 
-/** A tipikus felállás: az élő session és a hozzá tartozó élő VSCode ablak. */
+/** The typical setup: the live session and its live VS Code window. */
 const ALIVE = { 100: { procStart: 'ps-100' }, 900: { image: 'Code' } }
 
 describe('resolveLiveSessions', () => {
@@ -59,7 +59,7 @@ describe('resolveLiveSessions', () => {
   })
 
   it('drops a session whose pid is alive but started at a different time', () => {
-    // Pid-újrahasznosítás: a pid él, de már egy másik processz birtokolja.
+    // Pid reuse: the pid is alive, but another process owns it now.
     const probe = probeFor({ 100: { procStart: 'someone-else' }, 900: { image: 'Code' } })
     expect(resolveLiveSessions([session()], [lock()], probe)).toEqual([])
   })
@@ -95,9 +95,9 @@ describe('resolveLiveSessions', () => {
   })
 
   it('rejects a VSCode lock whose recycled pid now belongs to something else', () => {
-    // A veszélyes eset: elárvult lock ugyanarra a workspace-re, aminek a pidjét
-    // időközben egy teljesen független processz kapta meg. Élő pid, egyező
-    // útvonal — csak az image név árulja el, hogy nem VSCode ablak.
+    // The dangerous case: an orphaned lock for the same workspace whose pid has been taken by an
+    // unrelated process meanwhile. A live pid and a matching path: only the image name shows it is
+    // not a VS Code window.
     const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'notepad' } })
     const vscodeLock = lock({ ideName: 'Visual Studio Code' })
     const out = resolveLiveSessions([session()], [vscodeLock], probe)
@@ -117,8 +117,8 @@ describe('resolveLiveSessions', () => {
   })
 
   it('skips the image check for a lock from an IDE it does not know', () => {
-    // Nem VSCode IDE-nél nem tudjuk, mi a helyes image név — inkább párosítunk,
-    // mint hogy egy támogatott szerkesztőt kizárjunk.
+    // For an IDE other than VS Code we do not know the right image name: better to match than to
+    // exclude a supported editor.
     const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'cursor' } })
     const other = lock({ ideName: 'Cursor' })
     expect(resolveLiveSessions([session()], [other], probe)[0]!.window?.pid).toBe(900)
@@ -147,7 +147,7 @@ describe('resolveLiveSessions with lock file times', () => {
   const WRITTEN = 1_700_000_000_000
 
   it('rejects a lock written before its pid process started, because the pid was recycled', () => {
-    // A lock írásakor a pid még egy másik processzé volt: a mostani Code.exe később indult.
+    // When the lock was written, the pid belonged to another process: the current Code.exe started later.
     const probe = probeFor({ 100: { procStart: 'ps-100' }, 900: { image: 'Code', startedAtMs: WRITTEN + 60_000 } })
     const stale = lock({ ideName: 'Visual Studio Code', mtimeMs: WRITTEN })
     expect(resolveLiveSessions([session()], [stale], probe)[0]!.window).toBeUndefined()
@@ -177,7 +177,7 @@ describe('resolveLiveSessions with lock file times', () => {
   })
 
   it('does not let a recycled stale lock with a longer folder win over a valid one', () => {
-    // A review esete: az elavult lock mappája hosszabb, ezért a régi kód azt választotta.
+    // The case found in review: the stale lock's folder is longer, so the old code picked it.
     const probe = probeFor({
       100: { procStart: 'ps-100' },
       900: { image: 'Code', startedAtMs: WRITTEN - 60_000 },
@@ -204,7 +204,7 @@ describe('fileTimeToEpochMs', () => {
 
 interface FakeEntry {
   image: string
-  /** Hiányzik: a pid listázható, de az indulási ideje nem kérdezhető le (pl. access denied). */
+  /** Absent: the pid is listed, but its start time cannot be read (e.g. access denied). */
   start?: string
 }
 
@@ -219,7 +219,7 @@ function fakeSnapshot(entries: Record<number, FakeEntry>): ProcessSnapshot {
 
 const CLAUDE = { 100: { image: 'claude', start: 'ps-100' } }
 
-/** Kézzel feloldható ígéret, hogy egy futó refresh-t meg lehessen tartani. */
+/** A promise resolved by hand, so a running refresh can be held. */
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve: (value: T) => void = () => undefined
   const promise = new Promise<T>((r) => {
@@ -242,7 +242,7 @@ describe('createSnapshotProbe', () => {
     const probe = createSnapshotProbe(take, { now })
     expect(probe.isAlive(100)).toBe(false)
     expect(probe.imageName(100)).toBeUndefined()
-    // A szinkron válaszok soha nem indítanak lekérdezést: ez a fagyás oka volt.
+    // The synchronous answers never start a query: that was the cause of the freeze.
     expect(take).not.toHaveBeenCalled()
   })
 
@@ -259,9 +259,9 @@ describe('createSnapshotProbe', () => {
   it('treats a listed pid without a readable start time as unverifiable', async () => {
     const probe = createSnapshotProbe(() => Promise.resolve(fakeSnapshot({ 300: { image: 'svchost' } })), { now })
     await probe.refresh()
-    // procStart-tal nem tudjuk igazolni, hogy ugyanaz a processz: halott.
+    // With procStart we cannot prove it is the same process: dead.
     expect(probe.isAlive(300, 'ps-300')).toBe(false)
-    // procStart nélkül a pid listázva van, tehát él.
+    // Without procStart the pid is listed, so it is alive.
     expect(probe.isAlive(300)).toBe(true)
     expect(probe.imageName(300)).toBe('svchost')
   })
@@ -385,8 +385,8 @@ describe('parsePowerShellSnapshot', () => {
 
 describe('createWin32ProcessProbe', () => {
   const onWindows = process.platform === 'win32'
-  // Valódi PowerShellt indít: a teszt a pillanatkép saját korlátjánál tovább várhat, hogy egy lassú
-  // gépen a probe döntsön (hiba vagy siker), ne a teszt időkorlátja.
+  // Starts a real PowerShell: the test may wait longer than the snapshot's own timeout, so that on a
+  // slow machine the probe decides (failure or success), not the test's timeout.
   const LIVE_TEST_TIMEOUT_MS = POWERSHELL_SNAPSHOT_TIMEOUT_MS + 10_000
 
   it.skipIf(!onWindows)('reports the current process as alive after a refresh', async () => {

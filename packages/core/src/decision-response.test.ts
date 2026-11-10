@@ -57,7 +57,7 @@ describe('buildHookResponse', () => {
   })
 
   it('adds an edited rule at machine level, exactly as given', () => {
-    // Mérve (K4, K5): a Claude Code egy általunk kitalált szabályt is beír, a megadott helyre.
+    // Measured (spike K4, K5): Claude Code writes even a rule we made up, to the given destination.
     const decision = decisionOf(
       buildHookResponse(bash, {
         type: 'allow-with-rules',
@@ -118,8 +118,8 @@ describe('buildHookResponse', () => {
   })
 
   it('refuses any answer when the questions could not be read — never an allow with no answers', () => {
-    // Ha a `tool_input.questions` alakja megváltozik, a parser mindent eldob, és a lista üres.
-    // A kérdésenkénti ellenőrzés ilyenkor semmit nem utasítana el.
+    // If the shape of `tool_input.questions` changes, the parser drops everything and the list is
+    // empty. The per-question check would then refuse nothing.
     const raw = hookPayload('permissionRequest_askMulti')
     const unknownShape = parsePermissionRequest({
       ...raw,
@@ -133,7 +133,7 @@ describe('buildHookResponse', () => {
     expect(
       buildHookResponse(unknownShape, { type: 'answer', answers: { 'Milyen gyümölcsöket szeretsz?': 'Alma' } }).ok,
     ).toBe(false)
-    // A kiút: tiltás üzenettel továbbra is mehet.
+    // The way out: a deny with a message still goes through.
     expect(decisionOf(buildHookResponse(unknownShape, { type: 'deny', message: 'a VSCode-ban válaszolok' }))).toEqual({
       behavior: 'deny',
       message: 'a VSCode-ban válaszolok',
@@ -185,7 +185,7 @@ describe('parseUserDecision — the IPC boundary', () => {
   })
 })
 
-describe('buildHookResponse — olvashatatlan kérés', () => {
+describe('buildHookResponse: unreadable request', () => {
   const blindBash = parsePermissionRequest({ session_id: 's', tool_name: 'Bash', tool_input: { cmd: 'rm -rf /' } })
   const blindEdit = parsePermissionRequest({ session_id: 's', tool_name: 'Edit', tool_input: { path: 'x' } })
   if (blindBash === undefined || blindEdit === undefined) throw new Error('payload did not parse')

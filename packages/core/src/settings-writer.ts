@@ -5,9 +5,9 @@ import path from 'node:path'
 import { isRecord } from './guards.js'
 
 /**
- * Az a néhány fájlművelet, amit ez a modul használ. Teszteléshez cserélhető: egy foglalt
- * fájlt (EBUSY), egy félbecsonkolt olvasást vagy egy közben író másik folyamatot valódi
- * fájlrendszeren nem lehet determinisztikusan előidézni.
+ * The few file operations this module uses. Replaceable for tests: a busy file (EBUSY), a read of
+ * a half-truncated file or another process writing meanwhile cannot be produced deterministically
+ * on a real file system.
  */
 export interface SettingsFs {
   readFile(file: string, encoding: 'utf8'): Promise<string>
@@ -20,30 +20,30 @@ export interface SettingsFs {
 const nodeFs: SettingsFs = { readFile, writeFile, rename, unlink, copyFile }
 
 export interface SettingsWriteOptions {
-  /** Alapból a valódi `node:fs/promises`. */
+  /** The real `node:fs/promises` by default. */
   fs?: SettingsFs
   /**
-   * Egyszeri biztonsági másolat a meglévő fájlról az első módosító írás előtt. Alapból igen;
-   * a saját config fájlunknak nem kell.
+   * A one-time backup of the existing file before the first write that changes it. On by default;
+   * our own config file does not need one.
    */
   backup?: boolean
 }
 
-/** A biztonsági másolat a célfájl mellett, ezzel az utótaggal. */
+/** The backup sits beside the target file, with this suffix. */
 export const SETTINGS_BACKUP_SUFFIX = '.claudeswitcher-backup'
 
-/** Ennyiszer olvassuk újra a meglévő, de üres fájlt, mielőtt az írást elutasítjuk. */
+/** How many times an existing but empty file is re-read before the write is refused. */
 const EMPTY_READ_RETRIES = 3
 const EMPTY_READ_DELAY_MS = 50
-/** Ennyiszer kezdjük újra a teljes olvasás, transzformálás, írás kört, ha közben más írt. */
+/** How many times the whole read, transform, write cycle is retried when someone else wrote meanwhile. */
 const CONFLICT_ATTEMPTS = 3
 
-/** A Node fájlrendszer-hiba kódja (`ENOENT`, `EBUSY`…), ha van. */
+/** The Node file system error code (`ENOENT`, `EBUSY`…), if any. */
 function errorCode(error: unknown): string | undefined {
   return error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined
 }
 
-/** Igaz, ha a hiba azt jelenti, hogy a fájl nincs meg. Minden más hiba valódi hiba. */
+/** True when the error means the file does not exist. Every other error is a real error. */
 export function isNotFoundError(error: unknown): boolean {
   return errorCode(error) === 'ENOENT'
 }
@@ -58,9 +58,8 @@ export function isMissingPathError(error: unknown): boolean {
 }
 
 /**
- * Rekurzív merge. Objektumokat mélyen egyesít, tömböket és skalárokat cserél.
- * A tömb-csere szándékos: a hook-konfigot idempotensen akarjuk újraírni, nem
- * duplikálni minden telepítéskor.
+ * Recursive merge. Objects are merged deeply, arrays and scalars are replaced. Replacing arrays is
+ * deliberate: the hook config must be rewritten idempotently, not duplicated on every install.
  */
 export function mergeSettings(
   existing: Record<string, unknown>,
@@ -68,9 +67,9 @@ export function mergeSettings(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...existing }
   for (const [key, value] of Object.entries(patch)) {
-    // A `__proto__` értékadása a prototípus-settert hívná adatkulcs létrehozása
-    // helyett, és a payload némán eltűnne. Nem valós Claude Code beállításkulcs,
-    // de a csendes adatvesztést nem hagyjuk a kódban.
+    // Assigning `__proto__` would call the prototype setter instead of creating a data key, and the
+    // payload would vanish silently. It is not a real Claude Code settings key, but silent data
+    // loss is not left in the code.
     if (key === '__proto__') continue
     const current = out[key]
     out[key] =
@@ -82,26 +81,25 @@ export function mergeSettings(
 }
 
 /**
- * Célfájlonkénti sorbaállítás.
+ * One queue per target file.
  *
- * Enélkül két egyidejű hívás ugyanarra a fájlra összefésült, olvashatatlan
- * JSON-t hagyna maga után (pont az a katasztrófa, amit ez a modul megelőzni
- * hivatott), ráadásul a második beolvasás lemaradna az első írásáról, tehát az
- * egyik patch akkor is elveszne, ha a fájl épen marad.
+ * Without it, two concurrent calls on the same file would leave interleaved, unreadable JSON
+ * behind (exactly the disaster this module exists to prevent), and the second read would miss the
+ * first write, so one patch would be lost even if the file stayed intact.
  *
- * A Map csak annyi bejegyzést tart, ahány külön fájlt írunk vele (a felhasználói
- * settings.json és a desktop app config fájlja), tehát nem nő korlátlanul.
+ * The map holds only as many entries as there are distinct files written through it (the user's
+ * settings.json and the desktop app's config file), so it does not grow without bound.
  */
 const writeQueues = new Map<string, Promise<unknown>>()
 
 /**
- * Atomikus, sorba állított, parse-biztos olvasás, transzformálás, írás. A `transform` a már
- * beolvasott objektumot kapja, és a kiírandót adja vissza. Ütközésnél újra lefut, tehát
- * tisztának és megismételhetőnek kell lennie.
+ * An atomic, queued, parse-safe read, transform and write. `transform` gets the object read from
+ * the file and returns the one to write. It runs again on a conflict, so it must be pure and
+ * repeatable.
  *
- * Azért kell a merge-patch mellé, mert az integráció eltávolítása kulcsokat töröl, amit
- * egy merge-patch nem tud kifejezni. Az `updateSettingsFile`-lal azonos sort használ, így
- * a kettő ugyanarra a fájlra nem tudja egymás írását eldobni.
+ * It exists next to the merge patch because removing the integration deletes keys, which a merge
+ * patch cannot express. It shares its queue with `updateSettingsFile`, so the two cannot drop each
+ * other's writes to the same file.
  */
 export function transformSettingsFile(
   filePath: string,
@@ -110,8 +108,8 @@ export function transformSettingsFile(
 ): Promise<void> {
   const key = path.resolve(filePath)
   const previous = writeQueues.get(key) ?? Promise.resolve()
-  // A következő hívónak arra kell várnia, hogy a fájlművelet *befejeződjön*, a
-  // sikerére nem. Ezért fut a lánc hiba után is tovább.
+  // The next caller must wait for the file operation to *finish*, not to succeed. That is why the
+  // chain goes on after an error.
   const next = previous.then(
     () => writeTransformed(filePath, transform, options),
     () => writeTransformed(filePath, transform, options),
@@ -129,11 +127,11 @@ export function updateSettingsFile(
 }
 
 /**
- * Atomikus írás: egyedi nevű ideiglenes fájl, majd átnevezés. A célfájl vagy a régi, vagy az új
- * tartalmat tartja, félkészet soha.
+ * Atomic write: a uniquely named temporary file, then a rename. The target holds either the old or
+ * the new content, never a partial one.
  *
- * A `beforeRename` az átnevezés előtti utolsó pillanatban dönthet úgy, hogy mégse írjunk: ilyenkor
- * a temp eltűnik, a célfájl érintetlen, és a visszatérési érték `false`.
+ * `beforeRename` may decide at the last moment before the rename not to write after all: then the
+ * temp file is removed, the target is untouched, and the result is `false`.
  */
 export async function writeFileAtomic(
   filePath: string,
@@ -141,7 +139,7 @@ export async function writeFileAtomic(
   options: { fs?: SettingsFs; beforeRename?: () => Promise<boolean> } = {},
 ): Promise<boolean> {
   const fs = options.fs ?? nodeFs
-  // Egyedi név processzenként ÉS híváson belül: a pid önmagában nem elég.
+  // Unique per process AND per call: the pid alone is not enough.
   const temp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${randomUUID()}.tmp`)
   try {
     await fs.writeFile(temp, data, 'utf8')
@@ -152,7 +150,7 @@ export async function writeFileAtomic(
     await fs.rename(temp, filePath)
     return true
   } catch (error) {
-    // Ne hagyjunk törmeléket a célkönyvtárban. A célfájl érintetlen, ez a lényeg.
+    // Leave no debris in the target directory. The target file is untouched, which is what matters.
     await fs.unlink(temp).catch(() => undefined)
     throw error
   }
@@ -169,7 +167,7 @@ async function readRaw(fs: SettingsFs, filePath: string): Promise<string | undef
 }
 
 interface Snapshot {
-  /** A nyers tartalom, vagy `undefined`, ha a fájl nem létezett. */
+  /** The raw content, or `undefined` when the file did not exist. */
   raw: string | undefined
   existing: Record<string, unknown>
 }
@@ -177,12 +175,12 @@ interface Snapshot {
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * Beolvassa a fájlt, és csak akkor tekinti üres beállításnak, ha valóban nincs meg (ENOENT).
+ * Reads the file, and treats it as empty settings only when it really does not exist (ENOENT).
  *
- * Minden más olvasási hiba (EBUSY, EPERM, EACCES, EMFILE…) dob: régen `{}` lett belőlük, és a
- * telepítés csak a mi kulcsainkkal írta felül a felhasználó teljes beállítását. Egy meglévő, de
- * üres fájl tipikusan egy másik író csonkolása és írása közötti pillanat, ezért rövid szünetekkel
- * újraolvassuk. Ha üres marad, az írást elutasítjuk, nem `{}`-ként kezeljük.
+ * Every other read error (EBUSY, EPERM, EACCES, EMFILE…) throws: they used to become `{}`, and the
+ * install overwrote the user's whole settings with only our keys. An existing but empty file is
+ * typically the moment between another writer's truncate and write, so it is re-read after short
+ * pauses. If it stays empty, the write is refused rather than treated as `{}`.
  */
 async function readSnapshot(fs: SettingsFs, filePath: string): Promise<Snapshot> {
   for (let retry = 0; ; retry++) {
@@ -217,8 +215,8 @@ async function readSnapshot(fs: SettingsFs, filePath: string): Promise<Snapshot>
 }
 
 /**
- * Egyszeri biztonsági másolat. Az `COPYFILE_EXCL` miatt egy meglévő másolatot soha nem ír felül,
- * és a létezés ellenőrzése sem versenyezhet a másolással. Ha a másolat nem készülhet el, nem írunk.
+ * A one-time backup. Thanks to `COPYFILE_EXCL` it never overwrites an existing backup, and the
+ * existence check cannot race the copy. If the backup cannot be made, nothing is written.
  */
 async function ensureBackup(fs: SettingsFs, filePath: string): Promise<void> {
   try {
@@ -233,16 +231,16 @@ async function ensureBackup(fs: SettingsFs, filePath: string): Promise<void> {
 }
 
 /**
- * Parse-olhatatlan, nem objektum, olvashatatlan vagy üresen maradó meglévő fájlnál dob, és NEM
- * hívja a transzformációt és nem ír. Inkább ne módosítsunk semmit, mint hogy elveszítsük a
- * felhasználó beállításait.
+ * For an existing file that does not parse, is not an object, cannot be read or stays empty, it
+ * throws, and it does NOT call the transform or write. Better to change nothing than to lose the
+ * user's settings.
  *
- * Optimista párhuzamosság: ha a fájl tartalma az olvasás és az átnevezés között megváltozott, a
- * tempet eldobjuk, és a teljes kört a friss tartalomra ismételjük, korlátos számban. A tartalmat
- * vetjük össze, nem az mtime-ot és a méretet: egy ugyanakkora fájlt hagyó írás egy mtime-egységen
- * belül azokon nem látszik. Zárfájl nem segítene, mert a Claude Code és a szerkesztők nem
- * ismerik. Az utolsó összevetés és az átnevezés közötti rés megmarad: ezt csak egy közös zár
- * zárhatná be.
+ * Optimistic concurrency: if the file's content changed between the read and the rename, the temp
+ * file is dropped and the whole cycle is repeated on the fresh content, a bounded number of times.
+ * The content is compared, not the mtime and the size: a write that leaves a file of the same size
+ * within one mtime tick does not show in those. A lock file would not help, because Claude Code
+ * and the editors do not know it. The gap between the last comparison and the rename remains: only
+ * a shared lock could close it.
  */
 async function writeTransformed(
   filePath: string,
@@ -253,7 +251,7 @@ async function writeTransformed(
   for (let attempt = 1; attempt <= CONFLICT_ATTEMPTS; attempt++) {
     const snapshot = await readSnapshot(fs, filePath)
     const data = JSON.stringify(transform(snapshot.existing), null, 2) + '\n'
-    // Változatlan tartalmat nem írunk ki, így biztonsági másolat sem kell hozzá.
+    // Unchanged content is not written, so it needs no backup either.
     if (data === snapshot.raw) return
     if (snapshot.raw !== undefined && options.backup !== false) await ensureBackup(fs, filePath)
     const written = await writeFileAtomic(filePath, data, {

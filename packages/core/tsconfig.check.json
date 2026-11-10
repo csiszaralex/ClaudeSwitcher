@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
-  // A build `rootDir`-je a `src`; a vitest konfig azon kívül van, ez a program pedig nem ír fájlt.
+  // The build's `rootDir` is `src`, and the vitest config lies outside it; this program emits nothing.
   "compilerOptions": { "rootDir": "." },
   "include": ["src/**/*", "vitest.config.ts"],
   "exclude": []

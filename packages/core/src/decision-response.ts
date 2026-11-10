@@ -1,7 +1,7 @@
 import type { PermissionRequestInfo, PermissionRule, RuleDestination } from './decision.js'
 import { isRecord } from './guards.js'
 
-/** A felhasználó döntése egy függő kérésről: az overlayből, IPC-n át érkezik. */
+/** The user's decision on a pending request: it comes from the overlay, over IPC. */
 export type UserDecision =
   | { type: 'allow' }
   | { type: 'deny'; message?: string | undefined }
@@ -9,20 +9,20 @@ export type UserDecision =
   | { type: 'allow-session-edits' }
   | { type: 'answer'; answers: Record<string, string> }
 
-/** A PermissionRequest hook válasza, a VSCode bővítményben mért alakban. */
+/** The PermissionRequest hook's response, in the shape measured with the VS Code extension. */
 export interface HookDecisionBody {
   hookSpecificOutput: { hookEventName: 'PermissionRequest'; decision: Record<string, unknown> }
 }
 
 export type DecisionResult = { ok: true; body: HookDecisionBody } | { ok: false; reason: string }
 
-/** Három független mérés szerint a Claude Code a hookból adott terv-jóváhagyást figyelmen kívül hagyja. */
+/** Three independent measurements showed that Claude Code ignores a plan approval given by the hook. */
 export const PLAN_APPROVAL_UNSUPPORTED =
   'Tervet a hookból nem lehet jóváhagyni (Claude Code korlát). Hagyd jóvá a VSCode-ban.'
 
 /**
- * Olvashatatlan kérésre (`PermissionRequestInfo.readable`) a panel csak az eszköz nevét látja:
- * egy engedélyezés vakon menne ki. A panel ugyanezt a szöveget mutatja a gombok helyén.
+ * For an unreadable request (`PermissionRequestInfo.readable`) the panel sees only the tool name,
+ * so an allow would go out blind. The panel shows this same text in place of the buttons.
  */
 export const UNREADABLE_REQUEST =
   'A kérés tartalma nem olvasható (ismeretlen formátum), ezért itt nem engedélyezhető. Tilthatod, vagy dönts a VSCode-ban.'
@@ -35,7 +35,7 @@ function refuse(reason: string): DecisionResult {
   return { ok: false, reason }
 }
 
-/** `ruleContent` nélküli szabálynál a kulcs kimarad: `undefined`-ként nem utazhat a dróton. */
+/** A rule without `ruleContent` leaves the key out: it cannot travel on the wire as `undefined`. */
 function toWire(rule: PermissionRule): Record<string, string> {
   return rule.ruleContent === undefined
     ? { toolName: rule.toolName }
@@ -43,9 +43,9 @@ function toWire(rule: PermissionRule): Record<string, string> {
 }
 
 /**
- * A felhasználó döntéséből a hook válasza, vagy annak megtagadása, ha a döntés az adott
- * kérésre nem érvényes. Ez az egyetlen hely, ahol a spec tiltásai érvényesülnek: kérdést csak
- * válasszal, tervet soha nem enged tovább, olvashatatlan kérést pedig csak tilthat.
+ * The hook response built from the user's decision, or a refusal when the decision is not valid
+ * for the request. This is the one place that enforces the design's bans: a question goes through
+ * only with an answer, a plan never, and an unreadable request can only be denied.
  */
 export function buildHookResponse(request: PermissionRequestInfo, decision: UserDecision): DecisionResult {
   if (!request.readable && decision.type !== 'deny') return refuse(UNREADABLE_REQUEST)
@@ -82,14 +82,14 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
 
     case 'answer': {
       if (request.kind !== 'question') return refuse('Válasz csak kérdésre adható.')
-      // Üres lista = a kérdéseket nem tudtuk kiolvasni (megváltozott `tool_input` alak). A
-      // kérdésenkénti ellenőrzés ilyenkor semmit nem utasítana el, és egy válasz nélküli `allow`
-      // menne ki, épp az, amit a spec tilt. Innen csak a VSCode vagy egy tiltás vezet tovább.
+      // An empty list means the questions could not be read (a changed `tool_input` shape). The
+      // per-question check would then refuse nothing, and an `allow` without answers would go out:
+      // exactly what the design forbids. From here only VS Code or a deny leads on.
       if (request.questions.length === 0) {
         return refuse('A kérdéseket nem sikerült kiolvasni. Válaszolj a VSCode-ban.')
       }
-      // A válasz kulcsai pontosan a kérdések szövegei: egy idegen kulcs olyan választ jelentene,
-      // amit a felhasználó nem az itt látott kérdésre adott.
+      // The answer keys are exactly the question texts: a foreign key would be an answer the user
+      // did not give to a question shown here.
       const texts = new Set(request.questions.map((question) => question.question))
       for (const key of Object.keys(decision.answers)) {
         if (!texts.has(key)) return refuse(`Nincs ilyen kérdés: „${key}"`)
@@ -104,7 +104,7 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
   }
 }
 
-/** Többválasztós válasz a dokumentált formában (a tömb „Other"-ként jelent meg, spike R1a). */
+/** A multiple-choice answer in the documented form (an array showed up as "Other", spike R1a). */
 export function joinAnswerLabels(labels: readonly string[]): string {
   return labels.join(', ')
 }
@@ -119,8 +119,8 @@ function parseRule(raw: unknown): PermissionRule | undefined {
 }
 
 /**
- * Egy IPC-n érkezett döntés ellenőrzése. A renderer bármit küldhet; ami nem pontosan egy
- * `UserDecision`, azt elutasítjuk, mielőtt a daemonhoz érne. Soha nem dob.
+ * Validates a decision that arrived over IPC. The renderer may send anything; whatever is not
+ * exactly a `UserDecision` is rejected before it reaches the daemon. Never throws.
  */
 export function parseUserDecision(raw: unknown): UserDecision | undefined {
   if (!isRecord(raw)) return undefined

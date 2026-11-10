@@ -1,18 +1,18 @@
 import type { PermissionRule } from './decision.js'
 
-/** Egy szabály a beállításfájlok és a natív prompt írásmódjával: `Bash(ls *)`, vagy a puszta tool név. */
+/** A rule as the settings files and the native prompt write it: `Bash(ls *)`, or the bare tool name. */
 export function formatRule(rule: PermissionRule): string {
   return rule.ruleContent === undefined ? rule.toolName : `${rule.toolName}(${rule.ruleContent})`
 }
 
 export type ParsedRules = { ok: true; rules: PermissionRule[] } | { ok: false; line: number; text: string }
 
-/** Tool név, opcionálisan zárójeles tartalommal. A tartalomban lehet zárójel; üres `()` nem. */
+/** A tool name with optional content in parentheses. The content may hold parentheses; an empty `()` is invalid. */
 const RULE = /^([A-Za-z0-9_-]+)(?:\(([\s\S]+)\))?$/
 
 /**
- * Soronként egy szabály a szerkeszthető előnézetből. Az első hibás sort visszaadja, a számával
- * együtt: egy elgépelt szabály csendes „javítása" más engedélyt adna, mint amit a felhasználó lát.
+ * One rule per line from the editable preview. Returns the first invalid line with its number:
+ * silently "fixing" a mistyped rule would grant a different permission than the one the user sees.
  */
 export function parseRules(text: string): ParsedRules {
   const rules: PermissionRule[] = []
