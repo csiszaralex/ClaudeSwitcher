@@ -6,9 +6,9 @@ import { fakeProbe, tempDir, writeSessionRecord } from '@claudeswitcher/core/tes
 import { describe, expect, it, vi } from 'vitest'
 import { scanSessions } from './scanner.js'
 
-// A lock fájlok nem tárolnak `procStart`-ot, ezért a ProcessProbe `imageName`-je és
-// `startedAtMs`-e árulja el, ha egy elárvult lock pidjét időközben egy másik processz
-// kapta meg. Az ismeretlen indulási idő (`undefined`) nem dob el lockot.
+// The lock files store no `procStart`, so the ProcessProbe's `imageName` and `startedAtMs` reveal
+// when the pid of an orphaned lock has meanwhile gone to another process. An unknown start time
+// (`undefined`) does not drop a lock.
 const aliveProbe = fakeProbe()
 const deadProbe = fakeProbe({ isAlive: () => false, imageName: () => undefined })
 
@@ -18,7 +18,7 @@ async function fixture(): Promise<string> {
   await mkdir(ideDir(dir), { recursive: true })
   await mkdir(path.join(dir, 'projects', 'encoded-alpha'), { recursive: true })
 
-  // Szemét, ami nem session fájl — nem szabad elszállni rajta.
+  // Junk that is not a session file: the scan must not crash on it.
   await writeFile(path.join(sessionsDir(dir), '100.abc123'), JSON.stringify({ peerToken: 'x' }))
   await writeFile(path.join(sessionsDir(dir), 'broken.json'), '{ not json')
 
@@ -49,8 +49,8 @@ describe('scanSessions', () => {
   })
 
   it('refreshes the probe once, before resolving sessions', async () => {
-    // A probe szinkron válaszai a legutóbbi pillanatképből jönnek; a szkennelésnek
-    // előbb frissítenie kell, különben egy már nem élő listából dolgozna.
+    // The probe's synchronous answers come from its latest snapshot; the scan must refresh it first,
+    // or it would work from a list that is no longer current.
     const dir = await fixture()
     let fresh = false
     const refresh = vi.fn(() => {
@@ -98,7 +98,7 @@ describe('scanSessions', () => {
   })
 
   it('drops a lock whose pid now belongs to a process started after the lock was written', async () => {
-    // Pid-újrahasznosítás: a lock egy azóta kilépett VS Code-é, a pidet egy később indult Code.exe kapta.
+    // Pid reuse: the lock belongs to a VS Code that has exited since, and a Code.exe started later got the pid.
     const dir = await fixture()
     const written = new Date('2026-10-01T08:00:00.000Z')
     await utimes(path.join(ideDir(dir), '50269.lock'), written, written)
@@ -109,10 +109,9 @@ describe('scanSessions', () => {
   })
 
   it('still returns the session when its transcript is not a readable file', async () => {
-    // Figyelem: ez a `findTranscriptPath` isFile() védőágán megy át, nem a
-    // scanner catch blokkján — az utóbbi védelem mélységben, és nincs rá
-    // platformfüggetlen kiváltó. Amit ez bizonyít, az önmagában is fontos: egy
-    // hiányzó vagy hibás transcript nem tünteti el a sessiont a listáról.
+    // Note: this goes through the isFile() guard of `findTranscriptPath`, not through the scanner's
+    // catch block. The latter is defence in depth and has no platform-independent trigger. What this
+    // proves matters on its own: a missing or broken transcript does not remove the session from the list.
     const dir = await fixture()
     const projectDir = path.join(dir, 'projects', 'encoded-alpha')
     await rm(path.join(projectDir, 'sid-100.jsonl'))
@@ -124,7 +123,7 @@ describe('scanSessions', () => {
   })
 })
 
-// Konstruált subagent-fájlok a mért alakban (Claude Code 2.1.30x, 2026-10-21) — nem valódi tartalom.
+// Constructed subagent files in the measured shape (Claude Code 2.1.30x, 2026-10-21), not real content.
 function subagentLine(tool: string, input: Record<string, unknown>): string {
   return JSON.stringify({
     type: 'assistant',
@@ -156,7 +155,7 @@ async function addSubagent(
 
 const runningMeta = { agentType: 'general-purpose', description: 'Teszt hullám', toolUseId: 'toolu_c1', spawnDepth: 1 }
 
-describe('scanSessions — subagents', () => {
+describe('scanSessions: subagents', () => {
   it('reports an active subagent with its running tool and detail', async () => {
     const dir = await fixture()
     await addSubagent(dir, 'a1', { meta: runningMeta, lines: [subagentLine('Grep', { pattern: 'createPanel' })] })
@@ -196,8 +195,8 @@ describe('scanSessions — subagents', () => {
   })
 
   it('does not let newer finished subagents hide an older active one', async () => {
-    // A korlát a KÉSZ subagentek kiszűrése UTÁN hat: három frissen befejezett subagent nem
-    // takarhatja el a még futót, csak mert azok később írtak.
+    // The limit applies AFTER the finished subagents are filtered out: three just-finished subagents
+    // must not hide one still running, only because they wrote later.
     const dir = await fixture()
     for (const [i, id] of ['done0', 'done1', 'done2'].entries()) {
       await addSubagent(dir, id, {
@@ -242,8 +241,8 @@ describe('scanSessions — subagents', () => {
   })
 
   it('keeps a subagent with a held decision past the staleness window, labels included', async () => {
-    // Egy engedélyre váró subagent nem ír. 5 perc után különben eltűnne, és a panel fejléce a
-    // `subagent · general-purpose`-ra esne vissza.
+    // A subagent waiting for a permission writes nothing. Otherwise it would disappear after 5 minutes,
+    // and the panel header would fall back to `subagent · general-purpose`.
     const dir = await fixture()
     await addSubagent(dir, 'waiter', { meta: runningMeta, lines: [subagentLine('Bash', { command: 'x' })], ageMs: 10 * 60_000 })
     expect((await scanSessions(dir, aliveProbe)).subagents.get('sid-100') ?? []).toEqual([])

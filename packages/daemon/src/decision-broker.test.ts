@@ -26,7 +26,7 @@ function toolUse(name: string): ToolUseEvent {
   return { sessionId, toolName, toolInput: toolInput as Record<string, unknown>, toolUseId }
 }
 
-/** Hamis óra: a 590 mp-et nem kell kivárni, és az időzítők determinisztikusan futnak. */
+/** A fake clock: the 590 s need not be waited out, and the timers run deterministically. */
 function fakeClock(): BrokerClock & { advance(ms: number): void } {
   let now = 1_000
   let nextId = 1
@@ -53,7 +53,7 @@ function fakeClock(): BrokerClock & { advance(ms: number): void } {
   }
 }
 
-/** Egy tartott kérés megfigyelése: megkapta-e már a választ, és mit. */
+/** Observes a held request: whether it has got its answer yet, and which. */
 function observe(promise: Promise<HookDecisionBody | undefined>): { done: boolean; value: HookDecisionBody | undefined } {
   const state: { done: boolean; value: HookDecisionBody | undefined } = { done: false, value: undefined }
   void promise.then((value) => {
@@ -104,7 +104,7 @@ describe('DecisionBroker', () => {
   })
 
   it('recognises a decision made in VS Code by the PostToolUse of the same call', async () => {
-    // A fixture-hármas egyetlen hívás három hookja — mérve, nem kitalálva.
+    // The three fixtures are the three hooks of one call: measured, not invented.
     const broker = new DecisionBroker(fakeClock())
     broker.preToolUse(toolUse('preToolUse_bash'))
     const held = observe(broker.hold(parsedPayload('permissionRequest_bashCorrelated')))
@@ -117,7 +117,7 @@ describe('DecisionBroker', () => {
   })
 
   it('closes a natively allowed request whose tool then failed (PostToolUseFailure)', async () => {
-    // A konstruált fixture a mért preToolUse_bash hívás hibás vége: ugyanaz a tool_use_id.
+    // The constructed fixture is the failing end of the measured preToolUse_bash call: the same tool_use_id.
     const broker = new DecisionBroker(fakeClock())
     broker.preToolUse(toolUse('preToolUse_bash'))
     const held = observe(broker.hold(parsedPayload('permissionRequest_bashCorrelated')))
@@ -175,7 +175,7 @@ describe('DecisionBroker', () => {
     await flush()
     expect(held.done).toBe(true)
     expect(held.value).toBeUndefined()
-    // A natív prompt ott maradt, tehát a sor is — de onnan már csak a VSCode dönthet.
+    // The native prompt stayed, so the row does too, but from now on only VS Code can decide.
     expect(broker.views()[0]?.released).toBe(true)
     expect(broker.decide(view!.id, { type: 'allow' }).ok).toBe(false)
 
@@ -196,7 +196,7 @@ describe('DecisionBroker', () => {
   })
 
   it('closes a subagent\'s request on its SubagentStop, not the parent\'s', async () => {
-    // A subagent a szülő session_id-jával jön — csak az agent_id különbözteti meg.
+    // The subagent comes with the parent's session_id: only the agent_id tells them apart.
     const broker = new DecisionBroker(fakeClock())
     const parent = observe(broker.hold(parsedPayload('permissionRequest_bash')))
     const subagent = observe(broker.hold(parsedPayload('permissionRequest_subagent')))
@@ -221,7 +221,7 @@ describe('DecisionBroker', () => {
   })
 
   it('keeps a background subagent\'s request open on the main turn\'s Stop, and closes it on SessionEnd', async () => {
-    // A `run_in_background` subagent a fő kör Stop-ja után is fut; a kérése a szülő session_id-jával jön.
+    // A `run_in_background` subagent keeps running after the main turn's Stop; its request comes with the parent's session_id.
     const broker = new DecisionBroker(fakeClock())
     const main = observe(broker.hold(parsedPayload('permissionRequest_bash')))
     const subagent = observe(broker.hold(parsedPayload('permissionRequest_subagent')))
@@ -252,7 +252,7 @@ describe('DecisionBroker', () => {
     expect(held.done).toBe(true)
     expect(held.value).toBeUndefined()
     expect(broker.views()).toEqual([])
-    // Az „pontosan egy válasz" zár: a késő kattintás már nem talál semmit.
+    // The "exactly one answer" latch: a late click finds nothing any more.
     expect(broker.decide(view!.id, { type: 'allow' }).ok).toBe(false)
   })
 
@@ -295,7 +295,7 @@ describe('DecisionBroker', () => {
 
     broker.pruneAbsent(new Set())
     clock.advance(ABSENT_SESSION_GRACE_MS - 1)
-    // Egy kimaradt szkennelés után újra ott van: a session él.
+    // After one missed scan it is back: the session is alive.
     broker.pruneAbsent(new Set([held.sessionId]))
     clock.advance(ABSENT_SESSION_GRACE_MS - 1)
     broker.pruneAbsent(new Set())
@@ -303,8 +303,8 @@ describe('DecisionBroker', () => {
   })
 
   it('never prunes a request the app can still decide, even if discovery does not see its session', async () => {
-    // Spec §8: a jóváhagyás a felderítés nélkül is működik. A még döntható kérést a kliens
-    // bontása (a processz halála) zárja le, nem a registry hiánya.
+    // Design doc, section 8: approving works without the discovery. A request that can still be decided
+    // is closed by the client disconnecting (the process's death), not by its absence from the registry.
     const clock = fakeClock()
     const broker = new DecisionBroker(clock)
     const held = observe(broker.hold(parsedPayload('permissionRequest_bash')))
@@ -317,8 +317,8 @@ describe('DecisionBroker', () => {
   })
 
   it('matches identical parallel calls oldest-first when both PreToolUses come first', async () => {
-    // Mért sorrend: PreToolUse, majd ~15 ms-mal később a PermissionRequest. Két azonos hívásnál:
-    // Pre(id1), Pre(id2), A, B — az A az id1-é.
+    // Measured order: PreToolUse, then the PermissionRequest about 15 ms later. For two identical calls:
+    // Pre(id1), Pre(id2), A, B, and A belongs to id1.
     const broker = new DecisionBroker(fakeClock())
     const pre = toolUse('preToolUse_bash')
     broker.preToolUse({ ...pre, toolUseId: 'toolu_1' })
@@ -348,8 +348,8 @@ describe('DecisionBroker', () => {
   })
 
   it('keeps the main agent and a subagent apart when they run the same command in parallel', async () => {
-    // A subagent a szülő session_id-jával jön, csak az agent_id különbözteti meg. Pre(fő),
-    // Pre(sub), majd a sub kérése érkezik elsőnek: agent_id nélkül a fő hívás azonosítóját vinné el.
+    // The subagent comes with the parent's session_id, only the agent_id tells them apart. Pre(main),
+    // Pre(sub), then the sub's request arrives first: without the agent_id it would take the main call's id.
     const broker = new DecisionBroker(fakeClock())
     const pre = toolUse('preToolUse_bash')
     const subagentId = parsedPayload('permissionRequest_subagent').agentId
@@ -368,8 +368,8 @@ describe('DecisionBroker', () => {
   })
 
   it('does not pair a request with the Pre of an earlier auto-allowed identical call', async () => {
-    // Az első hívás engedély nélkül futott le (Pre, majd Post, PermissionRequest nélkül). Ha a Pre-je
-    // a 60 mp-es sorban marad, a következő azonos hívás kérése az ő régi azonosítóját kapná.
+    // The first call ran without a permission (Pre, then Post, no PermissionRequest). If its Pre stayed
+    // in the 60 s queue, the request of the next identical call would get its old id.
     const clock = fakeClock()
     const broker = new DecisionBroker(clock)
     const pre = toolUse('preToolUse_bash')
@@ -485,7 +485,7 @@ describe('DecisionBroker', () => {
     void broker.hold(parsedPayload('permissionRequest_bash'))
     broker.sessionEnded(broker.views()[0]!.sessionId)
 
-    // A döntés után a bontás figyelője már le van véve: egy késő abort nem jelez.
+    // After the decision the disconnect listener is already removed: a late abort signals nothing.
     client.abort()
     for (const [change] of listener.mock.calls) expect(change).toMatchObject({ abortedSessionId: undefined })
     expect(listener).toHaveBeenCalledTimes(4)

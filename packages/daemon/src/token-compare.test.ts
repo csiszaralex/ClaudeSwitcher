@@ -12,7 +12,7 @@ describe('matchesSecret', () => {
   })
 
   it('refuses a shorter or longer value without throwing', () => {
-    // A timingSafeEqual eltérő hosszú bufferekre dobna; a hossz-ellenőrzés előtte fut.
+    // timingSafeEqual would throw on buffers of different length; the length check runs before it.
     expect(matchesSecret('Bearer 0123', 'Bearer 0123456789abcdef')).toBe(false)
     expect(matchesSecret('Bearer 0123456789abcdef0', 'Bearer 0123456789abcdef')).toBe(false)
   })

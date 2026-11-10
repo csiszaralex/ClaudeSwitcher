@@ -22,7 +22,7 @@ export interface Daemon {
   readonly token: string
   state(): DaemonState
   refresh(): Promise<void>
-  /** A felhasználó döntése egy függő kérésről (az overlayből, IPC-n át). */
+  /** The user's decision on a pending request (from the overlay, over IPC). */
   decide(id: string, decision: UserDecision): DecideResult
   stop(): Promise<void>
 }
@@ -30,14 +30,14 @@ export interface Daemon {
 export interface DaemonOptions {
   claudeDir: string
   probe: ProcessProbe
-  /** Poll periódus ms-ben, alapból `POLL_INTERVAL_MS`. 0 kikapcsolja (tesztekhez). */
+  /** The poll period in ms, `POLL_INTERVAL_MS` by default. 0 turns it off (for tests). */
   pollMs?: number | undefined
   /**
-   * A port, amire a daemon köt. 0: ideiglenes (tesztekhez). A desktop fix portot ad, mert a
-   * telepített hookok egy rögzített URL-t kapnak a settings.json-ban.
+   * The port the daemon binds to. 0: ephemeral (for tests). The desktop app passes a fixed port,
+   * because the installed hooks get a fixed URL in settings.json.
    */
   port?: number | undefined
-  /** A daemon tokenje. Ha nincs megadva, véletlen. A desktop tartós tokent ad, ugyanezért. */
+  /** The daemon's token. Random when not given. The desktop app passes a persistent token, for the same reason. */
   token?: string | undefined
 }
 
@@ -56,9 +56,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
       },
       onLifecycle: (event) => {
         sessions.applyLifecycle(event)
-        // Kör vége vagy session vége: ha a VSCode-ban tiltottak, erről csak így értesülünk (a
-        // tiltásnak nincs PostToolUse-a). A Stop csak a fő agent kéréseit zárja, egy háttérben
-        // futó subagent kérése a #pending-en át továbbra is várakozónak mutatja a sessiont.
+        // End of the turn or of the session: if the user denied in VS Code, this is the only way to
+        // learn it (a denial has no PostToolUse). The Stop closes only the main agent's requests; a
+        // background subagent's request keeps the session waiting through #pending.
         if (event.kind === 'stop') decisions.sessionStopped(event.sessionId)
         if (event.kind === 'end') decisions.sessionEnded(event.sessionId)
         void refresh()
@@ -69,8 +69,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         decisions.preToolUse(event)
       },
       onPostToolUse: (event) => {
-        // Előbb a Notification-várakozás, aztán a függés: így egyik köztes állapot sem mutat
-        // „waiting" sessiont függő döntés nélkül: a függés még tartja, amíg a broker le nem zárja.
+        // The Notification wait first, then the pending decision: so no intermediate state shows a
+        // "waiting" session without a pending decision, which keeps it waiting until the broker closes it.
         sessions.applyToolFinished(event.sessionId)
         decisions.postToolUse(event)
       },
@@ -78,9 +78,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         decisions.subagentStopped(event.sessionId, event.agentId)
       },
     },
-    // Diagnosztika, alapból kikapcsolva. A hookok valódi alakja nincs dokumentálva, és egy
-    // rosszul olvasott mezőnév ugyanúgy néz ki, mint egy hiányzó adat, ezzel a nyers
-    // törzs megnézhető anélkül, hogy a kódot kellene átírni hozzá.
+    // Diagnostics, off by default. The real shape of the hooks is undocumented, and a misread field
+    // name looks the same as missing data; with this the raw body can be inspected without changing
+    // the code.
     process.env['CLAUDESWITCHER_HOOK_LOG'],
   )
 
@@ -88,13 +88,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     const s = serve({ fetch: app.fetch, hostname: DAEMON_HOST, port: requestedPort }, () => {
       resolve(s)
     })
-    // Foglalt porton a listen `error` eseményt emittál. Kezelő nélkül ez elkapatlan kivétel
-    // lenne; így a startDaemon elutasít, a desktop pedig indulási hibadialógust mutat.
+    // On a port in use, listen emits an `error` event. Without a handler it would be an uncaught
+    // exception; this way startDaemon rejects, and the desktop app shows a start-up error dialog.
     s.on('error', reject)
   })
   const port = (server.address() as AddressInfo).port
-  // A @hono/node-server `serve()` egy node:http Servert ad vissza a
-  // default (nem HTTP/2) konfigurációval; a WS hub ezen osztozik.
+  // The @hono/node-server `serve()` returns a node:http Server with the default (not HTTP/2)
+  // configuration; the WS hub shares it.
   const hub = new Hub(server as HttpServer, token)
   const connections = trackOpenRequests(server as HttpServer)
 
@@ -119,12 +119,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   // `resolvedSessionId` marks a change the app itself caused (a successful decide), so the store
   // can clear the pending state and the Notification wait in one step, with a single broadcast.
   decisions.onChange(({ abortedSessionId, resolvedSessionId }) => {
-    // Sessionönként a legrégebbi függő döntés: amíg az tart, a session várakozó. A store
-    // emittál, az pedig broadcastol: a döntések listája is ezzel megy ki.
+    // The oldest pending decision per session: while it lasts, the session is waiting. The store
+    // emits and that broadcasts: the list of decisions goes out this way too.
     const pendingSince = decisions.pendingSinceBySession()
-    // A kliens bontotta a kapcsolatot (natív Nem vagy Esc): a Notification-várakozást csak akkor
-    // töröljük, ha a sessionnek nem maradt másik tartott kérése. Ha maradt, a prompt még nyitva
-    // lehet, és a várakozást annak a lezárása viszi el.
+    // The client closed the connection (native No or Esc): the Notification wait is cleared only if
+    // the session has no other held request left. If it has, the prompt may still be open, and its
+    // close takes the wait away.
     const abortedByClient =
       abortedSessionId !== undefined && !pendingSince.has(abortedSessionId) ? abortedSessionId : undefined
     sessions.applyPending(pendingSince, Date.now(), resolvedSessionId, abortedByClient)
@@ -132,25 +132,25 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   let refreshing: Promise<void> | undefined
   async function refresh(): Promise<void> {
-    // Egyszerre csak egy szkennelés fusson: a poll és a lifecycle hookok egymást átfedve is indíthatják.
+    // Only one scan at a time: the poll and the lifecycle hooks can start it overlapping.
     if (refreshing !== undefined) return refreshing
     refreshing = (async () => {
       try {
         const now = Date.now()
-        // A függő döntésű subagentek címkéje akkor is kell, ha a subagent régóta nem írt (engedélyre
-        // vár). A forrás maga a broker, így nincs külön, elavulni képes másolat.
+        // The label of a subagent with a pending decision is needed even when the subagent has not
+        // written for long (it waits for a permission). The source is the broker itself, so there is
+        // no separate copy that could go stale.
         const heldAgents = new Set(
           decisions.views().flatMap((view) => (view.agentId === undefined ? [] : [view.agentId])),
         )
         const snapshot = await scanSessions(claudeDir, probe, now, heldAgents)
         sessions.applySnapshot(snapshot.sessions, snapshot.activities, now, snapshot.subagents)
-        // Csak sikeres szkennelés után: egy elbukott szkennelés nem „eltűnt minden session".
+        // Only after a successful scan: a failed scan is not "every session vanished".
         decisions.pruneAbsent(new Set(snapshot.sessions.map((session) => session.record.sessionId)))
-        // Életjel MINDEN sikeres szkennelés után, akkor is, ha a pillanatkép nem változott.
-        // Enélkül a kliens nem tudja megkülönböztetni azt, hogy „élünk, csak nincs
-        // változás", attól, hogy „megállt a poll", és épp a monitorozó eszköznél a
-        // legrosszabb kimenet, ha egy állott lista élőnek látszik. Egy WebSocket-ping ezt
-        // NEM fedné: a socket akkor is egészséges, ha a szkennelés halt meg.
+        // A heartbeat after EVERY successful scan, even when the snapshot did not change. Without it
+        // the client cannot tell "alive, just no change" from "the poll stopped", and for a
+        // monitoring tool the worst outcome is a stale list that looks live. A WebSocket ping would
+        // NOT cover this: the socket stays healthy even when the scanning died.
         hub.broadcastRaw(JSON.stringify({ type: 'tick', protocol: DAEMON_PROTOCOL, at: Date.now() }))
       } catch (error) {
         console.error('[daemon] refresh failed', error)
@@ -172,12 +172,12 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     decide: (id, decision) => decisions.decide(id, decision),
     async stop() {
       if (timer !== undefined) clearInterval(timer)
-      // A tartott kéréseket a szerver lezárása ELŐTT kell megválaszolni: a nyitott
-      // kapcsolatok miatt a server.close() különben soha nem térne vissza. A broker ezzel le is
-      // zárul: egy közben vagy ezután érkező PermissionRequest azonnal üres 200-at kap.
+      // The held requests must be answered BEFORE the server closes: with the open connections
+      // server.close() would never return otherwise. This also closes the broker: a
+      // PermissionRequest arriving meanwhile or later gets an empty 200 at once.
       decisions.releaseAll()
-      // Megvárjuk a futó szkennelést: leállás után ne maradjon dolgozó ígéret,
-      // ami a processzt életben tartja vagy egy már lezárt hubba írna.
+      // Wait for a running scan: after shutdown no working promise may remain that keeps the
+      // process alive or writes into a closed hub.
       await refreshing?.catch(() => undefined)
       await hub.close()
       await new Promise<void>((resolve) => {
@@ -191,13 +191,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 }
 
 /**
- * A `server.close()` a befejezett kérés utáni, tétlen keep-alive kapcsolatot bontja, azt viszont
- * nem, amelyen még nem jött kérés, és addig nem tér vissza, amíg a kliens azt nem bontja. Mérve
- * (2026-10-28, Node 24): a Node `fetch` egy megszakított tartott kérés után ilyen üres kapcsolatot
- * nyit, és csak ~4 mp múlva bontja. Ez hosszabb, mint amennyit a desktop kilépéskor vár
+ * `server.close()` closes an idle keep-alive connection after a finished request, but not one that
+ * has not carried a request yet, and it does not return until the client closes that one. Measured
+ * (2026-10-28, Node 24): after an aborted held request the Node `fetch` opens such an empty
+ * connection and closes it only about 4 s later. That is longer than the desktop app waits on quit
  * (`STOP_TIMEOUT_MS`).
- * Leállításkor ezért minden kapcsolatot bontunk, amelyen épp nincs nyitott kérés. A nyitott
- * kérésűt nem: azon a `releaseAll` üres 200-a még úton lehet.
+ * So on shutdown every connection without an open request is destroyed. One with an open request is
+ * not: the empty 200 of `releaseAll` may still be on its way there.
  */
 function trackOpenRequests(server: HttpServer): { destroyIdle(): void } {
   const openRequests = new Map<Socket, number>()

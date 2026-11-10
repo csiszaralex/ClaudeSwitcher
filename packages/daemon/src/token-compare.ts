@@ -1,12 +1,13 @@
 import { timingSafeEqual } from 'node:crypto'
 
 /**
- * Igaz, ha a kapott érték bájtra pontosan a titok. A hook-szerver a teljes `Bearer <token>`
- * fejlécet, a WS hub a `token` paramétert hasonlítja vele, így a kettő nem térhet el egymástól.
+ * True if the presented value is the secret, byte for byte. The hook server compares the whole
+ * `Bearer <token>` header with it, the WS hub the `token` parameter, so the two cannot drift apart.
  *
- * Állandó idejű összevetés (`timingSafeEqual`). Loopbacken egy 128 bites token ellen az időzítéses
- * támadás nem reális, ez higiénia. A hossz-ellenőrzés előtte kell, mert a `timingSafeEqual`
- * eltérő hosszú bufferekre dob. A hossz így kiderülhet, de az a tokennél rögzített (32 hexa jegy).
+ * A constant-time comparison (`timingSafeEqual`). On loopback a timing attack against a 128-bit
+ * token is not realistic; this is hygiene. The length check must come first, because
+ * `timingSafeEqual` throws on buffers of different length. That can reveal the length, but for the
+ * token it is fixed (32 hex digits).
  */
 export function matchesSecret(presented: string | null | undefined, secret: string): boolean {
   if (presented === undefined || presented === null) return false

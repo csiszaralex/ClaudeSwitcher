@@ -8,8 +8,8 @@ describe('Hub', () => {
   })
 
   it('logs an HTTP server error instead of letting it escape as an uncaught exception', async () => {
-    // A ws a szerver `error` eseményét a WebSocketServeren újra kibocsátja. Figyelő nélkül ez
-    // egy EventEmitter `error` lenne, ami dob, és a main processzben elkapatlan kivétel lenne.
+    // ws re-emits the server's `error` event on the WebSocketServer. Without a listener this would be an
+    // EventEmitter `error`, which throws, and an uncaught exception in the main process.
     const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const server = createServer()
     const hub = new Hub(server, 'token')

@@ -52,7 +52,7 @@ async function readRecords(claudeDir: string): Promise<SessionRecord[]> {
   return records.filter((r): r is SessionRecord => r !== null)
 }
 
-/** A fájl utolsó írása (ms), vagy `undefined`, ha nem kérdezhető le. Soha nem dob. */
+/** The file's last write (ms), or `undefined` when it cannot be read. Never throws. */
 async function mtimeOf(filePath: string): Promise<number | undefined> {
   try {
     return (await stat(filePath)).mtimeMs
@@ -62,9 +62,9 @@ async function mtimeOf(filePath: string): Promise<number | undefined> {
 }
 
 /**
- * Az IDE lock fájlok, mindegyik az utolsó írása idejével (`mtimeMs`). Az idő a pid-újrahasznosítás
- * felismeréséhez kell (lásd core `lockPredatesProcess`). Csak olvasunk: a `~/.claude` nem a miénk,
- * egy elavult lockot sem törlünk, csak nem párosítunk vele.
+ * The IDE lock files, each with the time of its last write (`mtimeMs`). The time is needed to detect
+ * pid reuse (see core `lockPredatesProcess`). Read only: `~/.claude` is not ours, so a stale lock is
+ * not deleted either, only not paired.
  */
 async function readLocks(claudeDir: string): Promise<IdeLock[]> {
   const dir = ideDir(claudeDir)
@@ -83,8 +83,8 @@ async function readLocks(claudeDir: string): Promise<IdeLock[]> {
 }
 
 /**
- * Az útvonalak, amelyek hibájáról már szóltunk. A poll 3 másodpercenként fut: egy tartósan
- * olvashatatlan fájl különben percenként húszszor írná tele a logot ugyanazzal.
+ * The paths whose error was already reported. The poll runs every 3 seconds: a file that stays
+ * unreadable would otherwise fill the log with the same line twenty times a minute.
  */
 const reported = new Set<string>()
 
@@ -99,7 +99,7 @@ async function readSubagentMeta(metaPath: string): Promise<SubagentMeta> {
   try {
     raw = await readFile(metaPath, 'utf8')
   } catch (error) {
-    // Hiányzó meta: nincs címke, de a subagent attól még futhat, az elavulási ablak határolja.
+    // A missing meta file: no label, but the subagent may still run; the stale window bounds it.
     if (!isMissingPathError(error)) reportOnce(metaPath, 'subagent meta read', error)
     return { finished: false }
   }
@@ -112,15 +112,16 @@ async function readSubagentMeta(metaPath: string): Promise<SubagentMeta> {
 }
 
 /**
- * A session aktív subagentjei, a legutóbb írt elöl. Költség pollonként: egy readdir, egy stat
- * minden `agent-*.jsonl`-re (a legfrissebbek kiválasztásához kell), legfeljebb
- * `SUBAGENT_META_LIMIT` meta-olvasás az elavulási ablakon belül, és a transcript vége csak a
- * legfrissebb `SUBAGENT_SCAN_LIMIT` NEM KÉSZ subagentnél. Soha nem dob: egy hibás fájl csak a
- * saját subagentjét viszi el.
+ * The session's active subagents, the most recently written first. Cost per poll: one readdir, one
+ * stat for every `agent-*.jsonl` (needed to pick the most recent ones), at most
+ * `SUBAGENT_META_LIMIT` meta reads within the stale window, and the transcript tail only for the
+ * `SUBAGENT_SCAN_LIMIT` most recent UNFINISHED subagents. Never throws: a faulty file takes only its
+ * own subagent with it.
  *
- * @param heldAgents a függő döntéssel bíró subagentek. Ezek koruktól és a korláttól függetlenül
- * bekerülnek: egy engedélyre váró subagent nem ír, így az elavulási ablak után a címkéje eltűnne a
- * döntési panelről. A plusz költség legfeljebb függő döntésenként egy meta és egy transcript-vég.
+ * @param heldAgents the subagents with a pending decision. They are included regardless of their age
+ * and of the limit: a subagent waiting for a permission writes nothing, so after the stale window its
+ * label would disappear from the decision panel. The extra cost is at most one meta file and one
+ * transcript tail per pending decision.
  */
 async function readSubagents(
   transcript: string,
@@ -146,15 +147,15 @@ async function readSubagents(
         const info = await stat(file)
         return info.isFile() ? { agentId, mtimeMs: info.mtimeMs, file } : undefined
       } catch (error) {
-        // A readdir és a stat között törölt fájl normális; minden más egyszer a logba.
+        // A file deleted between the readdir and the stat is normal; anything else goes to the log once.
         if (!isMissingPathError(error)) reportOnce(file, 'subagent stat', error)
         return undefined
       }
     }),
   )
   const listed = files.filter((file) => file !== undefined)
-  // Előbb a kész subagentek kiszűrése, CSAK utána a darabszám-korlát: különben néhány frissen
-  // befejezett subagent eltakarná a még futót (lásd SUBAGENT_META_LIMIT).
+  // First filter out the finished subagents, and ONLY then apply the count limit: otherwise a few
+  // just-finished subagents would hide one still running (see SUBAGENT_META_LIMIT).
   const recent = pickRecentSubagentFiles(listed, now, SUBAGENT_META_LIMIT)
   const held = listed.filter((file) => heldAgents.has(file.agentId) && !recent.includes(file))
   const withMeta = await Promise.all(
@@ -165,7 +166,7 @@ async function readSubagents(
   )
   const unfinished = withMeta.filter(({ meta }) => !meta.finished)
   const limited = unfinished.filter(({ agentId }) => !heldAgents.has(agentId)).slice(0, SUBAGENT_SCAN_LIMIT)
-  // A függő döntésű subagent a korláton felül is marad; a sorrend a legutóbb írt elöl.
+  // A subagent with a pending decision stays even beyond the limit; the order is most recently written first.
   const active = unfinished
     .filter((candidate) => heldAgents.has(candidate.agentId) || limited.includes(candidate))
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -185,17 +186,17 @@ async function readSubagents(
   )
 }
 
-/** Egy session olvasott állapota: a fő transcript aktivitása és az aktív subagentjei. */
+/** The state read for one session: the main transcript's activity and its active subagents. */
 interface SessionReading {
   activity: SessionActivity
   subagents: SubagentView[]
 }
 
 /**
- * Egy teljes állapot-pillanatkép: élő sessionök, párosított ablakok, aktivitás, aktív subagentek.
+ * A full state snapshot: live sessions, paired windows, activity, active subagents.
  *
- * @param heldAgents azon subagentek `agentId`-ja, amelyeknek most függő döntésük van (a daemon a
- * brokertől veszi). Ezek akkor is bekerülnek, ha régen írtak; lásd `readSubagents`.
+ * @param heldAgents the `agentId` of the subagents that have a pending decision now (the daemon takes
+ * them from the broker). They are included even when they wrote long ago; see `readSubagents`.
  */
 export async function scanSessions(
   claudeDir: string,
@@ -205,11 +206,11 @@ export async function scanSessions(
 ): Promise<{
   sessions: LiveSession[]
   activities: Map<string, SessionActivity>
-  /** Csak a legalább egy aktív subagenttel bíró sessionök szerepelnek benne. */
+  /** Holds only the sessions with at least one active subagent. */
   subagents: Map<string, SubagentView[]>
 }> {
-  // A probe szinkron válaszai a legutóbbi pillanatképből jönnek, ezért előbb frissítünk,
-  // a fájlolvasással párhuzamosan. A frissítés nem blokkol, és soha nem utasít el.
+  // The probe's synchronous answers come from its latest snapshot, so it is refreshed first, in
+  // parallel with the file reads. The refresh does not block and never rejects.
   const [records, locks] = await Promise.all([readRecords(claudeDir), readLocks(claudeDir), probe.refresh()])
   const sessions = resolveLiveSessions(records, locks, probe)
 
@@ -221,10 +222,9 @@ export async function scanSessions(
         const [lines, subagents] = await Promise.all([tailLines(transcript), readSubagents(transcript, now, heldAgents)])
         return [record.sessionId, { activity: readActivityFromLines(lines), subagents }]
       } catch (error) {
-        // Védelem mélységben. A `Promise.all` egyetlen elutasításra eldobná az
-        // egész szkennelést, vagyis MINDEN session eltűnne a listáról egy
-        // olvashatatlan transcript miatt. A hívottak már best-effortok; ez arra
-        // véd, ha egy későbbi módosítás behoz ide valami dobni képeset.
+        // Defence in depth. `Promise.all` would drop the whole scan on a single rejection, so EVERY
+        // session would vanish from the list because of one unreadable transcript. The callees are
+        // best-effort already; this guards against a later change bringing in something that throws.
         console.error(`[scan] activity read failed for ${record.sessionId}`, error)
         return [record.sessionId, { activity: {}, subagents: [] }]
       }

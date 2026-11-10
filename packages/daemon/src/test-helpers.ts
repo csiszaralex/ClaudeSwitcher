@@ -1,4 +1,4 @@
-/** Addig olvas, amíg a lista nem üres, és azt adja vissza. Időtúllépésnél dob. */
+/** Reads until the list is not empty and returns it. Throws on a timeout. */
 export async function waitFor<T>(read: () => T[] | Promise<T[]>, timeoutMs = 2000): Promise<T[]> {
   const started = Date.now()
   for (;;) {

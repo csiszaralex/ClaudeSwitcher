@@ -32,8 +32,8 @@ export interface HookEvents {
   onNotification(event: NotificationEvent): void | Promise<void>
   onLifecycle(event: LifecycleEvent): void | Promise<void>
   /**
-   * A hook válasza: döntés, vagy `undefined` = nincs döntés (üres 200, a natív prompt marad).
-   * A `signal` a hook-kliens kapcsolata: akkor bomlik, ha a kliens a válasz előtt bontja.
+   * The hook's answer: a decision, or `undefined` = no decision (an empty 200, the native prompt stays).
+   * The `signal` is the hook client's connection: it aborts when the client disconnects before the answer.
    */
   onPermissionRequest(request: PermissionRequestInfo, signal: AbortSignal): Promise<HookDecisionBody | undefined>
   onPreToolUse(event: ToolUseEvent): void
@@ -42,14 +42,13 @@ export interface HookEvents {
 }
 
 /**
- * Egy hook-kezelő hibája soha nem eshet ki a route-ból. A szinkron dobást a
- * hívást körülvevő try/catch fogja el; az aszinkron elutasítást ez.
+ * A hook handler's error must never escape the route. A synchronous throw is caught by the try/catch
+ * around the call; an asynchronous rejection by this.
  *
- * Ez nem elméleti: a kezelők `void | Promise<void>`-ot adhatnak vissza, és egy
- * elkapatlan elutasítás alapértelmezett Node beállításokkal **az egész daemont
- * megölné**, vagyis minden session hook-kezelését, nem csak ezt az egy hívást.
- * Szándékosan nem `await`-eljük: a válasz azonnal megy, a kezelő a maga
- * tempójában fut.
+ * This is not theoretical: the handlers may return `void | Promise<void>`, and with the default Node
+ * settings an unhandled rejection **would kill the whole daemon**, that is the hook handling of every
+ * session, not only this one call. It is deliberately not awaited: the answer goes at once, and the
+ * handler runs at its own pace.
  */
 function contain(result: void | Promise<void>, what: string): void {
   void Promise.resolve(result).catch((error: unknown) => {
@@ -65,29 +64,29 @@ function toolUseEvent(b: Record<string, unknown>): ToolUseEvent | undefined {
   if (sessionId === undefined || toolName === undefined || toolUseId === undefined || !isRecord(toolInput)) {
     return undefined
   }
-  // Subagentnél ott van; a mezőnév a mért permissionRequest_subagent és subagentStop fixture-ökből.
+  // Present for a subagent; the field name comes from the measured permissionRequest_subagent and subagentStop fixtures.
   const agentId = nonEmptyString(b['agent_id'])
   return { sessionId, ...(agentId === undefined ? {} : { agentId }), toolName, toolInput, toolUseId }
 }
 
 /**
- * A daemon hook-szervere. A display-only route-ok feltétel nélkül 200-at adnak üres törzzsel: a
- * szerver hibája soha nem akaszthat meg egy sessiont. A PermissionRequest route a döntést tartja,
- * de bármilyen hiba esetén ott is üres 200 megy. Mérve, hogy ezt a Claude Code „nincs döntés"-nek
- * veszi, nem tiltásnak.
+ * The daemon's hook server. The display-only routes answer 200 with an empty body unconditionally:
+ * an error of the server must never block a session. The PermissionRequest route holds the decision,
+ * but on any error it also sends an empty 200. Measured: Claude Code takes that as "no decision", not
+ * as a denial.
  */
 export function createHookApp(token: string, events: HookEvents, rawLogPath?: string): Hono {
   const app = new Hono()
 
   /**
-   * Kiírja a NYERS hook-törzset, ha kértek naplót. Alapból kikapcsolva.
+   * Writes the RAW hook body when a log was requested. Off by default.
    *
-   * Azért a nyers törzs, és nem a kiolvasott mezők: a hookok tényleges alakja nincs
-   * dokumentálva, tehát épp a saját értelmezésünk a leggyanúsabb. Ha rossz mezőnevet
-   * olvasunk, a feldolgozott adat ugyanúgy hiányos lesz, a nyers viszont megmutatja.
+   * The raw body, not the fields read from it: the real shape of the hooks is undocumented, so our
+   * own parsing is the most suspect part. When a wrong field name is read, the parsed data is just as
+   * incomplete, but the raw body shows it.
    *
-   * Soha nem vár rá a válasz, és egy írási hiba sem látszik a hívón: egy diagnosztika
-   * nem akaszthat meg egy sessiont.
+   * The answer never waits for it, and a write error is not visible to the caller: a diagnostic must
+   * not block a session.
    */
   function record(route: string, body: unknown): void {
     if (rawLogPath === undefined) return
@@ -142,8 +141,8 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
         sessionId,
         cwd: nonEmptyString(b['cwd']) ?? '',
         type,
-        // A Claude Code `message`-ben küldi, a CLAUDESWITCHER_HOOK_LOG nyers naplójából
-        // mérve. A `notification_text` csak tartalék, ha egy jövőbeli verzió átnevezné.
+        // Claude Code sends it in `message`, measured from the raw CLAUDESWITCHER_HOOK_LOG log.
+        // `notification_text` is only a fallback in case a future version renames it.
         text: nonEmptyString(b['message']) ?? nonEmptyString(b['notification_text']),
       }),
       'notification',
@@ -180,14 +179,14 @@ export function createHookApp(token: string, events: HookEvents, rawLogPath?: st
       record(hookPath('permission-request'), b)
       const request = parsePermissionRequest(b)
       if (request === undefined) return c.body(null, 200)
-      // A @hono/node-server ezt a jelet bontja, ha a válasz befejezése előtt zárul a kapcsolat
-      // (megszakítás a VSCode-ban, a session processzének halála), valódi szerverrel tesztelve.
+      // @hono/node-server aborts this signal when the connection closes before the answer is finished
+      // (cancelled in VS Code, the session's process died), tested with a real server.
       const decision = await events.onPermissionRequest(request, c.req.raw.signal)
       if (decision === undefined) return c.body(null, 200)
       return c.body(JSON.stringify(decision), 200, { 'content-type': 'application/json' })
     } catch (error) {
-      // Bármilyen hiba itt „nincs döntés": a natív prompt a VSCode-ban és a telefonon amúgy is
-      // ott van, és egy hibás hookot a Claude Code sem vesz tiltásnak (spike R3, R4).
+      // Any error here is "no decision": the native prompt is there in VS Code and on the phone anyway,
+      // and Claude Code does not take a failing hook as a denial either (spike results R3, R4).
       console.error('[hook] permission request failed', error)
       return c.body(null, 200)
     }

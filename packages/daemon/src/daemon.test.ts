@@ -23,9 +23,10 @@ async function fixture(): Promise<string> {
 }
 
 /**
- * Megvárja, hogy a szerver minden eddig küldött üzenete megérkezzen. A ws szerver a pingre pongot
- * küld (`autoPong`, alapból be), és egy socketen a keretek sorrendben jönnek, így a pong előtt
- * minden korábbi üzenet megjött. A ping maga nem vált ki állapotüzenetet, nem torzítja a számlálást.
+ * Waits until every message the server has sent so far has arrived. The ws server answers a ping with
+ * a pong (`autoPong`, on by default), and the frames on one socket arrive in order, so every earlier
+ * message has arrived before the pong. The ping itself triggers no state message and does not skew
+ * the count.
  */
 async function drained(socket: WebSocket): Promise<void> {
   const pong = new Promise((resolve) => socket.once('pong', resolve))
@@ -73,8 +74,8 @@ describe('startDaemon', () => {
   })
 
   it('accepts a websocket connection carrying the right token', async () => {
-    // Pozitív kontroll. Enélkül a két elutasítós teszt akkor is átmenne, ha a
-    // kapcsolat valami tőlünk független okból hiúsulna meg.
+    // The positive control. Without it the two rejection tests would also pass if the connection
+    // failed for some reason unrelated to us.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
 
@@ -84,8 +85,8 @@ describe('startDaemon', () => {
   })
 
   /**
-   * A kliens felől: hitelesítetlen kérésre a szerver a 101 helyett HTTP-választ ad, amit a `ws`
-   * kliens `unexpected-response`-ként jelez. Nyitás (`open`) ilyenkor nincs.
+   * From the client's side: to an unauthenticated request the server sends an HTTP response instead
+   * of the 101, which the `ws` client reports as `unexpected-response`. There is no `open` then.
    */
   async function upgradeRejection(url: string): Promise<{ status: number | undefined; opened: boolean }> {
     const socket = new WebSocket(url)
@@ -98,7 +99,7 @@ describe('startDaemon', () => {
         resolve(response.statusCode)
         response.resume()
       })
-      // Egy 101 utáni bezárás is ide futna: így a régi, kézfogás utáni elutasítás bukó teszt.
+      // A close after a 101 also ends up here, so a rejection after the handshake (the old way) fails the test.
       socket.on('close', () => {
         resolve(undefined)
       })
@@ -127,10 +128,10 @@ describe('startDaemon', () => {
   })
 
   it('does not re-broadcast an unchanged state, but does report every scan', async () => {
-    // Két külön szerződés, és a kettő együtt a lényeg. Azonos PILLANATKÉPET nem küldünk
-    // újra — a poll másodpercenként fut, az hússzor annyi azonos üzenet lenne percenként.
-    // Viszont MINDEN szkennelés után megy egy életjel, különben a kliens nem tudná
-    // megkülönböztetni azt, hogy „élünk, nincs változás", attól, hogy „megállt a poll".
+    // Two separate contracts, and the point is the two together. An identical SNAPSHOT is not sent
+    // again: the poll runs every 3 seconds, which would be twenty identical messages a minute. But a
+    // heartbeat goes out after EVERY scan, or the client could not tell "alive, no change" from "the
+    // poll stopped".
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     await running.refresh()
 
@@ -164,13 +165,13 @@ describe('startDaemon', () => {
     })
     await new Promise((resolve) => socket.on('open', resolve))
 
-    // Az első szkennelés megváltoztatja a pillanatképet (state), és utána életjelet küld (tick).
+    // The first scan changes the snapshot (state) and then sends a heartbeat (tick).
     await running.refresh()
     await gotTick
     socket.close()
 
     expect(messages.map((m) => m.type)).toEqual(['state', 'tick'])
-    // A konstans létezése is feltétel: hiányzó export mellett a két `undefined` egyezne.
+    // The constant must exist too: with a missing export the two `undefined` values would match.
     expect(DAEMON_PROTOCOL).toEqual(expect.any(Number))
     for (const message of messages) expect(message.protocol).toBe(DAEMON_PROTOCOL)
   })
@@ -182,9 +183,9 @@ describe('startDaemon', () => {
   })
 
   it('binds the port it is given, and fails loudly when that port is taken', async () => {
-    // A desktop fix portot ad, hogy a telepített hookok az újraindítás után is élők
-    // maradjanak. Egy foglalt port ezért indulási HIBA, nem csendes átállás egy másik
-    // portra — az átállás pont a telepített hookokat tenné halottá.
+    // The desktop app passes a fixed port so the installed hooks stay live after a restart. A port in
+    // use is therefore a start-up ERROR, not a silent switch to another port: the switch is exactly
+    // what would make the installed hooks dead.
     const first = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     try {
       await expect(
@@ -204,7 +205,7 @@ function postHook(daemon: Daemon, route: string, body: unknown): Promise<Respons
   })
 }
 
-describe('startDaemon — held decisions', () => {
+describe('startDaemon: held decisions', () => {
   it('holds a PermissionRequest until the user decides, then answers with the decision', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
@@ -237,7 +238,7 @@ describe('startDaemon — held decisions', () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
-    // Valódi payload, a fixture-registry sessionjéhez igazítva.
+    // A measured payload, matched to the session of the fixture registry.
     void postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
 
     await waitFor(() => daemon.state().decisions)
@@ -245,8 +246,8 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('clears the waiting row when the app decides, and ignores the late permission_prompt', async () => {
-    // Mérve (Task 10 A, F): a döntés után a sor a Stop-ig „waiting" maradt. A 6 mp-en belüli
-    // döntésnél a Notification a döntés UTÁN érkezik — azt sem szabad újra várakozásnak venni.
+    // Measured live: after the decision the row stayed "waiting" until the Stop. For a decision within
+    // 6 s the Notification arrives AFTER the decision, and that must not be taken as a new wait either.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
@@ -267,8 +268,8 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('broadcasts the decided session as no longer waiting in a single state message', async () => {
-    // Két külön frissítés között a renderer egy pillanatra egy már eldöntött, de még
-    // „waiting" sessiont látna.
+    // Between two separate updates the renderer would briefly see a session already decided but
+    // still "waiting".
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
@@ -308,7 +309,7 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('closes the row and clears the wait when a natively allowed tool fails (PostToolUseFailure)', async () => {
-    // A PostToolUseFailure a PostToolUse route-jára jön: a hibás tool is lefutott, a döntés megvolt.
+    // PostToolUseFailure comes to the PostToolUse route: the failing tool has run too, the decision was made.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
@@ -376,7 +377,7 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('keeps the label of a subagent that waits on a held decision longer than the staleness window', async () => {
-    // Konstruált subagent-fájlok a mért elrendezésben (lásd core subagent.ts), nem valódi tartalom.
+    // Constructed subagent files in the measured layout (see core subagent.ts), not real content.
     const dir = await fixture()
     const agentId = String(hookPayload('permissionRequest_subagent')['agent_id'])
     const project = path.join(dir, 'projects', 'encoded-alpha')
@@ -406,8 +407,8 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('drops a held request when the hook client disconnects — over a real socket', async () => {
-    // Megszakítás a VSCode-ban vagy a session processzének halála: nem jön se Stop, se PostToolUse,
-    // csak a kapcsolat bomlik. Nincs kinek válaszolni, a sor ne maradjon döntésre váró.
+    // Cancelled in VS Code, or the session's process died: neither a Stop nor a PostToolUse comes, only
+    // the connection closes. There is nobody to answer, and the row must not stay waiting for a decision.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     const client = new AbortController()
@@ -425,7 +426,7 @@ describe('startDaemon — held decisions', () => {
     expect(daemon.state().decisions).toEqual([])
   })
 
-  /** Egy tartott kérés, amit a teszt a kliens oldaláról bont (natív Nem vagy Esc a VSCode-ban). */
+  /** A held request that the test closes from the client's side (a native No or Esc in VS Code). */
   function abortableRequest(daemon: Daemon, body: unknown): { abort: () => Promise<void> } {
     const client = new AbortController()
     const response = fetch(`http://127.0.0.1:${daemon.port}/hooks/permission-request`, {
@@ -443,9 +444,9 @@ describe('startDaemon — held decisions', () => {
   }
 
   it('clears the waiting row in a single state message when the native prompt is answered after the Notification', async () => {
-    // Mérve (2026-10-25): natív Nem vagy Esc után nem jön Stop, PostToolUse vagy Notification,
-    // csak a tartott kapcsolat bomlik. ~6 mp várakozás után a permission_prompt már beállította
-    // a várakozást, és azt semmi más nem törölné.
+    // Measured (2026-10-25): after a native No or Esc no Stop, PostToolUse or Notification comes, only
+    // the held connection closes. After about 6 s of waiting the permission_prompt has already set the
+    // wait, and nothing else would clear it.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
@@ -499,7 +500,7 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('takes a permission_prompt after a native answer as a real wait, unlike after an app decision', async () => {
-    // Natív válasz 6 mp-en belül nem küld Notificationt; egy később érkező így egy új prompté.
+    // A native answer within 6 s sends no Notification, so one arriving later belongs to a new prompt.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running
     await daemon.refresh()
@@ -513,7 +514,7 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('answers held requests on stop instead of hanging the shutdown', async () => {
-    // A tartott kapcsolatok miatt a server.close() különben soha nem térne vissza.
+    // Because of the held connections server.close() would otherwise never return.
     const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const response = postHook(daemon, '/hooks/permission-request', hookPayload('permissionRequest_bash'))
     await waitFor(() => daemon.state().decisions)
@@ -525,15 +526,15 @@ describe('startDaemon — held decisions', () => {
   })
 
   it('stops without waiting for a connection that has not sent a request yet', async () => {
-    // Ilyet a Node fetch nyit egy megszakított tartott kérés után. A javítás nélkül a stop() a
-    // kliens bontásáig állna, ez a kliens pedig nem bont: a teszt időtúllépéssel bukna.
+    // The Node fetch opens such a connection after an aborted held request. Without the fix stop()
+    // would wait until the client closes it, and this client does not: the test would time out.
     const daemon = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const silent = connect(daemon.port, '127.0.0.1')
     const closed = new Promise((resolve) => silent.on('close', resolve))
     silent.on('error', () => undefined)
     await new Promise((resolve) => silent.on('connect', resolve))
-    // Egy teljes kérés egy MÁSIK kapcsolaton: a szerver a beérkezés sorrendjében fogadja a
-    // kapcsolatokat, így a válasz idejére a néma kapcsolatot is elfogadta.
+    // A full request on ANOTHER connection: the server accepts the connections in the order they
+    // arrive, so by the time of the answer it has accepted the silent one too.
     expect((await postHook(daemon, '/hooks/notification', hookPayload('notification_permissionPrompt'))).status).toBe(200)
 
     await daemon.stop()

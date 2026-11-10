@@ -9,30 +9,31 @@ import {
 } from '@claudeswitcher/core'
 
 /**
- * Egy ELENGEDETT kérés ennyi ideig marad meg azután, hogy a sessionje kiesett a registry
- * pillanatképéből: tíz poll-kör (`POLL_INTERVAL_MS`), így egy kimaradt vagy félig írt registry-fájl nem
- * zár le egy élő sessiont. Ha a session processze meghalt, SessionEnd nem jön, e nélkül a sor
- * örökre megmaradna. A még dönthető kérést ez SOHA nem zárja (spec §8: a jóváhagyás felderítés
- * nélkül is működik); azt a hook-kliens bontása zárja, ami a processz halálával együtt jár.
+ * A RELEASED request is kept this long after its session dropped out of the registry snapshot: ten
+ * polls (`POLL_INTERVAL_MS`), so a missed or half-written registry file does not close a live
+ * session. When the session's process died, no SessionEnd comes, and without this the row would
+ * stay forever. A request that can still be decided is NEVER closed by this (design doc, section 8:
+ * approving works without the discovery); that one is closed by the hook client disconnecting,
+ * which comes with the process's death.
  */
 export const ABSENT_SESSION_GRACE_MS = 10 * POLL_INTERVAL_MS
 
-/** Ennyi ideig vár egy PreToolUse arra, hogy megérkezzen a hozzá tartozó PermissionRequest. */
+/** How long a PreToolUse waits for its PermissionRequest to arrive. */
 const PRE_TOOL_USE_TTL_MS = 60_000
-/** Felső korlát a párosítatlan PreToolUse-okra, hogy egy sűrű session se szivárogjon. */
+/** An upper bound on the unmatched PreToolUse events, so even a busy session does not leak. */
 const PRE_TOOL_USE_CAP = 500
 
 export interface PendingDecisionView extends PermissionRequestInfo {
   id: string
   createdAt: number
-  /** Igaz, ha az app elengedte (`PERMISSION_RELEASE_AFTER_MS` után): onnan már csak a VSCode-ban vagy a telefonon dönthető. */
+  /** True once the app released it (after `PERMISSION_RELEASE_AFTER_MS`): from then on it can be decided only in VS Code or on the phone. */
   released: boolean
 }
 
-/** Egy tool-hívás a PreToolUse / PostToolUse hookból. */
+/** A tool call from the PreToolUse / PostToolUse hook. */
 export interface ToolUseEvent {
   sessionId: string
-  /** A subagent `agent_id`-ja; a fő agent hívásánál nincs. A subagent a szülő session_id-jával jön. */
+  /** The subagent's `agent_id`; absent for a call of the main agent. A subagent comes with the parent's session_id. */
   agentId?: string | undefined
   toolName: string
   toolInput: Record<string, unknown>
@@ -41,12 +42,12 @@ export interface ToolUseEvent {
 
 export type DecideResult = { ok: true } | { ok: false; reason: string }
 
-/** Egy változás oka, amit a figyelők a puszta „történt valami"-n túl megkapnak. */
+/** The cause of a change, which the listeners get beyond a bare "something happened". */
 export interface DecisionChange {
   /**
-   * A session, amelynek egy kérését ez a változás azért zárta le, mert a hook-kliens bontotta a
-   * kapcsolatot (natív Nem vagy Esc a VSCode-ban, vagy a session processzének halála). Minden más
-   * változásnál `undefined`.
+   * The session one of whose requests this change closed because the hook client closed the
+   * connection (a native No or Esc in VS Code, or the death of the session's process). `undefined`
+   * on every other change.
    */
   readonly abortedSessionId: string | undefined
   /**
@@ -59,7 +60,7 @@ export interface DecisionChange {
 
 const NO_ABORT: DecisionChange = { abortedSessionId: undefined }
 
-/** Az idő és az időzítők. Tesztben hamisítható, hogy az elengedési időt ne kelljen kivárni. */
+/** Time and timers. Fakeable in tests, so the release time need not be waited out. */
 export interface BrokerClock {
   now(): number
   setTimeout(callback: () => void, ms: number): unknown
@@ -70,7 +71,7 @@ const systemClock: BrokerClock = {
   now: () => Date.now(),
   setTimeout: (callback, ms) => {
     const handle = setTimeout(callback, ms)
-    // Egy tartott döntés ne tartsa életben a processzt kilépéskor.
+    // A held decision must not keep the process alive on exit.
     handle.unref()
     return handle
   },
@@ -84,14 +85,14 @@ interface Pending {
   key: string
   toolUseId: string | undefined
   timer: unknown
-  /** Mióta hiányzik a sessionje a registry pillanatképéből; `undefined`, ha ott van. */
+  /** Since when its session is missing from the registry snapshot; `undefined` while it is there. */
   absentSince: number | undefined
-  /** A kliens-bontás figyelőjének levétele. Lezáráskor és elengedéskor fut. */
+  /** Removes the client disconnect listener. Runs on close and on release. */
   detach: () => void
   respond: (body: HookDecisionBody | undefined) => void
 }
 
-/** Kulcssorrendtől független szerializálás, hogy a PreToolUse és a PermissionRequest bemenete egyezzen. */
+/** Serialisation independent of key order, so the PreToolUse and the PermissionRequest input match. */
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
   if (typeof value === 'object' && value !== null) {
@@ -102,9 +103,9 @@ function stable(value: unknown): string {
 }
 
 /**
- * A Pre és a PermissionRequest párosításának kulcsa. Az `agentId` azért van benne, mert egy subagent
- * a szülő session_id-jával kér: nélküle a fő agent és egy subagent azonos parallel hívása egymás
- * azonosítóját vihetné el.
+ * The key that pairs a PreToolUse with its PermissionRequest. `agentId` is part of it because a
+ * subagent requests with the parent's session_id: without it the same parallel call of the main
+ * agent and of a subagent could take each other's id.
  */
 function callKey(
   sessionId: string,
@@ -116,13 +117,13 @@ function callKey(
 }
 
 /**
- * A tartott PermissionRequest-ek tulajdonosa: a rendszer egyetlen valódi konkurens állapotgépe.
+ * The owner of the held PermissionRequests: the only real concurrent state machine of the system.
  *
- * Három forrásból jöhet döntés, és az első nyer: az app (`decide`), a VSCode vagy a telefon
- * (`postToolUse`, `sessionStopped`, `sessionEnded`, `subagentStopped`), illetve az elengedés.
- * Válasz nélkül zár a hook-kliens bontása és az eltűnt session elengedett kérésének takarítása
- * (`pruneAbsent`). Minden tartott kérés pontosan egyszer kap választ: ezt a `respond` saját
- * zára garantálja, akármelyik út ér oda elsőnek.
+ * A decision can come from three sources, and the first one wins: the app (`decide`), VS Code or the
+ * phone (`postToolUse`, `sessionStopped`, `sessionEnded`, `subagentStopped`), or the release. The hook
+ * client disconnecting and the clean-up of a vanished session's released request (`pruneAbsent`)
+ * close without an answer. Every held request gets exactly one answer: the `respond` function's own
+ * latch guarantees it, whichever path gets there first.
  */
 export class DecisionBroker {
   readonly #clock: BrokerClock
@@ -130,7 +131,7 @@ export class DecisionBroker {
   readonly #pending = new Map<string, Pending>()
   readonly #listeners: Array<(change: DecisionChange) => void> = []
   #recentPre: Array<{ key: string; toolUseId: string; at: number }> = []
-  /** A `releaseAll` után igaz: a daemon leáll, új kérést már nem tartunk. */
+  /** True after `releaseAll`: the daemon is shutting down and no new request is held. */
   #closed = false
 
   constructor(clock: BrokerClock = systemClock, releaseAfterMs: number = PERMISSION_RELEASE_AFTER_MS) {
@@ -143,14 +144,14 @@ export class DecisionBroker {
   }
 
   /**
-   * A kérés tartása. A visszaadott ígéret a hook válaszával teljesül; `undefined` = nincs döntés.
+   * Holds the request. The returned promise resolves with the hook's answer; `undefined` = no decision.
    *
-   * @param signal A hook-kliens kapcsolata. Ha bomlik (megszakítás a VSCode-ban, a session
-   * processzének halála), nincs kinek válaszolni: a kérés válasz nélkül lezárul, és eltűnik a sorból.
+   * @param signal The hook client's connection. When it closes (cancelled in VS Code, the session's
+   * process died), there is nobody to answer: the request closes without an answer and leaves the list.
    */
   hold(request: PermissionRequestInfo, signal?: AbortSignal): Promise<HookDecisionBody | undefined> {
-    // Leállás után (releaseAll) semmit nem tartunk: egy ilyenkor érkező kérés különben a
-    // server.close()-t az elengedésig feltartaná. Az üres 200 „nincs döntés", a natív prompt marad.
+    // Nothing is held after shutdown (releaseAll): a request arriving then would otherwise hold up
+    // server.close() until the release. The empty 200 is "no decision", the native prompt stays.
     if (this.#closed || signal?.aborted === true) return Promise.resolve(undefined)
 
     const id = randomUUID()
@@ -186,7 +187,7 @@ export class DecisionBroker {
     })
   }
 
-  /** A felhasználó döntése az appból. Érvénytelen döntésnél a kérés függőben marad. */
+  /** The user's decision from the app. On an invalid decision the request stays pending. */
   decide(id: string, decision: UserDecision): DecideResult {
     const pending = this.#pending.get(id)
     if (pending === undefined) return { ok: false, reason: 'Ez a kérés már lezárult.' }
@@ -199,10 +200,10 @@ export class DecisionBroker {
     return { ok: true }
   }
 
-  /** A PreToolUse hozza a `tool_use_id`-t, ami a PermissionRequest-ből hiányzik. */
+  /** The PreToolUse brings the `tool_use_id` that the PermissionRequest lacks. */
   preToolUse(event: ToolUseEvent): void {
     const key = callKey(event.sessionId, event.agentId, event.toolName, event.toolInput)
-    // Ha a PermissionRequest valamiért előbb ért ide, most kötjük hozzá.
+    // If the PermissionRequest got here first for some reason, it is bound now.
     for (const pending of this.#pending.values()) {
       if (pending.key === key && pending.toolUseId === undefined) {
         pending.toolUseId = event.toolUseId
@@ -217,10 +218,12 @@ export class DecisionBroker {
   }
 
   /**
-   * A tool lefutott (sikerrel vagy hibával), a döntés tehát máshol (VSCode, telefon) már megszületett.
+   * The tool has run (successfully or with an error), so the decision was already made elsewhere
+   * (VS Code, phone).
    *
-   * A hívás Pre-je is kikerül a sorból, ha még ott van: egy engedély nélkül lefutott hívásé ott
-   * maradna 60 mp-ig, és egy azonos, de már engedélyt kérő hívás a régi azonosítót kapná.
+   * The call's Pre also leaves the list if it is still there: the Pre of a call that ran without a
+   * permission would stay there for 60 s, and an identical call that does ask for permission would
+   * get the old id.
    */
   postToolUse(event: { sessionId: string; toolUseId: string }): void {
     this.#recentPre = this.#recentPre.filter((entry) => entry.toolUseId !== event.toolUseId)
@@ -228,29 +231,30 @@ export class DecisionBroker {
   }
 
   /**
-   * A session fő köre véget ért (Stop): a FŐ agent kérései már nem függnek. A subagentéi igen: egy
-   * `run_in_background` subagent a Stop után is fut, és a szülő session_id-jával kér. Azokat a
-   * SubagentStop, a PostToolUse, a kliens bontása vagy a SessionEnd zárja.
+   * The session's main turn ended (Stop): the MAIN agent's requests are no longer pending. The
+   * subagents' requests still are: a `run_in_background` subagent keeps running after the Stop and
+   * requests with the parent's session_id. Those are closed by the SubagentStop, the PostToolUse,
+   * the client disconnecting or the SessionEnd.
    */
   sessionStopped(sessionId: string): void {
     this.#closeWhere((pending) => pending.view.sessionId === sessionId && pending.view.agentId === undefined)
   }
 
-  /** A session véget ért (SessionEnd): a subagentjeivel együtt nála már semmi nem függ. */
+  /** The session ended (SessionEnd): nothing is pending for it any more, its subagents included. */
   sessionEnded(sessionId: string): void {
     this.#closeWhere((pending) => pending.view.sessionId === sessionId)
   }
 
-  /** Egy subagent leállt. A szülő session_id-ján fut, ezért az agent_id dönt. */
+  /** A subagent stopped. It runs under the parent's session_id, so the agent_id decides. */
   subagentStopped(sessionId: string, agentId: string): void {
     this.#closeWhere((pending) => pending.view.sessionId === sessionId && pending.view.agentId === agentId)
   }
 
   /**
-   * A registry friss pillanatképe után: az ELENGEDETT kéréseket, amelyek sessionje a türelmi
-   * időnél régebben hiányzik, lezárja (lásd ABSENT_SESSION_GRACE_MS). A hiány kezdetét minden
-   * kérésnél követi, így egy épp most elengedett kérés is azonnal lezárul, ha a sessionje már rég
-   * eltűnt. Csak sikeres szkennelés után hívandó: egy elbukott szkennelés nem „üres registry".
+   * After a fresh registry snapshot: closes the RELEASED requests whose session has been missing for
+   * longer than the grace period (see ABSENT_SESSION_GRACE_MS). It tracks the start of the absence for
+   * every request, so a request released just now also closes at once if its session vanished long
+   * ago. Call it only after a successful scan: a failed scan is not an "empty registry".
    */
   pruneAbsent(liveSessionIds: ReadonlySet<string>): void {
     const now = this.#clock.now()
@@ -264,7 +268,7 @@ export class DecisionBroker {
     })
   }
 
-  /** Minden tartott kérés elengedése a daemon leállásakor, a `server.close()` ELŐTT. */
+  /** Releases every held request when the daemon shuts down, BEFORE `server.close()`. */
   releaseAll(): void {
     this.#closed = true
     for (const pending of this.#pending.values()) {
@@ -291,11 +295,11 @@ export class DecisionBroker {
   }
 
   /**
-   * A legrégebbi, még párosítatlan azonos PreToolUse. Mért sorrend: PreToolUse, majd ~15 ms-mal
-   * később a PermissionRequest, és a Claude Code a kéréseket a hívások sorrendjében küldi. Két
-   * azonos hívásnál a Pre(id1), Pre(id2), A, B sorrendben az A az id1-é: a legújabbtól keresve
-   * felcserélődnének, és az id1 PostToolUse-a a B-t zárná le. Az összefésült Pre(id1), A,
-   * Pre(id2), B sorrendre is ez a helyes.
+   * The oldest identical PreToolUse not paired yet. Measured order: PreToolUse, then the
+   * PermissionRequest about 15 ms later, and Claude Code sends the requests in the order of the
+   * calls. For two identical calls in the order Pre(id1), Pre(id2), A, B, A belongs to id1: searching
+   * from the newest would swap them, and id1's PostToolUse would close B. This is also right for the
+   * interleaved order Pre(id1), A, Pre(id2), B.
    */
   #takeRecentPre(key: string): string | undefined {
     const now = this.#clock.now()
@@ -308,11 +312,11 @@ export class DecisionBroker {
   #release(id: string): void {
     const pending = this.#pending.get(id)
     if (pending === undefined || pending.view.released) return
-    // A válasz elment, a kapcsolat ezzel rendben lezárul: a bontás figyelése innen fölösleges.
+    // The answer has gone out and the connection closes normally: watching for a disconnect is no longer needed.
     pending.detach()
     pending.respond(undefined)
-    // A sor marad: a natív prompt is marad. Lezárni a PostToolUse, a Stop / SessionEnd /
-    // SubagentStop, vagy (ha a session eltűnt a registry-ből) a pruneAbsent fogja.
+    // The row stays, as the native prompt does. It is closed by the PostToolUse, the Stop / SessionEnd /
+    // SubagentStop, or (if the session vanished from the registry) by pruneAbsent.
     pending.view = { ...pending.view, released: true }
     this.#emit()
   }

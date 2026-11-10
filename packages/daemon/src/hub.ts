@@ -3,7 +3,7 @@ import { DAEMON_WS_PATH, DAEMON_WS_TOKEN_PARAM } from '@claudeswitcher/core'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { matchesSecret } from './token-compare.js'
 
-/** Broadcast-only WS hub: a kliensek (overlay) csak fogadnak, nem küldenek. */
+/** A broadcast-only WS hub: the clients (the overlay) only receive, they never send. */
 export class Hub {
   #wss: WebSocketServer
   #clients = new Set<WebSocket>()
@@ -12,23 +12,23 @@ export class Hub {
     this.#wss = new WebSocketServer({
       server,
       path: DAEMON_WS_PATH,
-      // A hitelesítés a kézfogás ELŐTT: egy token nélküli kérés 401-et kap, és soha nem lesz
-      // belőle WebSocket. A kézfogás utáni bezárás (1008) mellett egy idegen kliens előbb egy
-      // teljes kapcsolatot kapott volna.
+      // Authentication BEFORE the handshake: a request without the token gets a 401 and never becomes
+      // a WebSocket. With a close after the handshake (1008) a foreign client would first have got a
+      // full connection.
       verifyClient: (info, callback) => {
         const url = new URL(info.req.url ?? '/', 'http://127.0.0.1')
         if (matchesSecret(url.searchParams.get(DAEMON_WS_TOKEN_PARAM), token)) callback(true)
         else callback(false, 401, 'Unauthorized')
       },
     })
-    // A ws a HTTP szerver `error` eseményét a WebSocketServeren újra kibocsátja (ws 8.22.0,
-    // `addListeners(this._server, { error: ... })`). Figyelő nélkül egy EventEmitter `error`
-    // dob, ami a main processzben elkapatlan kivétel lenne. Itt csak naplózzuk; a szerver
-    // `error` figyelője a `startDaemon`-ban a listen után már nem tesz semmit.
+    // ws re-emits the HTTP server's `error` event on the WebSocketServer (ws 8.22.0,
+    // `addListeners(this._server, { error: ... })`). Without a listener an EventEmitter `error`
+    // throws, which would be an uncaught exception in the main process. Here it is only logged; the
+    // server's `error` listener in `startDaemon` does nothing any more after the listen.
     this.#wss.on('error', (error) => {
       console.error('[hub] server error', error)
     })
-    // Ide már csak a `verifyClient`-en átjutott, tehát hitelesített kliens ér.
+    // Only a client that passed `verifyClient`, so an authenticated one, gets here.
     this.#wss.on('connection', (socket) => {
       this.#clients.add(socket)
       socket.on('close', () => this.#clients.delete(socket))
@@ -37,12 +37,12 @@ export class Hub {
   }
 
   /**
-   * Már szerializált üzenetet küld.
+   * Sends an already serialised message.
    *
-   * Szándékosan nincs `broadcast(payload: unknown)` kényelmi változat: a daemon
-   * maga szerializál, hogy az azonos pillanatképeket ki tudja szűrni, tehát egy
-   * ilyen metódusnak nem lenne hívója. Egy hívó nélküli, teszteletlen második
-   * belépési pont rosszabb, mint a hiánya. Ha később kell, egy sor visszatenni.
+   * There is deliberately no `broadcast(payload: unknown)` convenience variant: the daemon serialises
+   * itself so it can filter out identical snapshots, so such a method would have no caller. A second,
+   * untested entry point without a caller is worse than none. If it is needed later, it is one line to
+   * add back.
    */
   broadcastRaw(message: string): void {
     for (const client of this.#clients) {

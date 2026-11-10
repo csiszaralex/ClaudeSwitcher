@@ -51,21 +51,21 @@ describe('hook app auth', () => {
 
 describe('raw hook logging', () => {
   it('writes the untouched payload when a log path is given', async () => {
-    // Azért kell, mert a hookok VALÓS alakja nincs dokumentálva: a mezőneveket csak
-    // méréssel lehet megtudni. A saját értelmezésünk ilyenkor pont a hibaforrás, ezért a
-    // nyers törzset írjuk ki, nem a kiolvasott mezőket.
+    // Needed because the REAL shape of the hooks is undocumented: the field names can only be learned
+    // by measuring. Our own parsing is then exactly the source of errors, so the raw body is written,
+    // not the fields read from it.
     const dir = await tempDir('cs-hooklog-')
     const logFile = path.join(dir, 'hooks.jsonl')
     const app = createHookApp(TOKEN, events(), logFile)
-    /** A log teljes (sorvéggel lezárt) sorai, ha már legalább `count` van belőlük. */
+    /** The log's complete (newline-terminated) lines, once there are at least `count` of them. */
     const completeLines = async (count: number): Promise<string[]> => {
       const content = await readFile(logFile, 'utf8').catch(() => '')
       const lines = content.split('\n').slice(0, -1)
       return lines.length >= count ? lines : []
     }
 
-    // Az írás tűz-és-felejts `appendFile`: a második kérés csak az első sor után megy, különben
-    // a két párhuzamos írás sorrendje nem garantált.
+    // The write is a fire-and-forget `appendFile`: the second request goes only after the first line,
+    // otherwise the order of the two parallel writes is not guaranteed.
     await post(app, '/hooks/notification', { session_id: 's1', notification_type: 'x', odd_field: 42 })
     await waitFor(() => completeLines(1))
     await post(app, '/hooks/lifecycle/stop', { session_id: 's1' })
@@ -73,13 +73,13 @@ describe('raw hook logging', () => {
     const lines = (await waitFor(() => completeLines(2))).map((l) => JSON.parse(l) as { route: string; body: Record<string, unknown> })
     expect(lines).toHaveLength(2)
     expect(lines[0]?.route).toBe('/hooks/notification')
-    // A kulcs: egy olyan mező is megmarad, amiről a kódunk nem tud.
+    // The point: a field our code does not know about is kept too.
     expect(lines[0]?.body['odd_field']).toBe(42)
     expect(lines[1]?.route).toBe('/hooks/lifecycle/stop')
   })
 
   it('still answers 200 when the log file cannot be written', async () => {
-    // A diagnosztika soha nem akaszthat meg egy sessiont.
+    // A diagnostic must never block a session.
     const app = createHookApp(TOKEN, events(), path.join(tmpdir(), 'no-such-dir-xyz', 'a.jsonl'))
     const res = await post(app, '/hooks/notification', { session_id: 's1', notification_type: 'x' })
     expect(res.status).toBe(200)
@@ -95,9 +95,9 @@ describe('raw hook logging', () => {
 
 describe('POST /hooks/notification', () => {
   it('reads the prompt text from `message`, the field Claude Code actually sends', async () => {
-    // Mérve, a CLAUDESWITCHER_HOOK_LOG nyers naplójából, egy valódi VSCode-os sessionből.
-    // A korábbi kód `notification_text`-et olvasott, ami nem létezik — a szöveg ezért
-    // minden várakozásnál üres volt, és az pont úgy nézett ki, mint ha nem jönne szöveg.
+    // Measured from the raw CLAUDESWITCHER_HOOK_LOG log of a real VS Code session. The earlier code read
+    // `notification_text`, which does not exist, so the text was empty on every wait, and that looked
+    // exactly as if no text came.
     const ev = events()
     await post(createHookApp(TOKEN, ev), '/hooks/notification', {
       session_id: '8d6721e2-3da6-4566-94fb-4030173389ee',
@@ -156,8 +156,8 @@ describe('POST /hooks/notification', () => {
   })
 
   it('contains an async handler rejection instead of letting it escape', async () => {
-    // A kezelők `void | Promise<void>`-ot adhatnak vissza. Egy elkapatlan
-    // elutasítás alapértelmezett Node beállításokkal az egész daemont megölné.
+    // The handlers may return `void | Promise<void>`. With the default Node settings an unhandled
+    // rejection would kill the whole daemon.
     const ev = events()
     const boom = new Error('async boom')
     ;(ev.onNotification as ReturnType<typeof vi.fn>).mockRejectedValue(boom)
@@ -215,7 +215,7 @@ describe('POST /statusline', () => {
   })
 })
 
-describe('M2 decision routes — measured payloads', () => {
+describe('M2 decision routes: measured payloads', () => {
   const ALLOW = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } } as const
 
   it('answers a PermissionRequest with the handler\'s decision', async () => {
@@ -236,7 +236,7 @@ describe('M2 decision routes — measured payloads', () => {
   })
 
   it('answers an empty 200 when the handler fails — never a denial', async () => {
-    // Mérve (R3, R4): egy hibás hookot a Claude Code „nincs döntés"-nek vesz, a natív prompt marad.
+    // Measured (spike results R3, R4): Claude Code takes a failing hook as "no decision", the native prompt stays.
     const ev = { ...events(), onPermissionRequest: vi.fn(() => Promise.reject(new Error('boom'))) }
     const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', hookPayload('permissionRequest_bash'))
     expect(res.status).toBe(200)
@@ -262,7 +262,7 @@ describe('M2 decision routes — measured payloads', () => {
   })
 
   it('forwards the agent_id of a subagent\'s PreToolUse', async () => {
-    // A mezőnév a mért subagent-fixture-ökből (permissionRequest_subagent, subagentStop).
+    // The field name comes from the measured subagent fixtures (permissionRequest_subagent, subagentStop).
     const agentId = hookPayload('permissionRequest_subagent')['agent_id']
     expect(agentId).toBe('ad0b11acf46ef176e')
     const ev = events()
@@ -287,7 +287,7 @@ describe('M2 decision routes — measured payloads', () => {
   })
 
   it('forwards a PostToolUseFailure on the PostToolUse route like a finished tool', async () => {
-    // A konstruált payload extra mezői (error, is_interrupt, duration_ms) nem számítanak.
+    // The extra fields of the constructed payload (error, is_interrupt, duration_ms) do not matter.
     const ev = events()
     await post(createHookApp(TOKEN, ev), '/hooks/post-tool-use', hookPayload('postToolUseFailure_bash_constructed'))
     expect(ev.onPostToolUse).toHaveBeenCalledWith({
@@ -316,8 +316,8 @@ describe('M2 decision routes — measured payloads', () => {
   })
 
   it('aborts the handler signal when the real client drops the connection', async () => {
-    // A @hono/node-server a `c.req.raw.signal`-t a válasz befejezése előtti `close`-ra bontja.
-    // Valódi szerverrel és valódi megszakított fetch-csel mérve, nem az `app.request`-tel.
+    // @hono/node-server aborts `c.req.raw.signal` on a `close` before the answer is finished. Measured
+    // with a real server and a really aborted fetch, not with `app.request`.
     let signalled: (signal: AbortSignal) => void = () => undefined
     const received = new Promise<AbortSignal>((resolve) => {
       signalled = resolve
@@ -370,7 +370,7 @@ describe('M2 decision routes — measured payloads', () => {
 
 describe('hook contract coverage', () => {
   it('has a handler for every installed hook path', async () => {
-    // Minden mező, amit bármelyik route olvas: így a kezelő akkor is lefut, ha a route csak egy részét nézi.
+    // Every field any route reads: so the handler runs even when the route looks at only some of them.
     const body = {
       ...hookPayload('permissionRequest_bash'),
       notification_type: 'permission_prompt',
