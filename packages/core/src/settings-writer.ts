@@ -235,8 +235,9 @@ async function ensureBackup(fs: SettingsFs, filePath: string): Promise<void> {
  * throws, and it does NOT call the transform or write. Better to change nothing than to lose the
  * user's settings.
  *
- * Optimistic concurrency: if the file's content changed between the read and the rename, the temp
- * file is dropped and the whole cycle is repeated on the fresh content, a bounded number of times.
+ * Optimistic concurrency: if the file's content changed between the read and the rename, or the
+ * check before the rename cannot read it, the temp file is dropped and the whole cycle is repeated
+ * on the fresh content, a bounded number of times.
  * The content is compared, not the mtime and the size: a write that leaves a file of the same size
  * within one mtime tick does not show in those. A lock file would not help, because Claude Code
  * and the editors do not know it. The gap between the last comparison and the rename remains: only
@@ -256,7 +257,9 @@ async function writeTransformed(
     if (snapshot.raw !== undefined && options.backup !== false) await ensureBackup(fs, filePath)
     const written = await writeFileAtomic(filePath, data, {
       fs,
-      beforeRename: async () => (await readRaw(fs, filePath)) === snapshot.raw,
+      // A read error here (another process holding the file for a moment) counts as a change: the
+      // next attempt reads again, and `readSnapshot` refuses in its own words if the error lasts.
+      beforeRename: () => readRaw(fs, filePath).then((raw) => raw === snapshot.raw, () => false),
     })
     if (written) return
   }

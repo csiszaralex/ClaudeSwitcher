@@ -340,6 +340,47 @@ describe('transformSettingsFile never loses the existing settings', () => {
     expect(await readdir(dir)).toEqual(['settings.json'])
   })
 
+  it('retries when the check before the rename cannot read the file for a moment', async () => {
+    // Another process holds the file (EBUSY) just as the content is compared before the rename.
+    // A later read succeeds, so the write still lands.
+    const dir = await tempDir('cs-writer-')
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, ORIGINAL)
+    let reads = 0
+    const fs = fsWith({
+      readFile: (target, encoding) => {
+        reads += 1
+        return reads === 2 ? Promise.reject(codedError('EBUSY')) : realFs.readFile(target, encoding)
+      },
+    })
+
+    await transformSettingsFile(file, (existing) => ({ ...existing, ours: 1 }), { fs, backup: false })
+
+    expect(reads).toBeGreaterThan(2)
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ ...JSON.parse(ORIGINAL), ours: 1 })
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('refuses in its own words when the file stays unreadable after the first read', async () => {
+    const dir = await tempDir('cs-writer-')
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, ORIGINAL)
+    let reads = 0
+    const fs = fsWith({
+      readFile: (target, encoding) => {
+        reads += 1
+        return reads === 1 ? realFs.readFile(target, encoding) : Promise.reject(codedError('EBUSY'))
+      },
+    })
+
+    await expect(
+      transformSettingsFile(file, (existing) => ({ ...existing, ours: 1 }), { fs, backup: false }),
+    ).rejects.toThrow(/Cannot read existing settings .*\(EBUSY\); refusing to write/)
+
+    expect(await readFile(file, 'utf8')).toBe(ORIGINAL)
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
   it('backs up the existing file once before the first change and never overwrites the backup', async () => {
     const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
