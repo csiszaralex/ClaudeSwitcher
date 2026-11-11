@@ -468,7 +468,7 @@ async function startApp(): Promise<void> {
         console.log(
           `[claudeswitcher] hook install state: ${state.kind}` +
             (state.kind === 'stale'
-              ? ` (missing: ${state.missing.join(', ')}${state.tokenMismatch ? '; token mismatch' : ''})`
+              ? ` (missing: ${state.missing.length > 0 ? state.missing.join(', ') : 'none'}${state.tokenMismatch ? '; token mismatch' : ''})`
               : ''),
         )
         tray.setNotice(integrationNotice(state))
