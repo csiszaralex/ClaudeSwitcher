@@ -51,7 +51,8 @@ function rendererCspPlugin(): Plugin {
     name: 'claudeswitcher-renderer-csp',
     transformIndexHtml: {
       order: 'pre',
-      handler: (html, ctx) => injectCsp(html, rendererCsp({ daemonPort: DAEMON_PORT, dev: ctx.server !== undefined })),
+      handler: (html, ctx) =>
+        injectCsp(html, rendererCsp({ daemonPort: DAEMON_PORT, dev: ctx.server !== undefined }), ctx.path),
     },
   }
 }

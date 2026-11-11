@@ -51,14 +51,18 @@ describe('rendererCsp', () => {
 
 describe('injectCsp', () => {
   it('replaces the one placeholder', () => {
-    expect(injectCsp(`<meta content="${CSP_PLACEHOLDER}">`, "default-src 'self'")).toBe(
+    expect(injectCsp(`<meta content="${CSP_PLACEHOLDER}">`, "default-src 'self'", '/index.html')).toBe(
       `<meta content="default-src 'self'">`,
     )
   })
 
   it('throws when the placeholder is missing or doubled, instead of shipping a page without a policy', () => {
-    expect(() => injectCsp('<meta content="x">', 'p')).toThrow()
-    expect(() => injectCsp(`${CSP_PLACEHOLDER}${CSP_PLACEHOLDER}`, 'p')).toThrow()
+    expect(() => injectCsp('<meta content="x">', 'p', '/index.html')).toThrow()
+    expect(() => injectCsp(`${CSP_PLACEHOLDER}${CSP_PLACEHOLDER}`, 'p', '/index.html')).toThrow()
+  })
+
+  it('names the page that lacks the placeholder', () => {
+    expect(() => injectCsp('<meta content="x">', 'p', '/setup.html')).toThrow(/^\/setup\.html: /)
   })
 
   it('finds exactly one placeholder in the real index.html, inside the CSP meta', () => {

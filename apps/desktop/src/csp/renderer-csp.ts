@@ -41,10 +41,10 @@ export function rendererCsp({ daemonPort, dev }: CspOptions): string {
  * Writes the CSP in place of the placeholder. Throws if the placeholder is not there exactly once:
  * a silently skipped replacement would give a page without a CSP (with an invalid policy).
  */
-export function injectCsp(html: string, csp: string): string {
+export function injectCsp(html: string, csp: string, page: string): string {
   const parts = html.split(CSP_PLACEHOLDER)
   if (parts.length !== 2) {
-    throw new Error(`index.html: expected exactly one ${CSP_PLACEHOLDER}, found ${parts.length - 1}`)
+    throw new Error(`${page}: expected exactly one ${CSP_PLACEHOLDER}, found ${parts.length - 1}`)
   }
   return parts.join(csp)
 }
