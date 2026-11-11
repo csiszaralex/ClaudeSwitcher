@@ -1,6 +1,6 @@
 # Contributing to ClaudeSwitcher
 
-This guide is for developers who want to run, change or trace the code. What the app does for a user is in [`README.md`](README.md). The design, and the measured Claude Code behaviour it depends on, is in [`docs/superpowers/specs/2026-09-04-claudeswitcher-design.md`](docs/superpowers/specs/2026-09-04-claudeswitcher-design.md). The raw measurements of the permission hook are in [`spikes/m2-permission/RESULTS.md`](spikes/m2-permission/RESULTS.md).
+This guide is for developers who want to run, change or trace the code. What the app does for a user is in [`README.md`](README.md). The design, and the measured Claude Code behaviour it depends on, is in [`docs/design.md`](docs/design.md). The raw measurements of the permission hook are in [`spikes/m2-permission/RESULTS.md`](spikes/m2-permission/RESULTS.md).
 
 ## Running from the repository
 

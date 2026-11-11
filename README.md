@@ -117,4 +117,4 @@ It keeps the app's data folder, `%APPDATA%\@claudeswitcher\desktop` (the setting
 
 ## Development
 
-How to run it from the repository, how it is built, and the rules for changes: [`CONTRIBUTING.md`](CONTRIBUTING.md). The design and the measured Claude Code behaviour it relies on: [`docs/superpowers/specs/2026-09-04-claudeswitcher-design.md`](docs/superpowers/specs/2026-09-04-claudeswitcher-design.md).
+How to run it from the repository, how it is built, and the rules for changes: [`CONTRIBUTING.md`](CONTRIBUTING.md). The design and the measured Claude Code behaviour it relies on: [`docs/design.md`](docs/design.md).

@@ -1,6 +1,6 @@
 # ClaudeSwitcher: rules for agents
 
-What the app does: `README.md`. How to run it, the architecture, the rules for every change, the module index, the Claude Code coupling points and the environment notes: `CONTRIBUTING.md`. The design and the measured Claude Code behaviour: `docs/superpowers/specs/2026-09-04-claudeswitcher-design.md`. This file adds only what applies to agents. A `CLAUDE.local.md` next to it, if present, holds the owner's personal workflow and the facts of one machine.
+What the app does: `README.md`. How to run it, the architecture, the rules for every change, the module index, the Claude Code coupling points and the environment notes: `CONTRIBUTING.md`. The design and the measured Claude Code behaviour: `docs/design.md`. This file adds only what applies to agents. A `CLAUDE.local.md` next to it, if present, holds the owner's personal workflow and the facts of one machine.
 
 ## Read first
 
