@@ -6,9 +6,7 @@ import {
   SETTINGS_BACKUP_SUFFIX,
   isMissingPathError,
   isNotFoundError,
-  mergeSettings,
   transformSettingsFile,
-  updateSettingsFile,
   type SettingsFs,
 } from './settings-writer.js'
 import { tempDir } from './testing.js'
@@ -41,65 +39,19 @@ describe('file error checks', () => {
   })
 })
 
-describe('mergeSettings', () => {
-  it('preserves unrelated keys', () => {
-    const existing = {
-      model: 'opus[1m]',
-      effortLevel: 'xhigh',
-      tui: 'fullscreen',
-      permissions: { allow: ['Bash(pnpm build *)'] },
-    }
-    const out = mergeSettings(existing, { statusLine: { type: 'command', command: 'x' } })
-    expect(out['model']).toBe('opus[1m]')
-    expect(out['effortLevel']).toBe('xhigh')
-    expect(out['tui']).toBe('fullscreen')
-    expect(out['permissions']).toEqual({ allow: ['Bash(pnpm build *)'] })
-    expect(out['statusLine']).toEqual({ type: 'command', command: 'x' })
-  })
-
-  it('deep-merges nested objects instead of replacing them', () => {
-    const existing = { permissions: { allow: ['a'], deny: ['b'] } }
-    const out = mergeSettings(existing, { permissions: { ask: ['c'] } })
-    expect(out['permissions']).toEqual({ allow: ['a'], deny: ['b'], ask: ['c'] })
-  })
-
-  it('replaces arrays wholesale rather than concatenating', () => {
-    const existing = { hooks: { Notification: [{ old: true }] } }
-    const out = mergeSettings(existing, { hooks: { Notification: [{ fresh: true }] } })
-    expect(out['hooks']).toEqual({ Notification: [{ fresh: true }] })
-  })
-
-  it('does not mutate its inputs', () => {
-    const existing = { permissions: { allow: ['a'] } }
-    const frozen = JSON.stringify(existing)
-    mergeSettings(existing, { permissions: { allow: ['b'] } })
-    expect(JSON.stringify(existing)).toBe(frozen)
-  })
-
-  it('drops a __proto__ key instead of losing it into the prototype', () => {
-    // JSON.parse is needed: the parser treats a `__proto__` key in an object literal specially, and
-    // it would not create an own key.
-    const patch = JSON.parse('{"__proto__":{"polluted":true}}') as Record<string, unknown>
-    const out = mergeSettings({ model: 'opus' }, patch)
-    expect(out).toEqual({ model: 'opus' })
-    expect(Object.getPrototypeOf(out)).toBe(Object.prototype)
-    expect((({} as Record<string, unknown>)['polluted'])).toBeUndefined()
-  })
-})
-
-describe('updateSettingsFile', () => {
+describe('transformSettingsFile', () => {
   it('creates the file when it does not exist', async () => {
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
-    await updateSettingsFile(file, { model: 'opus' })
+    await transformSettingsFile(file, (existing) => ({ ...existing, model: 'opus' }))
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ model: 'opus' })
   })
 
-  it('merges into an existing file', async () => {
+  it('keeps the existing keys the transform passes through', async () => {
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ model: 'opus', tui: 'fullscreen' }))
-    await updateSettingsFile(file, { statusLine: { type: 'command' } })
+    await transformSettingsFile(file, (existing) => ({ ...existing, statusLine: { type: 'command' } }))
     const out: unknown = JSON.parse(await readFile(file, 'utf8'))
     expect(out).toEqual({
       model: 'opus',
@@ -112,7 +64,9 @@ describe('updateSettingsFile', () => {
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, '{ this is not json')
-    await expect(updateSettingsFile(file, { model: 'opus' })).rejects.toThrow(/parse/i)
+    await expect(
+      transformSettingsFile(file, (existing) => ({ ...existing, model: 'opus' })),
+    ).rejects.toThrow(/parse/i)
     expect(await readFile(file, 'utf8')).toBe('{ this is not json')
   })
 
@@ -124,9 +78,9 @@ describe('updateSettingsFile', () => {
     await writeFile(file, JSON.stringify({ model: 'opus' }))
 
     await Promise.all([
-      updateSettingsFile(file, { statusLine: { type: 'command' } }),
-      updateSettingsFile(file, { env: { CLAUDESWITCHER_PORT: '1' } }),
-      updateSettingsFile(file, { hooks: { Stop: [] } }),
+      transformSettingsFile(file, (existing) => ({ ...existing, statusLine: { type: 'command' } })),
+      transformSettingsFile(file, (existing) => ({ ...existing, env: { CLAUDESWITCHER_PORT: '1' } })),
+      transformSettingsFile(file, (existing) => ({ ...existing, hooks: { Stop: [] } })),
     ])
 
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
@@ -141,22 +95,20 @@ describe('updateSettingsFile', () => {
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, '{ broken')
-    await expect(updateSettingsFile(file, { a: 1 })).rejects.toThrow(/parse/i)
+    await expect(transformSettingsFile(file, (existing) => ({ ...existing, a: 1 }))).rejects.toThrow(/parse/i)
 
     await writeFile(file, '{}')
-    await updateSettingsFile(file, { b: 2 })
+    await transformSettingsFile(file, (existing) => ({ ...existing, b: 2 }))
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ b: 2 })
   })
 
   it('leaves no temp files behind', async () => {
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
-    await updateSettingsFile(file, { model: 'opus' })
+    await transformSettingsFile(file, (existing) => ({ ...existing, model: 'opus' }))
     expect(await readdir(dir)).toEqual(['settings.json'])
   })
-})
 
-describe('transformSettingsFile', () => {
   it('passes the parsed file to the transform and writes its result', async () => {
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
@@ -170,8 +122,8 @@ describe('transformSettingsFile', () => {
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ keep: 1 })
   })
 
-  it('can remove nested keys, which a merge patch cannot express', async () => {
-    // The reason it exists at all: removal deletes keys, mergeSettings only adds.
+  it('can remove nested keys', async () => {
+    // Removing the integration deletes keys, not only adds them.
     const dir = await tempDir('cs-')
     const file = path.join(dir, 'settings.json')
     await writeFile(file, JSON.stringify({ env: { A: '1', B: '2' } }))
@@ -192,21 +144,6 @@ describe('transformSettingsFile', () => {
     ).rejects.toThrow(/parse/i)
     expect(called).toBe(false)
     expect(await readFile(file, 'utf8')).toBe('{ broken')
-  })
-
-  it('shares one write queue with updateSettingsFile', async () => {
-    // Without a shared queue an install and a concurrent merge would drop each other's writes.
-    const dir = await tempDir('cs-')
-    const file = path.join(dir, 'settings.json')
-    await writeFile(file, JSON.stringify({}))
-
-    await Promise.all([
-      updateSettingsFile(file, { a: 1 }),
-      transformSettingsFile(file, (existing) => ({ ...existing, b: 2 })),
-      updateSettingsFile(file, { c: 3 }),
-    ])
-
-    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ a: 1, b: 2, c: 3 })
   })
 })
 
@@ -247,7 +184,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
       },
     })
 
-    await updateSettingsFile(file, { statusLine: { type: 'command' } }, { fs })
+    await transformSettingsFile(file, (existing) => ({ ...existing, statusLine: { type: 'command' } }), { fs })
 
     expect(reads).toBeGreaterThan(1)
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
@@ -292,7 +229,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
       },
     })
 
-    await updateSettingsFile(file, { ours: 1 }, { fs, backup: false })
+    await transformSettingsFile(file, (existing) => ({ ...existing, ours: 1 }), { fs, backup: false })
 
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ model: 'sonnet', theirs: true, ours: 1 })
     expect(await readdir(dir)).toEqual(['settings.json'])
@@ -314,7 +251,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
       },
     })
 
-    await updateSettingsFile(file, { ours: 1 }, { fs, backup: false })
+    await transformSettingsFile(file, (existing) => ({ ...existing, ours: 1 }), { fs, backup: false })
 
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ effort: 'max', ours: 1 })
   })
@@ -334,7 +271,9 @@ describe('transformSettingsFile never loses the existing settings', () => {
       },
     })
 
-    await expect(updateSettingsFile(file, { ours: 1 }, { fs, backup: false })).rejects.toThrow(/changed/i)
+    await expect(
+      transformSettingsFile(file, (existing) => ({ ...existing, ours: 1 }), { fs, backup: false }),
+    ).rejects.toThrow(/changed/i)
 
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ round })
     expect(await readdir(dir)).toEqual(['settings.json'])
@@ -387,10 +326,10 @@ describe('transformSettingsFile never loses the existing settings', () => {
     const backup = `${file}${SETTINGS_BACKUP_SUFFIX}`
     await writeFile(file, ORIGINAL)
 
-    await updateSettingsFile(file, { a: 1 })
+    await transformSettingsFile(file, (existing) => ({ ...existing, a: 1 }))
     expect(await readFile(backup, 'utf8')).toBe(ORIGINAL)
 
-    await updateSettingsFile(file, { b: 2 })
+    await transformSettingsFile(file, (existing) => ({ ...existing, b: 2 }))
     expect(await readFile(backup, 'utf8')).toBe(ORIGINAL)
   })
 
@@ -401,7 +340,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
     await writeFile(file, ORIGINAL)
     await writeFile(backup, 'the very first one')
 
-    await updateSettingsFile(file, { a: 1 })
+    await transformSettingsFile(file, (existing) => ({ ...existing, a: 1 }))
 
     expect(await readFile(backup, 'utf8')).toBe('the very first one')
   })
@@ -410,7 +349,7 @@ describe('transformSettingsFile never loses the existing settings', () => {
     // A brand-new machine has no settings.json (ENOENT): that still starts as empty settings.
     const dir = await tempDir('cs-writer-')
     const file = path.join(dir, 'settings.json')
-    await updateSettingsFile(file, { a: 1 })
+    await transformSettingsFile(file, (existing) => ({ ...existing, a: 1 }))
     expect(await readdir(dir)).toEqual(['settings.json'])
   })
 

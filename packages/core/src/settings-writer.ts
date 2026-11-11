@@ -58,34 +58,11 @@ export function isMissingPathError(error: unknown): boolean {
 }
 
 /**
- * Recursive merge. Objects are merged deeply, arrays and scalars are replaced. Replacing arrays is
- * deliberate: the hook config must be rewritten idempotently, not duplicated on every install.
- */
-export function mergeSettings(
-  existing: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...existing }
-  for (const [key, value] of Object.entries(patch)) {
-    // Assigning `__proto__` would call the prototype setter instead of creating a data key, and the
-    // payload would vanish silently. It is not a real Claude Code settings key, but silent data
-    // loss is not left in the code.
-    if (key === '__proto__') continue
-    const current = out[key]
-    out[key] =
-      isRecord(value) && isRecord(current)
-        ? mergeSettings(current, value)
-        : value
-  }
-  return out
-}
-
-/**
  * One queue per target file.
  *
  * Without it, two concurrent calls on the same file would leave interleaved, unreadable JSON
  * behind (exactly the disaster this module exists to prevent), and the second read would miss the
- * first write, so one patch would be lost even if the file stayed intact.
+ * first write, so one change would be lost even if the file stayed intact.
  *
  * The map holds only as many entries as there are distinct files written through it (the user's
  * settings.json and the desktop app's config file), so it does not grow without bound.
@@ -96,10 +73,6 @@ const writeQueues = new Map<string, Promise<unknown>>()
  * An atomic, queued, parse-safe read, transform and write. `transform` gets the object read from
  * the file and returns the one to write. It runs again on a conflict, so it must be pure and
  * repeatable.
- *
- * It exists next to the merge patch because removing the integration deletes keys, which a merge
- * patch cannot express. It shares its queue with `updateSettingsFile`, so the two cannot drop each
- * other's writes to the same file.
  */
 export function transformSettingsFile(
   filePath: string,
@@ -116,14 +89,6 @@ export function transformSettingsFile(
   )
   writeQueues.set(key, next.catch(() => undefined))
   return next
-}
-
-export function updateSettingsFile(
-  filePath: string,
-  patch: Record<string, unknown>,
-  options: SettingsWriteOptions = {},
-): Promise<void> {
-  return transformSettingsFile(filePath, (existing) => mergeSettings(existing, patch), options)
 }
 
 /**
