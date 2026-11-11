@@ -17,11 +17,9 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
   if (!isRecord(message)) return []
   const content = message['content']
   if (!Array.isArray(content)) return []
-  // Non-object items are dropped here, not in the caller. A `null` block is valid JSON, and reading
-  // `.type` on it would throw a TypeError: exactly the kind of crash this module must prevent.
-  return content.filter(
-    (block): block is ContentBlock => typeof block === 'object' && block !== null,
-  )
+  // Items that are not records are dropped here, not in the caller. A `null` block is valid JSON, and
+  // reading `.type` on it would throw a TypeError: exactly the kind of crash this module must prevent.
+  return content.filter(isRecord)
 }
 
 /**
