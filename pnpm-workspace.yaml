@@ -4,7 +4,7 @@ packages:
 allowBuilds:
   # It has no install script (since Electron 42), yet pnpm asks for the key: without it
   # `ERR_PNPM_IGNORED_BUILDS: electron@45.1.0` (measured). `install-electron` downloads the
-  # binary (README).
+  # binary (CONTRIBUTING.md).
   electron: true
   # `postinstall: node install.js`: checks the platform binary package (and downloads it if missing).
   esbuild: true
