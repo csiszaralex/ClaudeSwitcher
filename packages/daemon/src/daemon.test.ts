@@ -406,7 +406,7 @@ describe('startDaemon: held decisions', () => {
     ])
   })
 
-  it('drops a held request when the hook client disconnects — over a real socket', async () => {
+  it('drops a held request when the hook client disconnects, over a real socket', async () => {
     // Cancelled in VS Code, or the session's process died: neither a Stop nor a PostToolUse comes, only
     // the connection closes. There is nobody to answer, and the row must not stay waiting for a decision.
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })

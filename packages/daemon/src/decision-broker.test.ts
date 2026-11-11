@@ -92,7 +92,7 @@ describe('DecisionBroker', () => {
     expect(broker.views()).toHaveLength(1)
   })
 
-  it('answers each request exactly once — a second decision is refused', async () => {
+  it('answers each request exactly once: a second decision is refused', async () => {
     const broker = new DecisionBroker(fakeClock())
     const held = observe(broker.hold(parsedPayload('permissionRequest_bash')))
     const [view] = broker.views()

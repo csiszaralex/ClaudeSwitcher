@@ -235,7 +235,7 @@ describe('M2 decision routes: measured payloads', () => {
     expect(await res.text()).toBe('')
   })
 
-  it('answers an empty 200 when the handler fails — never a denial', async () => {
+  it('answers an empty 200 when the handler fails: never a denial', async () => {
     // Measured (spike results R3, R4): Claude Code takes a failing hook as "no decision", the native prompt stays.
     const ev = { ...events(), onPermissionRequest: vi.fn(() => Promise.reject(new Error('boom'))) }
     const res = await post(createHookApp(TOKEN, ev), '/hooks/permission-request', hookPayload('permissionRequest_bash'))
