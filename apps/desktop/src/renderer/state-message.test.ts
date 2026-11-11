@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseDaemonMessage, parseStateMessage, sanitizeState } from './state-message.js'
+import { parseDaemonMessage, sanitizeState } from './state-message.js'
 import { DAEMON_PROTOCOL } from '@claudeswitcher/core/browser'
 import { parsedPayload } from '@claudeswitcher/core/testing'
 
@@ -8,21 +8,27 @@ function decisionFrom(name: string): Record<string, unknown> {
   return { ...parsedPayload(name), id: `id-${name}`, createdAt: 1, released: false }
 }
 
-describe('parseStateMessage', () => {
+/** The sessions of a state message, or `undefined` when it is not one. */
+function sessionsOf(data: unknown): unknown[] | undefined {
+  const parsed = parseDaemonMessage(data)
+  return parsed?.kind === 'state' ? parsed.state.sessions : undefined
+}
+
+describe('parseDaemonMessage state messages', () => {
   it('returns the state carried by a well-formed state message', () => {
     const message = JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: { sessions: [], decisions: [] } })
-    expect(parseStateMessage(message)).toEqual({ sessions: [], decisions: [] })
+    expect(parseDaemonMessage(message)).toEqual({ kind: 'state', state: { sessions: [], decisions: [] } })
   })
 
   it('ignores messages that are not state updates', () => {
-    expect(parseStateMessage(JSON.stringify({ type: 'other', payload: {} }))).toBeUndefined()
-    expect(parseStateMessage(JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: { sessions: 'no' } }))).toBeUndefined()
+    expect(parseDaemonMessage(JSON.stringify({ type: 'other', payload: {} }))).toBeUndefined()
+    expect(parseDaemonMessage(JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: { sessions: 'no' } }))).toBeUndefined()
   })
 
   it('never throws on garbage', () => {
     for (const garbage of ['not json', '', 'null', '42', '[]', undefined]) {
-      expect(() => parseStateMessage(garbage)).not.toThrow()
-      expect(parseStateMessage(garbage)).toBeUndefined()
+      expect(() => parseDaemonMessage(garbage)).not.toThrow()
+      expect(parseDaemonMessage(garbage)).toBeUndefined()
     }
   })
 
@@ -34,7 +40,7 @@ describe('parseStateMessage', () => {
       protocol: DAEMON_PROTOCOL,
       payload: { sessions: [null, { sessionId: 'a' }, 'nope', {}] },
     })
-    expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a' }])
+    expect(sessionsOf(message)).toEqual([{ sessionId: 'a' }])
   })
 
   it('keeps a session carrying stoppedAt, and drops one whose stoppedAt is not a number', () => {
@@ -47,7 +53,7 @@ describe('parseStateMessage', () => {
         sessions: [{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'b', stoppedAt: 'tegnap' }, { sessionId: 'c' }],
       },
     })
-    expect(parseStateMessage(message)?.sessions).toEqual([{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'c' }])
+    expect(sessionsOf(message)).toEqual([{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'c' }])
   })
 
   it('keeps a session carrying an entrypoint string, and drops one whose entrypoint is not a string', () => {
@@ -64,7 +70,7 @@ describe('parseStateMessage', () => {
         ],
       },
     })
-    expect(parseStateMessage(message)?.sessions).toEqual([
+    expect(sessionsOf(message)).toEqual([
       { sessionId: 'a', entrypoint: 'claude-vscode' },
       { sessionId: 'd' },
     ])
@@ -94,7 +100,7 @@ describe('parseStateMessage', () => {
         ],
       },
     })
-    expect(parseStateMessage(message)?.sessions).toEqual([
+    expect(sessionsOf(message)).toEqual([
       { sessionId: 'a', subagents: [good, bare] },
       { sessionId: 'j', subagents: [] },
       { sessionId: 'k' },

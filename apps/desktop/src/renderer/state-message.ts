@@ -124,9 +124,3 @@ export function parseDaemonMessage(data: unknown): DaemonMessage | undefined {
   const state = sanitizeState(message['payload'])
   return state === undefined ? undefined : { kind: 'state', state }
 }
-
-/** Reads the state from a WebSocket message, or returns `undefined`. Never throws. */
-export function parseStateMessage(data: unknown): DaemonState | undefined {
-  const parsed = parseDaemonMessage(data)
-  return parsed?.kind === 'state' ? parsed.state : undefined
-}
