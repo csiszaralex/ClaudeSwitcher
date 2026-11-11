@@ -31,7 +31,7 @@ describe('buildHookResponse', () => {
     })
   })
 
-  it('refuses a bare allow for a question — it would continue without an answer', () => {
+  it('refuses a bare allow for a question: it would continue without an answer', () => {
     expect(buildHookResponse(askMulti, { type: 'allow' }).ok).toBe(false)
   })
 
@@ -117,7 +117,7 @@ describe('buildHookResponse', () => {
     expect(buildHookResponse(bash, { type: 'answer', answers: {} }).ok).toBe(false)
   })
 
-  it('refuses any answer when the questions could not be read — never an allow with no answers', () => {
+  it('refuses any answer when the questions could not be read: never an allow with no answers', () => {
     // If the shape of `tool_input.questions` changes, the parser drops everything and the list is
     // empty. The per-question check would then refuse nothing.
     const raw = hookPayload('permissionRequest_askMulti')
@@ -156,7 +156,7 @@ describe('joinAnswerLabels', () => {
   })
 })
 
-describe('parseUserDecision — the IPC boundary', () => {
+describe('parseUserDecision: the IPC boundary', () => {
   it('accepts each well-formed decision', () => {
     expect(parseUserDecision({ type: 'allow' })).toEqual({ type: 'allow' })
     expect(parseUserDecision({ type: 'deny', message: 'x' })).toEqual({ type: 'deny', message: 'x' })

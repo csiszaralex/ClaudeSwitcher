@@ -32,7 +32,7 @@ describe('parseRules', () => {
     expect(parseRules('két szó')).toEqual({ ok: false, line: 1, text: 'két szó' })
   })
 
-  it('returns an empty list for empty text — the caller decides whether that is allowed', () => {
+  it('returns an empty list for empty text: the caller decides whether that is allowed', () => {
     expect(parseRules('  \n ')).toEqual({ ok: true, rules: [] })
   })
 })

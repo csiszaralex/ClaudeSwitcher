@@ -39,7 +39,7 @@ describe('parsePermissionRequest: the real payloads from the spike', () => {
     ])
   })
 
-  it('keeps an MCP suggestion without ruleContent — the rule is the tool name itself', () => {
+  it('keeps an MCP suggestion without ruleContent: the rule is the tool name itself', () => {
     const [rule] = parsedPayload('permissionRequest_mcp').suggestedRules
     expect(rule?.toolName).toBe('mcp__claude-vscode__getDiagnostics')
     expect(rule?.ruleContent).toBeUndefined()
@@ -109,7 +109,7 @@ describe('parsePermissionRequest: command line breaks and the description', () =
   })
 })
 
-describe('parsePermissionRequest — Workflow', () => {
+describe('parsePermissionRequest: Workflow', () => {
   function workflow(script: unknown): PermissionRequestInfo | undefined {
     return parsePermissionRequest({ session_id: 's', tool_name: 'Workflow', tool_input: { script, args: {} } })
   }

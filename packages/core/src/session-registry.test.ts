@@ -91,7 +91,7 @@ const REAL_STATUS_SESSION = {
   statusUpdatedAt: 1792493825845,
 }
 
-describe('parseSessionRecord — status, waitingFor, statusUpdatedAt', () => {
+describe('parseSessionRecord: status, waitingFor, statusUpdatedAt', () => {
   it('reads the status fields of a real idle record', () => {
     const r = parseSessionRecord(REAL_STATUS_SESSION)
     expect(r?.status).toBe('idle')
