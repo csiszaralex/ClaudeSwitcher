@@ -38,3 +38,6 @@ CLAUDE.local.md
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Working documents, kept locally only
+docs/archive/
