@@ -57,17 +57,18 @@ function rendererCspPlugin(): Plugin {
 }
 
 /**
- * The renderer root on its real (resolved) path. On a drive mapped with `subst` (for example
- * `P:` → `D:\P`) Vite resolves the HTML entry to the real path but would keep the root on the mapped
- * one: the relative path between them becomes absolute, and the build fails. Measured 2026-10-30 on
- * a `subst` P: drive. The path is relative to this config file, not to the working directory: knip
- * loads the config from the repo root.
+ * The renderer root on its real (resolved) path. On a drive mapped with `subst` and its real path,
+ * Vite resolves the HTML entry to the real path but would keep the root on the mapped one: the
+ * relative path between them becomes absolute, and the build fails. Measured live on 2026-10-30.
+ * The path is relative to this config file, not to the working directory: knip loads the config
+ * from the repo root.
  *
  * The entry pages (`RENDERER_INPUT`) are given on the real path too. electron-vite 6 computes them
  * from the working directory (`electronRendererConfigPresetPlugin`, `findInput`), and Vite 8's
- * Rolldown, started from a working directory under `P:` (`pnpm run build` in `apps/desktop`), would
- * get a name that is absolute relative to the root under `D:`, which it rejects with "neither
- * absolute nor relative paths". Measured 2026-10-30 with Vite 8.3.5; Vite 7 still accepted it.
+ * Rolldown, started from a working directory on the mapped drive (`pnpm run build` in
+ * `apps/desktop`), would get a name that is absolute relative to the root on the real path, which it
+ * rejects with "neither absolute nor relative paths". Measured live on 2026-10-30 with Vite 8.3.5;
+ * Vite 7 still accepted it.
  */
 const RENDERER_ROOT = realpathSync.native(fileURLToPath(new URL('./src/renderer', import.meta.url)))
 /** The two pages: the overlay (`index`) and the setup window (`setup`). */

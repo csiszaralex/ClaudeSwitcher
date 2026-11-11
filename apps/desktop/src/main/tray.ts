@@ -95,9 +95,9 @@ export function createTray(options: {
   const buildMenu = (): Menu =>
     Menu.buildFromTemplate([
       { label: 'Megnyitás', click: options.onOpen },
-      // The hotkey state is visible here, not only in the log. If registering fails (measured on
-      // this machine) or the value is mistyped, the user would otherwise just press it and see
-      // nothing happen. The tray is then the only entry point left, so this is where to say it.
+      // The hotkey state is visible here, not only in the log. If registering fails (measured
+      // live) or the value is mistyped, the user would otherwise just press it and see nothing
+      // happen. The tray is then the only entry point left, so this is where to say it.
       { label: hotkeyLabel(hotkey), enabled: false },
       { label: 'Beállítások…', click: options.onSettings },
       { type: 'separator' },
