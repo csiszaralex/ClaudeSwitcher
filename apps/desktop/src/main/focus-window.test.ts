@@ -53,9 +53,11 @@ function runningVSCodeWindowPid(): number | undefined {
       '-NoProfile',
       '-NonInteractive',
       '-Command',
+      // Without the final `exit 0` the command exits with 1 when no Code process runs (the
+      // suppressed error still counts), and `execFileSync` would throw instead of skipping.
       'Get-Process Code -ErrorAction SilentlyContinue | ' +
         'Where-Object { $_.MainWindowHandle -ne 0 } | ' +
-        'Select-Object -First 1 -ExpandProperty Id',
+        'Select-Object -First 1 -ExpandProperty Id; exit 0',
     ],
     { encoding: 'utf8', windowsHide: true, timeout: 30_000 },
   ).trim()
