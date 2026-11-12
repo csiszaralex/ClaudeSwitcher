@@ -87,6 +87,8 @@ The git hooks (`simple-git-hooks`, installed by `pnpm install`):
 
 Do not skip them (`--no-verify`).
 
+CI (`.github/workflows/verify.yml`) runs the same `pnpm verify` on a Windows runner for every push and pull request to `main`.
+
 For a change that should only touch comments (a translation, for example), `pnpm check:comment-only -- <base>` (`scripts/check-comment-only-diff.mjs`) compares the token streams of every changed source file and fails on any change outside comments, test titles and the strings listed in an optional `--allow` file. The usage is at the top of the script.
 
 ### Code
