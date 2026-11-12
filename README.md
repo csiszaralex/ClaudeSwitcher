@@ -30,27 +30,15 @@ It never starts, stops or prompts a session, and it writes no permission rules i
 
 ## Install
 
-There are no prebuilt releases yet, so you build the installer from source. Node.js and pnpm are needed only for building it: the installed app brings its own runtime. If someone gives you an installer they built, skip to step 4.
+Download `ClaudeSwitcher-Setup-<version>.exe` from the [latest release](https://github.com/csiszaralex/ClaudeSwitcher/releases/latest) and run it. The installed app brings its own runtime; nothing else is needed.
 
-1. Install [Node.js](https://nodejs.org/) 24 or newer (`engines` in `package.json`).
-2. Enable pnpm through Corepack, which ships with Node.js 24. The repo pins the exact pnpm version (`packageManager` in `package.json`), and Corepack uses that one:
-   ```sh
-   corepack enable
-   ```
-3. Clone the repository and build the installer:
-   ```sh
-   git clone https://github.com/csiszaralex/ClaudeSwitcher.git
-   cd ClaudeSwitcher
-   pnpm install
-   pnpm build
-   pnpm --filter @claudeswitcher/desktop dist
-   ```
-   `pnpm build` builds the shared packages the app bundles; `dist` then builds the app and the installer.
-4. Run `apps/desktop/release/ClaudeSwitcher-Setup-<version>.exe` (the version comes from `apps/desktop/package.json`).
-
-The installer is not signed. An installer you built yourself carries no download mark, so Windows does not warn about it. A downloaded copy triggers SmartScreen's "Windows protected your PC": click "More info", then "Run anyway".
+The installer is not signed, so Windows SmartScreen warns about the downloaded file ("Windows protected your PC"): click "More info", then "Run anyway". To build the installer from source instead, see [`CONTRIBUTING.md`](CONTRIBUTING.md#building-the-installer).
 
 The installer installs for the current user only, without administrator rights, under `%LOCALAPPDATA%\Programs\ClaudeSwitcher`. It asks whether you want a Start menu shortcut (on by default) and a desktop shortcut (off by default), and remembers the answer for the next install. If ClaudeSwitcher is running, the installer asks it to quit through its normal exit path; it never kills it.
+
+### Updating
+
+The installed app looks for a new release at start-up and every 6 hours, and downloads it in the background. When it is ready, the tray menu shows **"Frissítés elérhető (<version>), telepítés"** (update available, install) at the top. Clicking it installs the update silently and starts the new version; the settings and the Claude Code integration stay. Nothing is installed without that click. Turn the checks off with **"Frissítések keresése"** (check for updates) in the tray or the settings window. The first start after an update that adds a new setting shows the **"Első beállítás"** window once, for that setting.
 
 ## First start
 
@@ -73,11 +61,11 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 The tray icon changes when a session waits for you, and its tooltip says how many. Clicking the icon opens the list. The right-click menu:
 
-- **"Frissítés elérhető (<version>), telepítés"** (update available, install): appears at the top once the installed app has downloaded a new release. Clicking it quits ClaudeSwitcher through its normal exit path, installs the update silently and starts the new version. Nothing is installed without this click.
+- **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded; see [Updating](#updating).
 - **"Megnyitás"** (open): opens the list.
 - **"Gyorsbillentyű: Shift+Alt+Space"** (hotkey): the hotkey in effect, or what is wrong with it if it could not be registered.
 - **"Beállítások…"** (settings): the settings window, with the integration section.
-- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Frissítések keresése"** (check for updates: the installed app looks for a new release at start-up and every 6 hours, and downloads it in the background). All four are on by default.
+- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Frissítések keresése"** (check for updates, see [Updating](#updating)). All four are on by default.
 - **"Kilépés"** (quit).
 
 If the installed integration is out of date, a line **"Integráció elavult, telepítsd újra"** (integration out of date, install again) appears in the menu, with the reason in brackets: **"hiányzó hook"** (a newer version expects a hook the old install lacks) or **"rossz token"** (the token in `settings.json` is not the app's, for example in a `settings.json` brought from another machine; every hook would then be rejected). Clicking the line opens the settings window, where **"Telepítés"** fixes it.
