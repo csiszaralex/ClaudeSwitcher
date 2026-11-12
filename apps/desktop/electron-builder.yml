@@ -15,15 +15,22 @@ extraResources:
     to: icons
     filter:
       - tray*.png
-# No publish target yet. Without this line a set `GITHUB_TOKEN` makes electron-builder assume the
-# GitHub provider, and the build fails writing the update info because the repository is unknown.
-publish: null
+# The update source of `electron-updater`: the build writes `app-update.yml` into the app and
+# `latest.yml` next to the installer. The `dist` script passes `--publish never`: CI uploads the
+# files to the GitHub Release itself (`.github/workflows/release.yml`).
+publish:
+  provider: github
+  owner: csiszaralex
+  repo: ClaudeSwitcher
 # Reuse the binary `install-electron` already fetched instead of downloading it again.
 electronDist: node_modules/electron/dist
 win:
   target: nsis
   icon: resources/icon.png
 nsis:
+  # No spaces: `latest.yml` names the installer with hyphens, and GitHub turns spaces in an uploaded
+  # asset name into dots, so the default "ClaudeSwitcher Setup <version>.exe" could not be found.
+  artifactName: ${productName}-Setup-${version}.${ext}
   oneClick: false
   perMachine: false
   allowElevation: false

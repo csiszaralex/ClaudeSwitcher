@@ -46,7 +46,7 @@ There are no prebuilt releases yet, so you build the installer from source. Node
    pnpm --filter @claudeswitcher/desktop dist
    ```
    `pnpm build` builds the shared packages the app bundles; `dist` then builds the app and the installer.
-4. Run `apps/desktop/release/ClaudeSwitcher Setup <version>.exe` (the version comes from `apps/desktop/package.json`).
+4. Run `apps/desktop/release/ClaudeSwitcher-Setup-<version>.exe` (the version comes from `apps/desktop/package.json`).
 
 The installer is not signed. An installer you built yourself carries no download mark, so Windows does not warn about it. A downloaded copy triggers SmartScreen's "Windows protected your PC": click "More info", then "Run anyway".
 

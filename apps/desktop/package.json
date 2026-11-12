@@ -8,7 +8,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "dist": "electron-vite build && electron-builder --win nsis",
+    "dist": "electron-vite build && electron-builder --win nsis --publish never",
     "check-types": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.web.test.json --noEmit",
     "test": "vitest run",
     "lint": "eslint src electron.vite.config.ts vitest.config.ts",
