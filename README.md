@@ -73,10 +73,11 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 The tray icon changes when a session waits for you, and its tooltip says how many. Clicking the icon opens the list. The right-click menu:
 
+- **"Frissítés elérhető (<version>), telepítés"** (update available, install): appears at the top once the installed app has downloaded a new release. Clicking it quits ClaudeSwitcher through its normal exit path, installs the update silently and starts the new version. Nothing is installed without this click.
 - **"Megnyitás"** (open): opens the list.
 - **"Gyorsbillentyű: Shift+Alt+Space"** (hotkey): the hotkey in effect, or what is wrong with it if it could not be registered.
 - **"Beállítások…"** (settings): the settings window, with the integration section.
-- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab). All three are on by default.
+- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Frissítések keresése"** (check for updates: the installed app looks for a new release at start-up and every 6 hours, and downloads it in the background). All four are on by default.
 - **"Kilépés"** (quit).
 
 If the installed integration is out of date, a line **"Integráció elavult, telepítsd újra"** (integration out of date, install again) appears in the menu, with the reason in brackets: **"hiányzó hook"** (a newer version expects a hook the old install lacks) or **"rossz token"** (the token in `settings.json` is not the app's, for example in a `settings.json` brought from another machine; every hook would then be rejected). Clicking the line opens the settings window, where **"Telepítés"** fixes it.

@@ -19,6 +19,7 @@
   "dependencies": {
     "@claudeswitcher/core": "workspace:*",
     "@claudeswitcher/daemon": "workspace:*",
+    "electron-updater": "6.8.11",
     "koffi": "^3.3.5"
   },
   "devDependencies": {

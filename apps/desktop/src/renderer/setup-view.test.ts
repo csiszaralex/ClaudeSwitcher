@@ -13,7 +13,7 @@ import {
 } from './setup-view.js'
 import type { SetupState } from '../shared/setup-state.js'
 
-const VALUES: SettingValues = { autostart: true, hideAfterLastDecision: true, jumpToTab: true, hotkey: 'Shift+Alt+Space' }
+const VALUES: SettingValues = { autostart: true, hideAfterLastDecision: true, jumpToTab: true, checkForUpdates: true, hotkey: 'Shift+Alt+Space' }
 
 function state(overrides: Partial<SetupState> = {}): SetupState {
   return {
@@ -52,6 +52,7 @@ describe('mergeExternal', () => {
       autostart: true,
       hideAfterLastDecision: false,
       jumpToTab: true,
+      checkForUpdates: true,
       hotkey: 'F9',
     })
   })

@@ -126,7 +126,8 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 
 - `main/daemon-port.ts`: the daemon's fixed port (`DAEMON_PORT`). A module without imports, because the build config reads it too.
 - `main/instance.ts`: the helper flags (`HELPER_FLAG`) and exit codes (`LAUNCH_EXIT_CODE`) that `resources/installer.nsh` repeats as literals; `instance.test.ts` checks that the two agree.
-- `shared/settings.ts`: the one list of user settings (`SETTINGS`, `DEFAULT_SETTINGS`, `DEFAULT_HOTKEY`).
+- `shared/settings.ts`: the one list of user settings (`SETTINGS`, `DEFAULT_SETTINGS`, `DEFAULT_HOTKEY`), including `checkForUpdates`, which `main/updater.ts` follows.
+- `main/updater.ts`: the in-app update of the installed app on electron-updater (`createUpdateController`): the check interval (`UPDATE_CHECK_INTERVAL_MS`), the tray line (`updateLabel`), and why `quitAndInstall` goes through the normal quit sequence and the installer's `--quit` helper (the comment in `install`).
 - `shared/overlay-channels.ts`, `shared/setup-channels.ts`: the IPC channel names and reply types of the two windows.
 
 ## Claude Code coupling points
