@@ -5,6 +5,9 @@
   // Our packages export only to each other, nothing outside imports them: an unused export of an
   // entry point is dead code too.
   "includeEntryExports": true,
+  // Nx release loads `@nx/js` by name for the version step of the desktop app (`nx.json` `release`);
+  // no file imports it.
+  "ignoreDependencies": ["@nx/js"],
   // knip finds the core's two entry points (the main one and the IO-free `/browser`) and the
   // daemon's in their package.json (`exports`, `main`), and its own plugins find the electron-vite
   // main and preload entry points and the vitest configs; what is listed here, they do not find.

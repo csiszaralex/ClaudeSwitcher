@@ -10,5 +10,22 @@
     "check-types": { "dependsOn": ["^build"], "inputs": ["default", "^default"], "cache": true },
     "lint": { "dependsOn": ["^build"], "inputs": ["default", "^default"], "cache": true },
     "dev": { "dependsOn": ["^build"], "cache": false }
+  },
+  "release": {
+    "projects": ["@claudeswitcher/desktop"],
+    "releaseTag": { "pattern": "v{version}" },
+    "conventionalCommits": { "useCommitScope": false },
+    "version": {
+      "conventionalCommits": true,
+      "fallbackCurrentVersionResolver": "disk",
+      "adjustSemverBumpsForZeroMajorVersion": false,
+      "preserveLocalDependencyProtocols": true,
+      "git": { "commit": false, "tag": false }
+    },
+    "changelog": {
+      "workspaceChangelog": { "createRelease": "github", "file": false },
+      "projectChangelogs": false,
+      "git": { "commit": false, "tag": true }
+    }
   }
 }
