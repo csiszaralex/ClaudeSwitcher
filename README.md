@@ -1,5 +1,7 @@
 # ClaudeSwitcher
 
+[![verify](https://github.com/csiszaralex/ClaudeSwitcher/actions/workflows/verify.yml/badge.svg)](https://github.com/csiszaralex/ClaudeSwitcher/actions/workflows/verify.yml)
+
 A Windows tray app that shows every running Claude Code session in one list and lets you answer their permission prompts without hunting for the right window.
 
 ## Why
@@ -37,7 +39,7 @@ There are no prebuilt releases yet, so you build the installer from source. Node
    ```
 3. Clone the repository and build the installer:
    ```sh
-   git clone <repository URL> ClaudeSwitcher
+   git clone https://github.com/csiszaralex/ClaudeSwitcher.git
    cd ClaudeSwitcher
    pnpm install
    pnpm build
@@ -118,3 +120,7 @@ It keeps the app's data folder, `%APPDATA%\@claudeswitcher\desktop` (the setting
 ## Development
 
 How to run it from the repository, how it is built, and the rules for changes: [`CONTRIBUTING.md`](CONTRIBUTING.md). The design and the measured Claude Code behaviour it relies on: [`docs/design.md`](docs/design.md).
+
+## License
+
+[MIT](LICENSE).
