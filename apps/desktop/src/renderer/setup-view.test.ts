@@ -19,7 +19,7 @@ function state(overrides: Partial<SetupState> = {}): SetupState {
   return {
     values: VALUES,
     ask: ['hotkey'],
-    autostartAvailable: true,
+    installed: true,
     hotkey: { requested: 'Shift+Alt+Space', status: 'registered' },
     integration: 'current',
     showAll: false,
@@ -92,7 +92,7 @@ describe('readSetupState', () => {
       readSetupState({ ...state(), hotkey: { requested: 'F9', status: 'invalid', fallback: { accelerator: 'F8' } } }),
     ).toBeUndefined()
     expect(readSetupState({ ...state(), showAll: 'yes' })).toBeUndefined()
-    expect(readSetupState({ ...state(), autostartAvailable: undefined })).toBeUndefined()
+    expect(readSetupState({ ...state(), installed: undefined })).toBeUndefined()
     expect(readSetupState(null)).toBeUndefined()
     expect(readSetupState([])).toBeUndefined()
   })

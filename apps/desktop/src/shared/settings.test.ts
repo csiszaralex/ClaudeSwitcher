@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isSettingKey, parseSettingValues, pickSettings, settingsToAsk } from './settings.js'
+import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isInstalledOnly, isSettingKey, parseSettingValues, pickSettings, settingsToAsk } from './settings.js'
 import type { BooleanSettingKey, SettingKey, SettingValues } from './settings.js'
 
 describe('SETTINGS', () => {
@@ -39,7 +39,7 @@ describe('isSettingKey', () => {
 
 describe('settingsToAsk', () => {
   it('asks everything on a first start', () => {
-    expect(settingsToAsk(new Set(), { autostartAvailable: true })).toEqual([
+    expect(settingsToAsk(new Set(), { installed: true })).toEqual([
       'autostart',
       'hideAfterLastDecision',
       'jumpToTab',
@@ -50,13 +50,26 @@ describe('settingsToAsk', () => {
 
   it('asks only the new setting after an update', () => {
     const confirmed = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'checkForUpdates', 'hotkey'])
-    expect(settingsToAsk(confirmed, { autostartAvailable: true })).toEqual(['autostart'])
+    expect(settingsToAsk(confirmed, { installed: true })).toEqual(['autostart'])
   })
 
   it('never asks autostart where it cannot be set', () => {
-    expect(settingsToAsk(new Set(), { autostartAvailable: false })).not.toContain('autostart')
+    expect(settingsToAsk(new Set(), { installed: false })).not.toContain('autostart')
     const rest = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'checkForUpdates', 'hotkey'])
-    expect(settingsToAsk(rest, { autostartAvailable: false })).toEqual([])
+    expect(settingsToAsk(rest, { installed: false })).toEqual([])
+  })
+
+  it('skips checkForUpdates in a repo build and asks it in the installed app', () => {
+    const rest = new Set<SettingKey>(['autostart', 'hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+    expect(settingsToAsk(rest, { installed: false })).toEqual([])
+    expect(settingsToAsk(rest, { installed: true })).toEqual(['checkForUpdates'])
+    expect(settingsToAsk(new Set(), { installed: false })).toEqual(['hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+  })
+})
+
+describe('isInstalledOnly', () => {
+  it('is true for exactly autostart and checkForUpdates', () => {
+    expect(SETTINGS.map((setting) => setting.key).filter(isInstalledOnly)).toEqual(['autostart', 'checkForUpdates'])
   })
 })
 

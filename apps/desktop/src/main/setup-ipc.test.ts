@@ -52,7 +52,7 @@ function fakes(
 } {
   const applied: ApplyCall[] = []
   const switched: string[] = []
-  const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(), autostartAvailable: true }
+  const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(), installed: true }
   return {
     deps: {
       settings: {
@@ -138,11 +138,11 @@ describe('setupState', () => {
   const hotkey = { requested: 'Shift+Alt+Space', status: 'registered' } as const
 
   it('asks for the unconfirmed settings and passes the rest through', () => {
-    const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(['jumpToTab']), autostartAvailable: true }
+    const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(['jumpToTab']), installed: true }
     expect(setupState(snapshot, { hotkey, integration: { kind: 'stale', missing: ['Stop'], tokenMismatch: false }, showAll: true })).toEqual({
       values: VALUES,
       ask: ['autostart', 'hideAfterLastDecision', 'checkForUpdates', 'hotkey'],
-      autostartAvailable: true,
+      installed: true,
       hotkey,
       integration: 'stale',
       showAll: true,
@@ -153,7 +153,7 @@ describe('setupState', () => {
     const snapshot: SettingsSnapshot = {
       values: { ...VALUES, autostart: false },
       confirmed: new Set(['jumpToTab']),
-      autostartAvailable: true,
+      installed: true,
     }
     const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: false })
     expect(state.values.autostart).toBe(DEFAULT_SETTINGS.autostart)
@@ -164,7 +164,7 @@ describe('setupState', () => {
     const snapshot: SettingsSnapshot = {
       values: { ...VALUES, autostart: false },
       confirmed: new Set(['autostart']),
-      autostartAvailable: true,
+      installed: true,
     }
     const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: true })
     expect(state.values.autostart).toBe(false)
@@ -174,17 +174,17 @@ describe('setupState', () => {
     const snapshot: SettingsSnapshot = {
       values: { ...VALUES, autostart: false },
       confirmed: new Set(),
-      autostartAvailable: false,
+      installed: false,
     }
     const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: true })
     expect(state.values.autostart).toBe(false)
   })
 
-  it('never asks for autostart where it is unavailable, and never for the integration', () => {
+  it('never asks for an installed-only setting in a repo build, and never for the integration', () => {
     const snapshot: SettingsSnapshot = {
       values: VALUES,
-      confirmed: new Set(['hideAfterLastDecision', 'jumpToTab', 'checkForUpdates', 'hotkey']),
-      autostartAvailable: false,
+      confirmed: new Set(['hideAfterLastDecision', 'jumpToTab', 'hotkey']),
+      installed: false,
     }
     const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: false })
     expect(state.ask).toEqual([])

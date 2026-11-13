@@ -3,8 +3,9 @@ import type { SetupApi } from '../preload/setup-api.js'
 import { errorMessage } from '../shared/error-message.js'
 import { hotkeyLabel } from '../shared/hotkey-status.js'
 import {
-  AUTOSTART_UNAVAILABLE_NOTE,
+  INSTALLED_ONLY_NOTE,
   SETTINGS,
+  isInstalledOnly,
   type SettingDefinition,
   type SettingKey,
   type SettingValues,
@@ -175,7 +176,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
         </div>
       )
     }
-    const unavailable = key === 'autostart' && !state.autostartAvailable
+    const unavailable = isInstalledOnly(key) && !state.installed
     return (
       <label className="setup-row" key={key}>
         <input
@@ -187,7 +188,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
           }}
         />
         <span className="setup-label">{setting.label}</span>
-        {unavailable ? <span className="setup-note">{AUTOSTART_UNAVAILABLE_NOTE}</span> : undefined}
+        {unavailable ? <span className="setup-note">{INSTALLED_ONLY_NOTE}</span> : undefined}
       </label>
     )
   }

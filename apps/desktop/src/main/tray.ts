@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Menu, Tray, app, nativeImage, type MenuItemConstructorOptions } from 'electron'
-import { AUTOSTART_UNAVAILABLE_NOTE, SETTINGS, type BooleanSettingKey, type SettingDefinition } from '../shared/settings.js'
+import { INSTALLED_ONLY_NOTE, SETTINGS, isInstalledOnly, type BooleanSettingKey, type SettingDefinition } from '../shared/settings.js'
 import { hotkeyLabel, type HotkeyRegistration } from '../shared/hotkey-status.js'
 import { resourcesDir } from './resources.js'
 import type { SettingsSnapshot } from './settings-service.js'
@@ -22,8 +22,8 @@ export interface TrayHandle {
   destroy(): void
 }
 
-/** Shown after the autostart label in a repo build, where the checkbox is read-only. */
-const AUTOSTART_UNAVAILABLE_SUFFIX = ` (${AUTOSTART_UNAVAILABLE_NOTE})`
+/** Shown after the label of an installed-only setting in a repo build, where the checkbox is read-only. */
+const INSTALLED_ONLY_SUFFIX = ` (${INSTALLED_ONLY_NOTE})`
 
 function isBooleanSetting(setting: SettingDefinition): setting is SettingDefinition & { key: BooleanSettingKey } {
   return setting.kind === 'boolean' && setting.key !== 'hotkey'
@@ -79,9 +79,9 @@ export function createTray(options: {
   let destroyed = false
 
   const toggleItem = (setting: SettingDefinition & { key: BooleanSettingKey }): MenuItemConstructorOptions => {
-    const readOnly = setting.key === 'autostart' && !settings.autostartAvailable
+    const readOnly = isInstalledOnly(setting.key) && !settings.installed
     return {
-      label: readOnly ? `${setting.label}${AUTOSTART_UNAVAILABLE_SUFFIX}` : setting.label,
+      label: readOnly ? `${setting.label}${INSTALLED_ONLY_SUFFIX}` : setting.label,
       type: 'checkbox',
       checked: settings.values[setting.key],
       enabled: !readOnly,

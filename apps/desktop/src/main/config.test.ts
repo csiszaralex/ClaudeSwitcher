@@ -152,7 +152,7 @@ describe('confirmed settings', () => {
     const config = await loadConfig(dir)
     expect(config.values).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: false, checkForUpdates: true })
     expect([...config.confirmed]).toEqual(['autostart', 'hideAfterLastDecision', 'jumpToTab', 'hotkey'])
-    expect(settingsToAsk(config.confirmed, { autostartAvailable: true })).toEqual(['checkForUpdates'])
+    expect(settingsToAsk(config.confirmed, { installed: true })).toEqual(['checkForUpdates'])
   })
 
   it('ignores unknown and malformed confirmed entries', async () => {

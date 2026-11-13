@@ -69,7 +69,25 @@ describe('createSettingsService', () => {
     const snapshot = await service.apply({}, ['autostart', 'jumpToTab'])
     expect(calls[0]?.confirm).toEqual(['jumpToTab'])
     expect([...snapshot.confirmed]).toEqual(['jumpToTab'])
-    expect(snapshot.autostartAvailable).toBe(false)
+    expect(snapshot.installed).toBe(false)
+  })
+
+  it('a repo build neither writes nor confirms checkForUpdates', async () => {
+    const { persist, calls } = fakePersist(true)
+    const service = createSettingsService({ stored: stored(), autostart: fakeAutostart(false), persist })
+    const snapshot = await service.apply({ checkForUpdates: false, jumpToTab: false }, ['checkForUpdates', 'jumpToTab'])
+    expect(calls[0]?.patch).toEqual({ jumpToTab: false })
+    expect(calls[0]?.confirm).toEqual(['jumpToTab'])
+    expect(snapshot.values.checkForUpdates).toBe(true)
+    expect([...snapshot.confirmed]).toEqual(['jumpToTab'])
+  })
+
+  it('the installed app writes and confirms checkForUpdates', async () => {
+    const { persist, calls } = fakePersist(true)
+    const service = createSettingsService({ stored: stored(), autostart: fakeAutostart(true), persist })
+    await service.apply({ checkForUpdates: false }, ['checkForUpdates'])
+    expect(calls[0]?.patch).toEqual({ checkForUpdates: false })
+    expect(calls[0]?.confirm).toEqual(['checkForUpdates'])
   })
 
   it('listeners get every change', async () => {
