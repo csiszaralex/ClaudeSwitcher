@@ -10,6 +10,12 @@ export interface StoredConfig {
   values: StoredValues
   /** The settings the user has answered. An older file without the list confirms nothing. */
   confirmed: ReadonlySet<SettingKey>
+  /**
+   * The release the user chose to skip in the update popup (`saveSkippedVersion`). Not a setting:
+   * it is not in `SETTINGS`, the setup window does not show it, and it is never confirmed. An older
+   * file without it, or a value that is not a version, skips nothing.
+   */
+  skippedVersion: string | undefined
 }
 
 const DEFAULT_VALUES: StoredValues = {
@@ -20,7 +26,15 @@ const DEFAULT_VALUES: StoredValues = {
 }
 
 function defaultConfig(): StoredConfig {
-  return { values: { ...DEFAULT_VALUES }, confirmed: new Set() }
+  return { values: { ...DEFAULT_VALUES }, confirmed: new Set(), skippedVersion: undefined }
+}
+
+/** A release version as electron-updater reports it (`1.2.3`, with an optional pre-release or build). */
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+
+/** The stored skipped version, or `undefined` if it is missing or not a version string. */
+function versionOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && VERSION_PATTERN.test(value) ? value : undefined
 }
 
 /** The value of a boolean key, or its default if it is missing or not a boolean. */
@@ -110,7 +124,7 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
   if (raw !== undefined) {
     const parsed = parseObject(raw)
     if (parsed === undefined) return defaultConfig()
-    const { hotkey, hideAfterLastDecision, jumpToTab, checkForUpdates, confirmed } = parsed
+    const { hotkey, hideAfterLastDecision, jumpToTab, checkForUpdates, confirmed, skippedVersion } = parsed
     return {
       values: {
         hotkey: isHotkeyValue(hotkey) ? hotkey : DEFAULT_HOTKEY,
@@ -119,6 +133,7 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
         checkForUpdates: booleanOr(checkForUpdates, DEFAULT_VALUES.checkForUpdates),
       },
       confirmed: confirmedKeys(confirmed),
+      skippedVersion: versionOrUndefined(skippedVersion),
     }
   }
 
@@ -158,6 +173,22 @@ export async function saveSettings(
     return true
   } catch (error) {
     console.error('[claudeswitcher] could not update the config file; not overwriting it', error)
+    return false
+  }
+}
+
+/**
+ * Persists the release the user skipped in the update popup (`skippedVersion`), with the same
+ * guarantees as `saveSettings`: the file is read fresh, only this key changes, a broken or
+ * unreadable file is not written to, and the calls queue per file. Never throws; true if it was
+ * written.
+ */
+export async function saveSkippedVersion(dir: string, version: string): Promise<boolean> {
+  try {
+    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), skippedVersion: version }))
+    return true
+  } catch (error) {
+    console.error('[claudeswitcher] could not save the skipped update version; not overwriting the config file', error)
     return false
   }
 }

@@ -3,7 +3,7 @@ import path from 'node:path'
 import { tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_HOTKEY, settingsToAsk } from '../shared/settings.js'
-import { configPath, loadConfig, saveSettings } from './config.js'
+import { configPath, loadConfig, saveSettings, saveSkippedVersion } from './config.js'
 
 const freshDir = (): Promise<string> => tempDir('cs-config-')
 
@@ -162,6 +162,61 @@ describe('confirmed settings', () => {
 
     await writeFile(configPath(dir), JSON.stringify({ confirmed: 'jumpToTab' }))
     expect((await loadConfig(dir)).confirmed.size).toBe(0)
+  })
+})
+
+describe('skipped update version', () => {
+  it('an older config without the key skips nothing, and loads without a rewrite', async () => {
+    const dir = await freshDir()
+    const older = JSON.stringify({ hotkey: 'F9' })
+    await writeFile(configPath(dir), older)
+    expect((await loadConfig(dir)).skippedVersion).toBeUndefined()
+    expect(await readFile(configPath(dir), 'utf8')).toBe(older)
+  })
+
+  it('a missing file skips nothing', async () => {
+    expect((await loadConfig(await freshDir())).skippedVersion).toBeUndefined()
+  })
+
+  it('returns a stored version and ignores a value that is not one', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ skippedVersion: '0.2.0' }))
+    expect((await loadConfig(dir)).skippedVersion).toBe('0.2.0')
+    for (const bad of [42, '', 'latest', '0.2', ' 0.2.0', null, ['0.2.0']]) {
+      await writeFile(configPath(dir), JSON.stringify({ skippedVersion: bad }))
+      expect((await loadConfig(dir)).skippedVersion).toBeUndefined()
+    }
+  })
+
+  it('is not a setting: it is never confirmed and does not change the values', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ skippedVersion: '0.2.0', confirmed: ['skippedVersion'] }))
+    const config = await loadConfig(dir)
+    expect(config.values).toEqual(DEFAULTS)
+    expect(config.confirmed.size).toBe(0)
+  })
+
+  it('saveSkippedVersion changes only that key, and a later settings save keeps it', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', note: 'kézzel', skippedVersion: '0.2.0' }))
+    expect(await saveSkippedVersion(dir, '0.3.0')).toBe(true)
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual({ hotkey: 'F9', note: 'kézzel', skippedVersion: '0.3.0' })
+
+    expect(await saveSettings(dir, { jumpToTab: false }, [])).toBe(true)
+    expect((await loadConfig(dir)).skippedVersion).toBe('0.3.0')
+  })
+
+  it('saveSkippedVersion writes the defaults plus the version when there is no file yet', async () => {
+    const dir = await freshDir()
+    expect(await saveSkippedVersion(dir, '0.2.0')).toBe(true)
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual({ ...DEFAULTS, skippedVersion: '0.2.0' })
+  })
+
+  it('saveSkippedVersion never writes into a broken file and never throws', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), '{ broken')
+    expect(await saveSkippedVersion(dir, '0.2.0')).toBe(false)
+    expect(await readFile(configPath(dir), 'utf8')).toBe('{ broken')
   })
 })
 
