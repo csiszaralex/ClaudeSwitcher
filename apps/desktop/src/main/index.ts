@@ -36,6 +36,7 @@ import {
 import { readInstanceRecord, removeInstanceRecord, writeInstanceRecord } from './instance-file.js'
 import { createHandleFrom } from './ipc-handle.js'
 import { rendererLocation } from './ipc-sender.js'
+import { ensureLogFile, installFileLog } from './log-file.js'
 import { createOverlayController } from './overlay-window.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { createQuitSequence } from './quit-sequence.js'
@@ -66,6 +67,26 @@ import { waitUntil } from './wait-for-exit.js'
 // Must run before `requestSingleInstanceLock`, which is tied to `userData`. The packaged build
 // sets `productName`, which would otherwise move the directory and lose the token (see `userDataDir`).
 app.setPath('userData', userDataDir(app.getPath('appData')))
+
+// Right after `userData` is known, so every later line is caught, the `--quit` helper's too (its
+// pid tells the two apart). The daemon and core run in this process, so their `console` lines land
+// in the file without a call-site change.
+installFileLog({ userData: app.getPath('userData'), target: console, now: () => new Date(), pid: process.pid })
+console.log(
+  `[claudeswitcher] start: version ${app.getVersion()}, ${app.isPackaged ? 'packaged' : 'repo build'}, electron ${process.versions.electron}`,
+)
+
+// `uncaughtExceptionMonitor` only observes: Electron's own handling (its error dialog) stays.
+process.on('uncaughtExceptionMonitor', (error, origin) => {
+  console.error(`[claudeswitcher] ${origin}`, error)
+})
+// Deliberately log and go on. Under Node's default mode (`throw`) a rejection without a handler
+// becomes an uncaught exception; with this handler it does not, whatever Electron's own default is.
+// A tray app that holds permission requests must not go down over one stray promise: the line in
+// the log is what we need to find it.
+process.on('unhandledRejection', (reason) => {
+  console.error('[claudeswitcher] unhandled rejection', reason)
+})
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Loads electron-updater (externalized, like koffi) only where it is used: in the installed app. */
@@ -110,6 +131,23 @@ async function openTabFocusUri(uri: string): Promise<void> {
     await shell.openExternal(uri)
   } catch (error) {
     console.error('[focus] could not open the tab focus URI; the window stays focused', error)
+  }
+}
+
+/** Opens the log file with the default application; the file is created first, so there is always something to open. */
+function openLog(): void {
+  try {
+    shell
+      .openPath(ensureLogFile(app.getPath('userData')))
+      .then((failure) => {
+        // `openPath` resolves with an error message, an empty string on success.
+        if (failure !== '') console.error('[claudeswitcher] could not open the log file', failure)
+      })
+      .catch((error: unknown) => {
+        console.error('[claudeswitcher] could not open the log file', error)
+      })
+  } catch (error) {
+    console.error('[claudeswitcher] could not create the log file', error)
   }
 }
 
@@ -460,6 +498,7 @@ async function startApp(): Promise<void> {
     onSettings: () => {
       if (!quitSequence.isQuitting()) setupWindow.open({ showAll: true })
     },
+    onOpenLog: openLog,
     onQuit: () => {
       app.quit()
     },

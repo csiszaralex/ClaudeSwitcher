@@ -39,7 +39,7 @@ The installer and the uninstaller use the same helper modes, `--quit` and `--uni
 
 ### Shared data
 
-The installed app and every repo build use the same `userData` directory, `%APPDATA%\@claudeswitcher\desktop` (`apps/desktop/src/main/user-data.ts` `userDataDir`). It holds `config.json` (the settings, which of them the user confirmed, and the update version the user skipped), `daemon-token` and `instance.json`. Because the token is shared, hooks installed by one build keep working with the others. Start at login and checking for updates work only in the installed app, so both are read-only in a repo build: the login item would register `electron.exe` (`autostart.ts`), and the updater is created only when `app.isPackaged` (`index.ts`). The list is `INSTALLED_ONLY_SETTINGS` in `apps/desktop/src/shared/settings.ts` (`isInstalledOnly`).
+The installed app and every repo build use the same `userData` directory, `%APPDATA%\@claudeswitcher\desktop` (`apps/desktop/src/main/user-data.ts` `userDataDir`). It holds `config.json` (the settings, which of them the user confirmed, and the update version the user skipped), `daemon-token`, `instance.json` and the `logs` folder (the log file, see `main/log-file.ts`). Because the token is shared, hooks installed by one build keep working with the others. Start at login and checking for updates work only in the installed app, so both are read-only in a repo build: the login item would register `electron.exe` (`autostart.ts`), and the updater is created only when `app.isPackaged` (`index.ts`). The list is `INSTALLED_ONLY_SETTINGS` in `apps/desktop/src/shared/settings.ts` (`isInstalledOnly`).
 
 ### Environment variables
 
@@ -145,6 +145,7 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 - `main/instance.ts`: the helper flags (`HELPER_FLAG`) and exit codes (`LAUNCH_EXIT_CODE`) that `resources/installer.nsh` repeats as literals; `instance.test.ts` checks that the two agree.
 - `shared/settings.ts`: the one list of user settings (`SETTINGS`, `DEFAULT_SETTINGS`, `DEFAULT_HOTKEY`), including `checkForUpdates`, which `main/updater.ts` follows.
 - `main/updater.ts`: the in-app update of the installed app on electron-updater (`createUpdateController`): the check interval (`UPDATE_CHECK_INTERVAL_MS`), the tray line (`updateLabel`), the update popup's texts and choices (`updatePrompt`, `updateChoice`), when the popup appears and what a skipped version (`config.ts` `saveSkippedVersion`) suppresses, and why `quitAndInstall` goes through the normal quit sequence and the installer's `--quit` helper (the comment in `install`).
+- `main/log-file.ts`: the log of the main process (`installFileLog`, `ensureLogFile`): its folder and file names (`logDir`, `logFilePath`, `OLD_LOG_FILE_NAME`), the size limit (`LOG_MAX_BYTES`), the line format and the rotation. It wraps `console.log`, `console.warn` and `console.error` once, from `index.ts`, so no call site changes; the renderer's console is not captured. The tray's "Napló megnyitása" opens the file.
 - `shared/overlay-channels.ts`, `shared/setup-channels.ts`: the IPC channel names and reply types of the two windows.
 
 ## Claude Code coupling points

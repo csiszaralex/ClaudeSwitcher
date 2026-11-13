@@ -60,6 +60,8 @@ export function createTray(options: {
   onOpen: () => void
   /** Opens the setup window with every setting. */
   onSettings: () => void
+  /** Opens the log file (`log-file.ts`) in the default application. */
+  onOpenLog: () => void
   onQuit: () => void
   /** The notice line (an outdated integration) was clicked: the setup window handles the integration. */
   onNotice: () => void
@@ -110,6 +112,7 @@ export function createTray(options: {
       // happen. The tray is then the only entry point left, so this is where to say it.
       { label: hotkeyLabel(hotkey), enabled: false },
       { label: 'Beállítások…', click: options.onSettings },
+      { label: 'Napló megnyitása', click: options.onOpenLog },
       { type: 'separator' },
       ...TOGGLES.map(toggleItem),
       { type: 'separator' },
