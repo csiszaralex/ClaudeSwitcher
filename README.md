@@ -38,7 +38,13 @@ The installer installs for the current user only, without administrator rights, 
 
 ### Updating
 
-The installed app looks for a new release at start-up and every 6 hours, and downloads it in the background. When it is ready, the tray menu shows **"Frissítés elérhető (<version>), telepítés"** (update available, install) at the top. Clicking it installs the update silently and starts the new version; the settings and the Claude Code integration stay. Nothing is installed without that click. Turn the checks off with **"Frissítések keresése"** (check for updates) in the tray or the settings window. The first start after an update that adds a new setting shows the **"Első beállítás"** window once, for that setting.
+The installed app looks for a new release at start-up and every 6 hours, and downloads it in the background. When it is ready, a **"Frissítés elérhető"** (update available) popup asks what to do, once the list is closed:
+
+- **"Frissítés most"** (update now): installs the update silently and starts the new version; the settings and the Claude Code integration stay. Requests still waiting are left to the prompts in VS Code.
+- **"Most ne"** (not now, also Enter and closing the popup): nothing happens. The update stays in the tray menu as **"Frissítés elérhető (<version>), telepítés"** (update available, install) at the top, where a click installs it the same way, and the popup comes back at the next start (while the checks are on).
+- **"Verzió kihagyása"** (skip this version): this version is never offered or downloaded again, not even after a restart. The next newer release is offered as usual.
+
+Nothing is installed without one of those two clicks. Turn the checks off with **"Frissítések keresése"** (check for updates) in the tray or the settings window. The first start after an update that adds a new setting shows the **"Első beállítás"** window once, for that setting.
 
 ## First start
 
@@ -61,7 +67,7 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 The tray icon changes when a session waits for you, and its tooltip says how many. Clicking the icon opens the list. The right-click menu:
 
-- **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded; see [Updating](#updating).
+- **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded and not skipped; see [Updating](#updating).
 - **"Megnyitás"** (open): opens the list.
 - **"Gyorsbillentyű: Shift+Alt+Space"** (hotkey): the hotkey in effect, or what is wrong with it if it could not be registered.
 - **"Beállítások…"** (settings): the settings window, with the integration section.

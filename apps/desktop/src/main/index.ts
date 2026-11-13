@@ -12,7 +12,7 @@ import {
   shell,
 } from 'electron'
 import { createAutostart, type LoginItems } from './autostart.js'
-import { loadConfig, saveSettings } from './config.js'
+import { loadConfig, saveSettings, saveSkippedVersion } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { errorMessage } from '../shared/error-message.js'
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
@@ -52,7 +52,14 @@ import {
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
-import { CONSOLE_UPDATER_LOG, createUpdateController, updateLabel, type UpdateController } from './updater.js'
+import {
+  CONSOLE_UPDATER_LOG,
+  createUpdateController,
+  updateChoice,
+  updateLabel,
+  updatePrompt,
+  type UpdateController,
+} from './updater.js'
 import { userDataDir } from './user-data.js'
 import { waitUntil } from './wait-for-exit.js'
 
@@ -313,8 +320,9 @@ async function startApp(): Promise<void> {
   const userData = app.getPath('userData')
   // Every handler reads the settings from the service at the time of use, so a change from the
   // tray (or the setup window) takes effect at once.
+  const stored = await loadConfig(userData)
   const settings = createSettingsService({
-    stored: await loadConfig(userData),
+    stored,
     autostart: createAutostart(app.isPackaged, LOGIN_ITEMS),
     persist: (patch, confirm) => saveSettings(userData, patch, confirm),
   })
@@ -459,7 +467,7 @@ async function startApp(): Promise<void> {
     onNotice: () => {
       if (!quitSequence.isQuitting()) setupWindow.open({ showAll: true })
     },
-    // `updates` is defined below; the line appears only once it has downloaded an update.
+    // `updates` is defined below; the line appears only while a downloaded update is on offer.
     onUpdate: () => {
       if (!quitSequence.isQuitting()) updates?.install()
     },
@@ -471,10 +479,17 @@ async function startApp(): Promise<void> {
     ? createUpdateController({
         updater: (requireRuntime('electron-updater') as typeof import('electron-updater')).autoUpdater,
         enabled: settings.snapshot().values.checkForUpdates,
-        onDownloaded: (version) => {
-          console.log(`[claudeswitcher] update ${version} downloaded`)
-          tray.setUpdate(updateLabel(version))
+        onOffer: (version) => {
+          if (version !== undefined) console.log(`[claudeswitcher] update ${version} downloaded`)
+          tray.setUpdate(version === undefined ? undefined : updateLabel(version))
         },
+        // No parent window: the overlay is hidden by then, and the setup window may be closed.
+        prompt: (version) =>
+          dialog.showMessageBox(updatePrompt(version, app.getVersion())).then(({ response }) => updateChoice(response)),
+        overlayVisible: overlay.isVisible,
+        onOverlayHidden: overlay.onHidden,
+        skippedVersion: stored.skippedVersion,
+        saveSkipped: (version) => saveSkippedVersion(userData, version),
         log: CONSOLE_UPDATER_LOG,
       })
     : undefined

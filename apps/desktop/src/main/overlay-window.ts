@@ -16,6 +16,10 @@ export interface OverlayController {
   readonly toggle: () => void
   /** Hides the overlay if it still exists. */
   readonly hide: () => void
+  /** Whether the overlay is visible now. */
+  readonly isVisible: () => boolean
+  /** Registers a listener for the overlay being hidden (its window's `hide` event, a re-created window included). */
+  readonly onHidden: (listener: () => void) => void
 }
 
 /**
@@ -35,6 +39,8 @@ export function createOverlayController(options: {
   let sessionEnding = false
   /** The limit on the overlay's renderer reloads, shared across a re-created overlay too. */
   const allowRendererReload = createReloadLimiter()
+  /** The `onHidden` listeners; every window `createOverlay` makes calls them. */
+  const hiddenListeners: (() => void)[] = []
 
   function createOverlay(): BrowserWindow {
     const window = new BrowserWindow({
@@ -62,6 +68,9 @@ export function createOverlayController(options: {
     // tracking. `show` always fires when the window really becomes visible, and only then.
     window.on('show', () => {
       window.webContents.send(OVERLAY_CHANNELS.shown)
+    })
+    window.on('hide', () => {
+      for (const listener of hiddenListeners) listener()
     })
 
     // Alt+F4 would close the frameless window too, and with it the only window for good. After that
@@ -130,6 +139,10 @@ export function createOverlayController(options: {
     // `hide()` on a destroyed window would throw.
     hide: () => {
       if (!overlay.isDestroyed()) overlay.hide()
+    },
+    isVisible: () => !overlay.isDestroyed() && overlay.isVisible(),
+    onHidden: (listener) => {
+      hiddenListeners.push(listener)
     },
   }
 }
