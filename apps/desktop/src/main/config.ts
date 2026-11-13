@@ -15,6 +15,7 @@ export interface StoredConfig {
 const DEFAULT_VALUES: StoredValues = {
   hideAfterLastDecision: DEFAULT_SETTINGS.hideAfterLastDecision,
   jumpToTab: DEFAULT_SETTINGS.jumpToTab,
+  checkForUpdates: DEFAULT_SETTINGS.checkForUpdates,
   hotkey: DEFAULT_SETTINGS.hotkey,
 }
 
@@ -109,12 +110,13 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
   if (raw !== undefined) {
     const parsed = parseObject(raw)
     if (parsed === undefined) return defaultConfig()
-    const { hotkey, hideAfterLastDecision, jumpToTab, confirmed } = parsed
+    const { hotkey, hideAfterLastDecision, jumpToTab, checkForUpdates, confirmed } = parsed
     return {
       values: {
         hotkey: isHotkeyValue(hotkey) ? hotkey : DEFAULT_HOTKEY,
         hideAfterLastDecision: booleanOr(hideAfterLastDecision, DEFAULT_VALUES.hideAfterLastDecision),
         jumpToTab: booleanOr(jumpToTab, DEFAULT_VALUES.jumpToTab),
+        checkForUpdates: booleanOr(checkForUpdates, DEFAULT_VALUES.checkForUpdates),
       },
       confirmed: confirmedKeys(confirmed),
     }

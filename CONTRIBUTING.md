@@ -16,7 +16,16 @@ pnpm --filter @claudeswitcher/desktop start
 - `pnpm build` builds every package. The desktop app bundles `@claudeswitcher/core` and `@claudeswitcher/daemon` from their `dist/` output, so build them again after changing either of them (`pnpm --filter @claudeswitcher/core build`, or `pnpm build`).
 - `start` is `electron-vite preview`: it builds the app and starts the built version. For live reloading of the renderer use `pnpm --filter @claudeswitcher/desktop dev` (`electron-vite dev`).
 - The Electron binary does not come with `pnpm install`: the `electron` package has no install script. The desktop `predev`, `prestart` and `predist` scripts run its `install-electron` command first, which downloads the binary once and does nothing after that. Building and `pnpm verify` do not need it.
-- `pnpm --filter @claudeswitcher/desktop dist` builds the Windows installer into `apps/desktop/release/` (NSIS, configured in `apps/desktop/electron-builder.yml` and `apps/desktop/resources/installer.nsh`).
+
+### Building the installer
+
+```sh
+pnpm install
+pnpm build
+pnpm --filter @claudeswitcher/desktop dist
+```
+
+`dist` builds the app and the Windows installer into `apps/desktop/release/`: `ClaudeSwitcher-Setup-<version>.exe`, its `.blockmap` and `latest.yml` (NSIS, configured in `apps/desktop/electron-builder.yml` and `apps/desktop/resources/installer.nsh`). A local build has the repo's version, `0.0.0`, and uploads nothing (`--publish never`). An installer built on your machine carries no download mark, so SmartScreen does not warn about it. Its in-app update works like a released one: it finds the latest GitHub release and offers it in the tray, and a click on that line replaces the test build with the release.
 
 ### One instance at a time, and the hand-over
 
@@ -103,6 +112,14 @@ For a change that should only touch comments (a translation, for example), `pnpm
 
 [Conventional Commits](https://www.conventionalcommits.org/) with exactly one scope, in English, one independent change per commit. The scopes in use are `core`, `daemon`, `desktop`, `repo` and `deps`. For example: `fix(daemon): release held requests before the server closes`.
 
+### Releases
+
+Every push to `main` (a merged PR) runs `.github/workflows/release.yml`. Nx release (`nx.json` `release`) looks at the commits since the last `v*` tag that touch the desktop app or a package it bundles (a commit that changes only `.github/`, `scripts/` or the docs never releases):
+
+- `feat` gives a minor bump, `fix` a patch bump, a breaking change (`!` or `BREAKING CHANGE:`) a major bump. `docs`, `test`, `chore`, `ci`, `refactor`, `build` and `style` give no release, and the run ends green without one. A squash merge leaves one commit, the PR title: it must then be a Conventional Commit too, or the merge releases nothing.
+- The version source is the git tag (`v0.1.0`, …). The workflow writes the version into `apps/desktop/package.json` only in its own checkout; nothing is committed back, so the repo keeps `0.0.0`.
+- The order is `pnpm verify`, the version, the installer build, then the tag, the GitHub Release with the notes Nx writes from the commits, and the upload of the installer, its `.blockmap` and `latest.yml`. A red `verify`, a failed build or a missing installer file leaves no tag. Only the tag is pushed, so a merge that lands during the run does not break it. If a step after the tag fails, delete the Release (if any) and the tag by hand, then rerun the workflow run of the latest commit on `main`. With the tag still there, a rerun finds nothing to release and ends green.
+
 ## Module index
 
 The shared modules, each the one home of its facts. Core modules marked "/browser" are also exported by `@claudeswitcher/core/browser`.
@@ -126,7 +143,8 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 
 - `main/daemon-port.ts`: the daemon's fixed port (`DAEMON_PORT`). A module without imports, because the build config reads it too.
 - `main/instance.ts`: the helper flags (`HELPER_FLAG`) and exit codes (`LAUNCH_EXIT_CODE`) that `resources/installer.nsh` repeats as literals; `instance.test.ts` checks that the two agree.
-- `shared/settings.ts`: the one list of user settings (`SETTINGS`, `DEFAULT_SETTINGS`, `DEFAULT_HOTKEY`).
+- `shared/settings.ts`: the one list of user settings (`SETTINGS`, `DEFAULT_SETTINGS`, `DEFAULT_HOTKEY`), including `checkForUpdates`, which `main/updater.ts` follows.
+- `main/updater.ts`: the in-app update of the installed app on electron-updater (`createUpdateController`): the check interval (`UPDATE_CHECK_INTERVAL_MS`), the tray line (`updateLabel`), and why `quitAndInstall` goes through the normal quit sequence and the installer's `--quit` helper (the comment in `install`).
 - `shared/overlay-channels.ts`, `shared/setup-channels.ts`: the IPC channel names and reply types of the two windows.
 
 ## Claude Code coupling points

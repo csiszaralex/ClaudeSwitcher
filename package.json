@@ -22,6 +22,7 @@
     "pre-push": "pnpm verify"
   },
   "devDependencies": {
+    "@nx/js": "24.0.2",
     "@types/node": "^24.19.2",
     "eslint": "^10.13.0",
     "knip": "^6.44.0",

@@ -1,0 +1,90 @@
+name: release
+
+# Every push to main (a merged PR) may release the desktop app. Nx release decides from the
+# Conventional Commits since the last `v*` tag: `feat` gives a minor bump, `fix` a patch bump, the
+# other types no release (`nx.json` `release`). The tag is the version source: the version is
+# written into `apps/desktop/package.json` only in this checkout, and nothing is committed back.
+on:
+  push:
+    branches: [main]
+
+# Only this workflow writes: the tag and the GitHub Release.
+permissions:
+  contents: write
+
+# One release at a time; a running release is never cancelled halfway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The full history and the tags: Nx compares against the last `v*` tag.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # Corepack provides the pnpm version pinned in `packageManager`.
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      # Red means no release. It also builds the workspace packages the installer bundles.
+      - run: pnpm verify
+
+      # Without a releasable commit the version stays the repo's 0.0.0, and the run ends green here.
+      - id: version
+        run: |
+          pnpm exec nx release version
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          if [ "$version" = "0.0.0" ]; then
+            echo "No releasable commit since the last tag: no release."
+          else
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Build before tagging, so a failed build, or a missing file the upload step needs, leaves no
+      # tag and no release behind.
+      - if: steps.version.outputs.version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          pnpm --filter @claudeswitcher/desktop dist
+          cd apps/desktop/release
+          ls "ClaudeSwitcher-Setup-$VERSION.exe" "ClaudeSwitcher-Setup-$VERSION.exe.blockmap" latest.yml
+
+      # The tag on the merged commit, pushed, and the GitHub Release with the notes Nx writes from
+      # the commits. The first release has no earlier tag to compare against: `--first-release`.
+      # Only the tag is pushed (`--git-push-args`): Nx's own push (`git push --follow-tags
+      # --no-verify --atomic origin`) would push the branch too, and fail together with the tag
+      # once `main` moved on during the run. `--no-verify` skips the pre-push hook, whose
+      # `pnpm verify` already ran above.
+      - if: steps.version.outputs.version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          first=""
+          if [ -z "$(git tag --list 'v*')" ]; then first="--first-release"; fi
+          pnpm exec nx release changelog "$VERSION" --git-push --git-push-args "refs/tags/v$VERSION" $first
+
+      # What electron-updater reads: `latest.yml` names the installer and its checksum, the
+      # blockmap allows a differential download (`apps/desktop/electron-builder.yml` `publish`).
+      # The names follow `nsis.artifactName` there; the build step above checked that they exist.
+      - if: steps.version.outputs.version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd apps/desktop/release
+          gh release upload "v$VERSION" \
+            "ClaudeSwitcher-Setup-$VERSION.exe" \
+            "ClaudeSwitcher-Setup-$VERSION.exe.blockmap" \
+            latest.yml

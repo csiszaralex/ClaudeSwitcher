@@ -4,9 +4,12 @@ import { hardenWindow, loadPage, secureWebPreferences } from './harden-window.js
 import { captureStep } from './hotkey-capture.js'
 import type { RendererLocation } from './ipc-sender.js'
 
-/** Content size of the setup window: all four settings, the integration row and the button fit. */
+/**
+ * Content size of the setup window: every setting, the integration row and the button fit. Each
+ * checkbox row is about 28 px (`styles.css` `.setup-row`: a 13 px × 1.4 line plus 2 × 5 px padding).
+ */
 const SETUP_WIDTH = 480
-const SETUP_HEIGHT = 520
+const SETUP_HEIGHT = 548
 
 export interface SetupWindowController {
   /**

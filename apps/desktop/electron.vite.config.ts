@@ -25,7 +25,8 @@ function workspaceDependencies(manifest: unknown): string[] {
  * The main process is an ES module (`"type": "module"` in `package.json`). Our workspace packages
  * are still built into the bundle, together with their transitive dependencies (hono,
  * @hono/node-server, ws): those are not in this app's `dependencies`, so they are not externalized.
- * So at runtime only `koffi` and `electron` come from `node_modules`.
+ * So at runtime only `koffi`, `electron-updater` (with its own dependencies) and `electron` come from
+ * `node_modules`.
  *
  * This is a packaging decision, not a loading constraint. Under Electron 33's Node 20 it was one: the
  * CJS main died with `ERR_REQUIRE_ESM` on an externalized ESM workspace package. Node 24.22.1

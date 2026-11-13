@@ -13,6 +13,8 @@ export interface TrayHandle {
   setWaiting(count: number): void
   /** A warning line in the menu (an outdated integration); clicking it calls `onNotice`. `undefined` removes it. */
   setNotice(text: string | undefined): void
+  /** The update line at the top of the menu (`updateLabel`); clicking it calls `onUpdate`. `undefined` removes it. */
+  setUpdate(text: string | undefined): void
   /** Shows the current settings; the setup window can change them while the tray is open. */
   setSettings(snapshot: SettingsSnapshot): void
   /** Shows the hotkey that now holds, after a live switch. */
@@ -61,16 +63,19 @@ export function createTray(options: {
   onQuit: () => void
   /** The notice line (an outdated integration) was clicked: the setup window handles the integration. */
   onNotice: () => void
+  /** The update line was clicked: install the downloaded update. */
+  onUpdate: () => void
 }): TrayHandle {
   const idle = loadIcon('tray.png')
   const waiting = loadIcon('tray-waiting.png')
 
   const tray = new Tray(idle)
-  // The menu is rebuilt on every change (notice, settings, hotkey), so its state lives here:
+  // The menu is rebuilt on every change (update, notice, settings, hotkey), so its state lives here:
   // otherwise a rebuilt menu would show the startup state, not what holds now.
   let settings = options.settings
   let hotkey = options.hotkey
   let notice: string | undefined
+  let update: string | undefined
   let destroyed = false
 
   const toggleItem = (setting: SettingDefinition & { key: BooleanSettingKey }): MenuItemConstructorOptions => {
@@ -92,8 +97,13 @@ export function createTray(options: {
   const noticeItems = (): MenuItemConstructorOptions[] =>
     notice === undefined ? [] : [{ label: notice, click: options.onNotice }, { type: 'separator' }]
 
+  // At the top, where it is seen first: installing waits for this click.
+  const updateItems = (): MenuItemConstructorOptions[] =>
+    update === undefined ? [] : [{ label: update, click: options.onUpdate }, { type: 'separator' }]
+
   const buildMenu = (): Menu =>
     Menu.buildFromTemplate([
+      ...updateItems(),
       { label: 'Megnyitás', click: options.onOpen },
       // The hotkey state is visible here, not only in the log. If registering fails (measured
       // live) or the value is mistyped, the user would otherwise just press it and see nothing
@@ -127,6 +137,11 @@ export function createTray(options: {
     setNotice(text) {
       if (destroyed || text === notice) return
       notice = text
+      rebuild()
+    },
+    setUpdate(text) {
+      if (destroyed || text === update) return
+      update = text
       rebuild()
     },
     setSettings(snapshot) {

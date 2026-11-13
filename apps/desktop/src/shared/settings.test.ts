@@ -4,11 +4,12 @@ import type { BooleanSettingKey, SettingKey, SettingValues } from './settings.js
 
 describe('SETTINGS', () => {
   it('lists the settings in window order with the tray labels', () => {
-    expect(SETTINGS.map((setting) => setting.key)).toEqual(['autostart', 'hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+    expect(SETTINGS.map((setting) => setting.key)).toEqual(['autostart', 'hideAfterLastDecision', 'jumpToTab', 'checkForUpdates', 'hotkey'])
     expect(SETTINGS.map((setting) => setting.label)).toEqual([
       'Induljon el bejelentkezéskor',
       'Elrejtés az utolsó döntés után',
       'Ugrás a pontos Claude-tabra',
+      'Frissítések keresése',
       'Gyorsbillentyű',
     ])
   })
@@ -21,7 +22,7 @@ describe('SETTINGS', () => {
 
 describe('boolean settings', () => {
   it('are exactly the ones whose default is a boolean', () => {
-    const flags: BooleanSettingKey[] = ['autostart', 'hideAfterLastDecision', 'jumpToTab']
+    const flags: BooleanSettingKey[] = ['autostart', 'hideAfterLastDecision', 'jumpToTab', 'checkForUpdates']
     expect(SETTINGS.filter((setting) => setting.kind === 'boolean').map((setting) => setting.key)).toEqual(flags)
     for (const key of flags) expect(typeof DEFAULT_SETTINGS[key]).toBe('boolean')
   })
@@ -42,18 +43,19 @@ describe('settingsToAsk', () => {
       'autostart',
       'hideAfterLastDecision',
       'jumpToTab',
+      'checkForUpdates',
       'hotkey',
     ])
   })
 
   it('asks only the new setting after an update', () => {
-    const confirmed = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+    const confirmed = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'checkForUpdates', 'hotkey'])
     expect(settingsToAsk(confirmed, { autostartAvailable: true })).toEqual(['autostart'])
   })
 
   it('never asks autostart where it cannot be set', () => {
     expect(settingsToAsk(new Set(), { autostartAvailable: false })).not.toContain('autostart')
-    const rest = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'hotkey'])
+    const rest = new Set<SettingKey>(['hideAfterLastDecision', 'jumpToTab', 'checkForUpdates', 'hotkey'])
     expect(settingsToAsk(rest, { autostartAvailable: false })).toEqual([])
   })
 })
@@ -67,10 +69,14 @@ describe('parseSettingValues', () => {
     const rest: Partial<SettingValues> = { ...DEFAULT_SETTINGS }
     delete rest.jumpToTab
     expect(parseSettingValues(rest)).toBeUndefined()
+    const withoutUpdates: Partial<SettingValues> = { ...DEFAULT_SETTINGS }
+    delete withoutUpdates.checkForUpdates
+    expect(parseSettingValues(withoutUpdates)).toBeUndefined()
   })
 
   it('rejects a non-boolean flag', () => {
     expect(parseSettingValues({ ...DEFAULT_SETTINGS, autostart: 'true' })).toBeUndefined()
+    expect(parseSettingValues({ ...DEFAULT_SETTINGS, checkForUpdates: 1 })).toBeUndefined()
   })
 
   it('rejects a blank or non-string hotkey', () => {
@@ -89,5 +95,6 @@ describe('pickSettings', () => {
     const values: SettingValues = { ...DEFAULT_SETTINGS, jumpToTab: false, hotkey: 'F9' }
     expect(pickSettings(values, ['jumpToTab', 'hotkey'])).toEqual({ jumpToTab: false, hotkey: 'F9' })
     expect(pickSettings(values, [])).toEqual({})
+    expect(pickSettings({ ...values, checkForUpdates: false }, ['checkForUpdates'])).toEqual({ checkForUpdates: false })
   })
 })

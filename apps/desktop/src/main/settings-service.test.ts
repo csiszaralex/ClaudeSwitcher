@@ -5,7 +5,7 @@ import type { StoredConfig, StoredValues } from './config.js'
 import { createSettingsService, type SettingsSnapshot } from './settings-service.js'
 
 function stored(confirmed: SettingKey[] = []): StoredConfig {
-  return { values: { hideAfterLastDecision: true, jumpToTab: true, hotkey: 'Shift+Alt+Space' }, confirmed: new Set(confirmed) }
+  return { values: { hideAfterLastDecision: true, jumpToTab: true, checkForUpdates: true, hotkey: 'Shift+Alt+Space' }, confirmed: new Set(confirmed) }
 }
 
 /** A fake autostart that keeps its state in memory and records every write. */

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DAEMON_HOST, createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
@@ -51,6 +52,7 @@ import {
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createTray } from './tray.js'
+import { CONSOLE_UPDATER_LOG, createUpdateController, updateLabel, type UpdateController } from './updater.js'
 import { userDataDir } from './user-data.js'
 import { waitUntil } from './wait-for-exit.js'
 
@@ -59,6 +61,8 @@ import { waitUntil } from './wait-for-exit.js'
 app.setPath('userData', userDataDir(app.getPath('appData')))
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
+/** Loads electron-updater (externalized, like koffi) only where it is used: in the installed app. */
+const requireRuntime = createRequire(import.meta.url)
 
 const RENDERER_DIR = path.join(dirname, '../renderer')
 /** Where the overlay loads from; its handlers check the sender against it (`handleFrom`). */
@@ -455,7 +459,28 @@ async function startApp(): Promise<void> {
     onNotice: () => {
       if (!quitSequence.isQuitting()) setupWindow.open({ showAll: true })
     },
+    // `updates` is defined below; the line appears only once it has downloaded an update.
+    onUpdate: () => {
+      if (!quitSequence.isQuitting()) updates?.install()
+    },
   })
+
+  // The installed app only: a repo build has no `app-update.yml` and no updater at all, so no
+  // check and no tray line.
+  const updates: UpdateController | undefined = app.isPackaged
+    ? createUpdateController({
+        updater: (requireRuntime('electron-updater') as typeof import('electron-updater')).autoUpdater,
+        enabled: settings.snapshot().values.checkForUpdates,
+        onDownloaded: (version) => {
+          console.log(`[claudeswitcher] update ${version} downloaded`)
+          tray.setUpdate(updateLabel(version))
+        },
+        log: CONSOLE_UPDATER_LOG,
+      })
+    : undefined
+  console.log(
+    `[claudeswitcher] updater: ${updates === undefined ? 'none (repo build)' : `checks ${settings.snapshot().values.checkForUpdates ? 'on' : 'off'}`}`,
+  )
 
   /**
    * Whether the installed integration is stale. An install by an earlier version lacks a hook added
@@ -529,6 +554,8 @@ async function startApp(): Promise<void> {
   settings.onChange((snapshot) => {
     tray.setSettings(snapshot)
     setupWindow.notifyChanged()
+    // Live, without a restart: off stops the checks, on checks now.
+    updates?.setEnabled(snapshot.values.checkForUpdates)
   })
 
   // Every setup handler first checks that the setup page sent it (`handleFrom`).
@@ -595,6 +622,8 @@ async function startApp(): Promise<void> {
   // a `syncTray` running meanwhile would reach a destroyed tray icon.
   quitSequence.setCleanup(() => {
     clearInterval(trayTimer)
+    // Before the tray too: a download finishing during the quit must not reach the destroyed icon.
+    updates?.stop()
     // A capture still running holds temporary shortcuts; end it before everything is released.
     hotkeyController.endCapture()
     globalShortcut.unregisterAll()
