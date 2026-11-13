@@ -19,20 +19,21 @@ import type { HookInstallState } from './claude-integration.js'
  * `SetupState` type, so the two sides cannot drift apart. The integration never adds to `ask`:
  * installing it is an action, not a setting.
  *
- * While autostart is unconfirmed and available, the window shows its default (ticked) instead of
+ * While autostart is unconfirmed and the app is installed, the window shows its default (ticked) instead of
  * the OS state, which is off on a fresh install: "Mentés" then applies and confirms the default.
- * Once confirmed, the real OS value is shown.
+ * Once confirmed, the real OS value is shown. Only autostart needs this: `checkForUpdates` lives in
+ * the config, so its snapshot value is already its default until the user answers.
  */
 export function setupState(
   snapshot: SettingsSnapshot,
   extra: { hotkey: HotkeyRegistration; integration: HookInstallState; showAll: boolean },
 ): SetupState {
-  const { values, confirmed, autostartAvailable } = snapshot
-  const presentDefault = autostartAvailable && !confirmed.has('autostart')
+  const { values, confirmed, installed } = snapshot
+  const presentDefault = installed && !confirmed.has('autostart')
   return {
     values: presentDefault ? { ...values, autostart: DEFAULT_SETTINGS.autostart } : values,
-    ask: settingsToAsk(confirmed, { autostartAvailable }),
-    autostartAvailable,
+    ask: settingsToAsk(confirmed, { installed }),
+    installed,
     hotkey: extra.hotkey,
     integration: extra.integration.kind,
     showAll: extra.showAll,

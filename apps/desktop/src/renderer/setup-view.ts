@@ -43,12 +43,12 @@ export function readSetupState(raw: unknown): SetupState | undefined {
   const values = parseSettingValues(raw['values'])
   const ask = readKeys(raw['ask'])
   const hotkey = readHotkeyRegistration(raw['hotkey'])
-  const { autostartAvailable, integration, showAll } = raw
+  const { installed, integration, showAll } = raw
   if (values === undefined || ask === undefined || hotkey === undefined) return undefined
-  if (typeof autostartAvailable !== 'boolean' || typeof showAll !== 'boolean' || !isIntegrationKind(integration)) {
+  if (typeof installed !== 'boolean' || typeof showAll !== 'boolean' || !isIntegrationKind(integration)) {
     return undefined
   }
-  return { values, ask, autostartAvailable, hotkey, integration, showAll }
+  return { values, ask, installed, hotkey, integration, showAll }
 }
 
 /**

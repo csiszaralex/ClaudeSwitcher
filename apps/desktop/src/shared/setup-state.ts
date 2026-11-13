@@ -11,7 +11,8 @@ export interface SetupState {
   values: SettingValues
   /** The settings the user has never confirmed (`settingsToAsk`), in window order. */
   ask: SettingKey[]
-  autostartAvailable: boolean
+  /** True when running as the installed app; the installed-only settings are read-only otherwise. */
+  installed: boolean
   /** The hotkey registration that holds now. */
   hotkey: HotkeyRegistration
   integration: IntegrationKind

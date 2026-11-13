@@ -39,7 +39,7 @@ The installer and the uninstaller use the same helper modes, `--quit` and `--uni
 
 ### Shared data
 
-The installed app and every repo build use the same `userData` directory, `%APPDATA%\@claudeswitcher\desktop` (`apps/desktop/src/main/user-data.ts` `userDataDir`). It holds `config.json` (the settings and which of them the user confirmed), `daemon-token` and `instance.json`. Because the token is shared, hooks installed by one build keep working with the others. Start at login works only in the installed app: in a repo build the login item would register `electron.exe` (`autostart.ts`).
+The installed app and every repo build use the same `userData` directory, `%APPDATA%\@claudeswitcher\desktop` (`apps/desktop/src/main/user-data.ts` `userDataDir`). It holds `config.json` (the settings and which of them the user confirmed), `daemon-token` and `instance.json`. Because the token is shared, hooks installed by one build keep working with the others. Start at login and checking for updates work only in the installed app, so both are read-only in a repo build: the login item would register `electron.exe` (`autostart.ts`), and the updater is created only when `app.isPackaged` (`index.ts`). The list is `INSTALLED_ONLY_SETTINGS` in `apps/desktop/src/shared/settings.ts` (`isInstalledOnly`).
 
 ### Environment variables
 

@@ -56,8 +56,20 @@ export const DEFAULT_SETTINGS: SettingValues = {
   hotkey: DEFAULT_HOTKEY,
 }
 
-/** Why the autostart row is read-only in a repo build; the tray and the setup window both show it. */
-export const AUTOSTART_UNAVAILABLE_NOTE = 'csak a telepített appban'
+/**
+ * The settings that only work in the installed app, not in a repo build: autostart would register
+ * `electron.exe` as the login item (`main/autostart.ts`), and the updater exists only when the app is
+ * packaged (`main/index.ts`). In a repo build they are read-only, never asked and never confirmed.
+ */
+const INSTALLED_ONLY_SETTINGS: ReadonlySet<SettingKey> = new Set<SettingKey>(['autostart', 'checkForUpdates'])
+
+/** Why an installed-only row is read-only in a repo build; the tray and the setup window both show it. */
+export const INSTALLED_ONLY_NOTE = 'csak a telepített appban'
+
+/** True when `key` is read-only unless the app runs as the installed app. */
+export function isInstalledOnly(key: SettingKey): boolean {
+  return INSTALLED_ONLY_SETTINGS.has(key)
+}
 
 const KEYS: ReadonlySet<string> = new Set(SETTINGS.map((setting) => setting.key))
 
@@ -90,10 +102,10 @@ export function parseSettingValues(raw: unknown): SettingValues | undefined {
 /** The settings the user has not confirmed yet, in window order. */
 export function settingsToAsk(
   confirmed: ReadonlySet<SettingKey>,
-  options: { autostartAvailable: boolean },
+  options: { installed: boolean },
 ): SettingKey[] {
   return SETTINGS.map((setting) => setting.key).filter(
-    (key) => !confirmed.has(key) && (key !== 'autostart' || options.autostartAvailable),
+    (key) => !confirmed.has(key) && (options.installed || !isInstalledOnly(key)),
   )
 }
 

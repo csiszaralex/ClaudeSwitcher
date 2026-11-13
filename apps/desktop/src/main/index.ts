@@ -599,7 +599,7 @@ async function startApp(): Promise<void> {
 
   // The window opens by itself only while a setting is unconfirmed; the integration never opens it.
   const startup = settings.snapshot()
-  const toAsk = settingsToAsk(startup.confirmed, { autostartAvailable: startup.autostartAvailable })
+  const toAsk = settingsToAsk(startup.confirmed, { installed: startup.installed })
   console.log(`[claudeswitcher] setup window: ${toAsk.length > 0 ? `asking ${toAsk.join(', ')}` : 'nothing to ask'}`)
   if (toAsk.length > 0) setupWindow.open({ showAll: false })
 
