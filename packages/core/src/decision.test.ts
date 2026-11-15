@@ -79,8 +79,11 @@ describe('parsePermissionRequest: the real payloads from the spike', () => {
 })
 
 /** A Bash request with the given input: there is no real payload for the line-break cases. */
-function bash(toolInput: Record<string, unknown>): PermissionRequestInfo | undefined {
-  return parsePermissionRequest({ session_id: 's', tool_name: 'Bash', tool_input: toolInput })
+function bash(
+  toolInput: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+): PermissionRequestInfo | undefined {
+  return parsePermissionRequest({ session_id: 's', tool_name: 'Bash', tool_input: toolInput, ...extra })
 }
 
 describe('parsePermissionRequest: command line breaks and the description', () => {
@@ -106,6 +109,24 @@ describe('parsePermissionRequest: command line breaks and the description', () =
     expect(parsedPayload('permissionRequest_write').description).toBeUndefined()
     expect(parsedPayload('permissionRequest_mcp').description).toBeUndefined()
     expect(bash({ command: 'ls', description: 42 })?.description).toBeUndefined()
+  })
+})
+
+describe('parsePermissionRequest: permission_mode', () => {
+  it('carries the measured mode raw', () => {
+    expect(parsedPayload('permissionRequest_bash').permissionMode).toBe('default')
+    expect(parsedPayload('permissionRequest_askMulti').permissionMode).toBe('acceptEdits')
+    expect(parsedPayload('permissionRequest_plan').permissionMode).toBe('plan')
+  })
+
+  it('keeps a mode it does not know as the raw text', () => {
+    expect(bash({ command: 'ls' }, { permission_mode: 'someFutureMode' })?.permissionMode).toBe('someFutureMode')
+  })
+
+  it('has no mode when it is absent, empty or not a string', () => {
+    expect(bash({ command: 'ls' })?.permissionMode).toBeUndefined()
+    expect(bash({ command: 'ls' }, { permission_mode: '' })?.permissionMode).toBeUndefined()
+    expect(bash({ command: 'ls' }, { permission_mode: 3 })?.permissionMode).toBeUndefined()
   })
 })
 
