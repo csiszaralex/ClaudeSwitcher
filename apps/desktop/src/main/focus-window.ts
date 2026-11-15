@@ -1,6 +1,7 @@
 import { exec, type ExecOptions } from 'node:child_process'
 import { createRequire } from 'node:module'
 import type { PermissionRequestInfo, SessionView } from '@claudeswitcher/core'
+import { VSCODE_ENTRYPOINT } from '../shared/entrypoint.js'
 
 // Not named `require`: in the module wrapper of the CJS bundle `require` already exists as a
 // parameter, and a `const` of the same name would clash with it.
@@ -306,9 +307,6 @@ export interface FocusSteps {
   byPid(pid: number): Promise<boolean>
   byCli(folder: string): Promise<boolean>
 }
-
-/** The registry `entrypoint` value of a session running in the VSCode extension. */
-const VSCODE_ENTRYPOINT = 'claude-vscode'
 
 /**
  * The decision logic of `focusSessionWindow`, with injected steps.

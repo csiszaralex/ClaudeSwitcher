@@ -149,6 +149,17 @@ describe('sanitizeState', () => {
     expect(clean?.decisions).toEqual([good])
   })
 
+  it('keeps a decision with a permission mode, and drops one whose mode or cwd is not a string', () => {
+    // The panel renders both as text; an object would throw there.
+    const good = decisionFrom('permissionRequest_askMulti')
+    expect(good['permissionMode']).toBe('acceptEdits')
+    const clean = sanitizeState({
+      sessions: [],
+      decisions: [good, { ...good, id: 'm', permissionMode: { mode: 'x' } }, { ...good, id: 'c', cwd: 7 }],
+    })
+    expect(clean?.decisions).toEqual([good])
+  })
+
   it('keeps an unreadable decision, and drops one whose readable flag is missing or not a boolean', () => {
     // From it the panel decides whether to offer allowing; a missing flag must not count as readable.
     const good = decisionFrom('permissionRequest_bash')

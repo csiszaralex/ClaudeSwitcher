@@ -20,6 +20,7 @@ import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
+import { requestFacts, type RequestSource } from './request-source.js'
 import { releasedMessage } from './session-marker.js'
 import { summaryView } from './summary-view.js'
 
@@ -38,6 +39,8 @@ type Mode = 'buttons' | Extract<DecisionAction, 'deny' | 'rule-project' | 'rule-
 
 interface Props {
   decision: PendingDecisionView
+  /** Where the request comes from (request-source.ts `requestSource`); emphasised when it stands out. */
+  source: RequestSource
   /** The requesting subagent's label in the header (format.ts `subagentLabel`); absent for the main session. */
   agentLabel: string | undefined
   /** Whether the session has a Remote Control connection (session-marker.ts `hasRemoteControl`): it picks the released request's text. */
@@ -56,6 +59,7 @@ interface Props {
  */
 export function DecisionPanel({
   decision,
+  source,
   agentLabel,
   remoteControl,
   keyHistory,
@@ -308,6 +312,8 @@ export function DecisionPanel({
 
   // For a question and a plan the action area itself is long (questions, plan text): there its
   // inside scrolls, and the submit buttons stay at the bottom.
+  const facts = requestFacts(decision)
+
   const fill = decision.kind === 'question' || decision.kind === 'plan'
 
   // The header on top, the action area at the bottom, the scrollable content between them: even
@@ -325,6 +331,12 @@ export function DecisionPanel({
         )}
       </header>
       <DecisionContent decision={decision} summary={summary} />
+      <p className="decision-source">
+        <span className={source.standsOut ? 'source-label stands-out' : 'source-label'} title={source.title}>
+          {source.label}
+        </span>
+        {facts !== undefined && <span className="muted" title={facts}>{facts}</span>}
+      </p>
       <div className={fill ? 'decision-actions fill' : 'decision-actions'}>
         {body()}
         {error !== undefined && <p className="decision-error">{error}</p>}

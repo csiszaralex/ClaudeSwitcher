@@ -100,6 +100,8 @@ Selecting a waiting session opens its request. What you can do depends on the re
 - **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer).
 - **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there.
 
+Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag and a red waiting mark, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
+
 The letter keys do not fire for a short moment after a panel appears, on key repeat, or within a moment after you typed in a text field.
 
 The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. The prompt in VS Code stays and can still be answered there.

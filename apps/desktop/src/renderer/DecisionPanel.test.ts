@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ACTION_BUTTONS, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
 import { DecisionPanel } from './DecisionPanel.js'
+import { requestSource } from './request-source.js'
 import { RuleEditor } from './RuleEditor.js'
 
 function bashDecision(overrides: Partial<PendingDecisionView> = {}): PendingDecisionView {
@@ -26,10 +27,11 @@ function bashDecision(overrides: Partial<PendingDecisionView> = {}): PendingDeci
 }
 
 /** The panel's first render, without effects: what the user sees at the moment it appears. */
-function render(decision: PendingDecisionView, shownArmedAt = 0): string {
+function render(decision: PendingDecisionView, shownArmedAt = 0, entrypoint?: string): string {
   return renderToStaticMarkup(
     createElement(DecisionPanel, {
       decision,
+      source: requestSource(entrypoint),
       agentLabel: undefined,
       remoteControl: false,
       keyHistory: { current: { shownArmedAt, lastTypedAt: undefined } },
@@ -58,6 +60,28 @@ describe('DecisionPanel layout', () => {
 
   it('shows no description paragraph when the tool gives none', () => {
     expect(render(bashDecision({ description: undefined }))).not.toContain('decision-description')
+  })
+})
+
+describe('request source', () => {
+  it('shows the label, the full folder and a non-default mode, plain for VS Code', () => {
+    const html = render(bashDecision({ permissionMode: 'acceptEdits' }), 0, 'claude-vscode')
+    expect(html).toContain('>VS Code</span>')
+    expect(html).not.toContain('stands-out')
+    expect(html).toContain('p:\\proj\\alpha · mód: acceptEdits')
+  })
+
+  it('emphasises a headless run', () => {
+    const html = render(bashDecision(), 0, 'sdk-cli')
+    expect(html).toContain('source-label stands-out')
+    expect(html).toContain('>claude -p</span>')
+    expect(html).not.toContain('mód:')
+  })
+
+  it('emphasises a request whose session is not in the registry', () => {
+    const html = render(bashDecision())
+    expect(html).toContain('source-label stands-out')
+    expect(html).toContain('>ismeretlen</span>')
   })
 })
 

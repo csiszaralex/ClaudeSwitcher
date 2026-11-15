@@ -163,6 +163,14 @@ test and the permission spike).
 - **`Stop`**: reliable, and brings `last_assistant_message` too. **`SessionEnd`**: arrives.
 - **`SessionStart`**: **never arrives as an HTTP hook, only as a command hook.**
 - **`PreToolUse` / `PostToolUse` / `SubagentStart` / `SubagentStop`**: arrive over HTTP.
+- **Headless runs** (measured 2026-11-15, Claude Code 2.1.325): `claude -p` with a command that needs
+  permission wrote a registry record with `entrypoint: "sdk-cli"` and `kind: "interactive"`, so
+  `kind` does not tell a headless run apart; the record also had a derived `name`. While its
+  `PermissionRequest` was pending, `status` was `busy`, not `waiting`. The request reached the
+  app and showed as a normal waiting row, indistinguishable from a VS Code session's (the VS Code
+  session in the same folder: `entrypoint: "claude-vscode"`, `kind: "interactive"`). The SDK
+  runs (`sdk-ts`, `sdk-py`) were not measured. The app labels a request from the `entrypoint`
+  (`renderer/request-source.ts`) and does not read `kind`.
 - **Subagent transcripts** are in a separate file: `<session>/subagents/agent-<id>.jsonl`
   (`isSidechain: true`, `agentId`, with the **parent's** `sessionId`); they are not in the main
   transcript.
