@@ -9,6 +9,11 @@ import type { Daemon } from '@claudeswitcher/daemon'
 export const OVERLAY_CHANNELS = {
   connection: 'daemon:connection',
   state: 'daemon:state',
+  /**
+   * The finishes the user has seen (main `index.ts` `finishesSeen`), as `[sessionId, stoppedAt]`
+   * pairs; the renderer reads them with a check (`readSeenFinishes`).
+   */
+  finishesSeen: 'session:finishes-seen',
   decide: 'decision:decide',
   focusSession: 'session:focus',
   hide: 'overlay:hide',

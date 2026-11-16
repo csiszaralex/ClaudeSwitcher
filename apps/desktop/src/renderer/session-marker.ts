@@ -1,14 +1,15 @@
 import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
 import { isChoiceKind } from '../shared/request-kind.js'
-import { hasFinished } from '../shared/session-finished.js'
+import { finishState, type SeenFinishes } from '../shared/session-finished.js'
 
 /**
  * The states of the mark at the start of the row; the CSS class `tone-…` gives its color. `waiting`
  * is a yes/no request (or a Notification wait), `choice` a request that asks for more
- * (`isChoiceKind`): the same dot in another color.
+ * (`isChoiceKind`): the same dot in another color. `done` is a finish the user has not seen yet,
+ * `seen` one they have (`finishState`): the same ✓ in another color.
  */
-type MarkerTone = 'waiting' | 'choice' | 'released' | 'working' | 'done' | 'idle'
+type MarkerTone = 'waiting' | 'choice' | 'released' | 'working' | 'done' | 'seen' | 'idle'
 
 export interface StatusMarker {
   tone: MarkerTone
@@ -26,6 +27,8 @@ const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
   released: { tone: 'released', glyph: '◆', title: '' },
   working: { tone: 'working', glyph: '◐', title: 'Dolgozik' },
   done: { tone: 'done', glyph: '✓', title: 'Épp végzett' },
+  // The same ✓: whether the finish was seen is told by the color and the tooltip, not the shape.
+  seen: { tone: 'seen', glyph: '✓', title: 'Végzett, már megnyitottad' },
   idle: { tone: 'idle', glyph: '○', title: 'Tétlen' },
 }
 
@@ -45,17 +48,19 @@ function releasedMarker(remoteControl: boolean): StatusMarker {
 }
 
 /**
- * The session's status marker. `decisions` are the session's OWN pending decisions.
+ * The session's status marker. `decisions` are the session's OWN pending decisions, `seen` the
+ * finishes the user has seen (`useSeenFinishes`).
  *
  * Order: a request the app can still decide (not released) is the strongest sign, in the choice
  * color if one of them asks for more than a yes or a no; if there are only released ones, that is a
  * state of its own, because from there the app can no longer decide.
- * Then come the Notification wait, running, and "just finished" (`hasFinished`, the rule the tray's
- * done mark follows too).
+ * Then come the Notification wait, running, and "just finished" (`finishState`, the rule the tray's
+ * done mark follows too): green while unseen, blue once seen.
  */
 export function statusMarker(
-  view: { status: SessionStatus; stoppedAt?: number | undefined; bridgeSessionId?: unknown },
+  view: { sessionId: string; status: SessionStatus; stoppedAt?: number | undefined; bridgeSessionId?: unknown },
   decisions: readonly { released: boolean; kind: DecisionKind }[],
+  seen: SeenFinishes,
 ): StatusMarker {
   const held = decisions.filter((d) => !d.released)
   if (held.some((d) => isChoiceKind(d.kind))) return MARKERS.choice
@@ -63,8 +68,14 @@ export function statusMarker(
   if (decisions.length > 0) return releasedMarker(hasRemoteControl(view))
   if (view.status === 'waiting') return MARKERS.waiting
   if (view.status === 'working') return MARKERS.working
-  if (hasFinished(view)) return MARKERS.done
-  return MARKERS.idle
+  switch (finishState(view, seen)) {
+    case 'unseen':
+      return MARKERS.done
+    case 'seen':
+      return MARKERS.seen
+    case 'none':
+      return MARKERS.idle
+  }
 }
 
 /**

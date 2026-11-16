@@ -12,6 +12,7 @@ import { requestSource } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 import type { OverlayState } from './useDaemonState.js'
+import type { SeenFinishes } from '../shared/session-finished.js'
 import './styles.css'
 
 /**
@@ -38,8 +39,9 @@ function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): J
 /**
  * @param overlay The daemon's live state. It comes from outside (`main.tsx` `Root`) and is not read
  * here: so the connection lives on after a render error, and the next state can restore the UI.
+ * @param seenFinishes The finishes the user has seen (`useSeenFinishes`), for the ✓ marker's color.
  */
-export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
+export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFinishes: SeenFinishes }): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
   // A session id, not an index: when the list reorders, the selection moves with the session.
   // See the selection.ts documentation.
@@ -185,7 +187,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
         {rows.map((row, index) => {
           const pending = activeDecision(row.decisions)
           // The row of a session the snapshot does not know yet: the pending request holds it, so it is waiting.
-          const marker = statusMarker(row.session ?? { status: row.status }, row.decisions)
+          const marker = statusMarker(row.session ?? { sessionId: row.sessionId, status: row.status }, row.decisions, seenFinishes)
           const badge = pendingBadge(row.decisions)
           // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
           const source = requestSource(row.session?.entrypoint)

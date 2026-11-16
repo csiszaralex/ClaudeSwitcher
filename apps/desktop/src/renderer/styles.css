@@ -19,8 +19,8 @@
   --danger-tint: #e0796b1a; /* removed diff lines */
   --danger-tint-strong: #e0796b33; /* escaped invisible characters */
   --warning: #e3b341; /* released marker, line count, setup warnings */
-  --info: #7aa2c4; /* working marker, subagent description */
-  --success: #8fbf7a; /* done marker, added diff lines */
+  --info: #7aa2c4; /* working marker, seen done marker, subagent description */
+  --success: #8fbf7a; /* unseen done marker, added diff lines */
   --success-tint: #8fbf7a1a; /* added diff lines */
   --link: #5fa8e8; /* Remote Control dot, setup link */
 }
@@ -55,6 +55,7 @@ body {
 .marker.tone-released { color: var(--warning); }
 .marker.tone-working { color: var(--info); }
 .marker.tone-done { color: var(--success); }
+.marker.tone-seen { color: var(--info); }
 .marker.tone-idle { color: var(--text-faint); }
 
 /* Flex, so only the text is truncated (…), never the Remote Control dot. */
