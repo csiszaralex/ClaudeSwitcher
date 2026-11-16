@@ -15,16 +15,28 @@ export const TRAY_COLORS = {
   choice: '#b8406a',
   /** A session finished and the user has not seen it yet: `--success`, the list's ✓. */
   done: '#8fbf7a',
+  /** The flash frame of a request about to be released: `--danger`, the list's warning red. */
+  flash: '#e0796b',
+  /** The exclamation mark on the flash frame. */
+  mark: '#ffffff',
 } as const
 
 /**
  * What the icon shows: a disc in one colour, or, with `ring`, a ring in that colour around a
- * smaller disc in `fill`.
+ * smaller disc in `fill`. With `mark`, a white exclamation mark on the disc.
  */
 export interface TrayLook {
   fill: string
   ring?: string | undefined
+  mark?: boolean | undefined
 }
+
+/**
+ * The flash frame: a red disc with a white exclamation mark. The red alone is too close to the
+ * orange of a yes/no request (`--danger` against `--accent`) to be seen as a change on the taskbar;
+ * the mark makes the frame differ in shape and brightness too.
+ */
+const FLASH_LOOK: TrayLook = { fill: TRAY_COLORS.flash, mark: true }
 
 function waitColor(state: TrayState): string | undefined {
   switch (state.wait) {
@@ -39,9 +51,12 @@ function waitColor(state: TrayState): string | undefined {
 
 /**
  * The icon for a tray state. What waits is the stronger sign, so it keeps the centre; a finish
- * nobody has seen yet turns an idle icon green, and puts a green ring around a waiting one.
+ * nobody has seen yet turns an idle icon green, and puts a green ring around a waiting one. While
+ * the state flashes, every frame with `flashOn` is the flash frame instead, and the frames between
+ * are the normal icon (`main/tray.ts` alternates `flashOn` on each tick).
  */
-export function trayLook(state: TrayState): TrayLook {
+export function trayLook(state: TrayState, flashOn: boolean): TrayLook {
+  if (state.flash && flashOn) return FLASH_LOOK
   const waiting = waitColor(state)
   const finished = state.finishedCount > 0
   if (waiting === undefined) return { fill: finished ? TRAY_COLORS.done : TRAY_COLORS.idle }
@@ -65,6 +80,12 @@ const DISC_RADIUS_SQ = 41
 const RING_INNER_RADIUS_SQ = 16
 const CORE_RADIUS_SQ = 9
 
+/** The exclamation mark: 2 px wide in the middle columns, a bar and a dot below it. */
+const MARK_COLUMNS: readonly number[] = [7, 8]
+function isMarkRow(y: number): boolean {
+  return (y >= 3 && y <= 9) || y === 11 || y === 12
+}
+
 const BYTES_PER_PIXEL = 4
 
 function rgb(hex: string): [number, number, number] {
@@ -82,6 +103,7 @@ function distanceSq(x: number, y: number): number {
 function pixelColor(look: TrayLook, x: number, y: number): string | undefined {
   const distance = distanceSq(x, y)
   if (distance > DISC_RADIUS_SQ) return undefined
+  if (look.mark === true && MARK_COLUMNS.includes(x) && isMarkRow(y)) return TRAY_COLORS.mark
   if (look.ring === undefined) return look.fill
   if (distance > RING_INNER_RADIUS_SQ) return look.ring
   return distance <= CORE_RADIUS_SQ ? look.fill : undefined

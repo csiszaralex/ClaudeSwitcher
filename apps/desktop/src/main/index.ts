@@ -689,7 +689,7 @@ async function startApp(): Promise<void> {
 
   const syncTray = (): void => {
     const state = running.state()
-    tray.setState(trayState({ ...state, acknowledged: finishesSeen }))
+    tray.setState(trayState({ ...state, acknowledged: finishesSeen, now: Date.now() }))
     // Never lets a failing toast stop the tray tick.
     try {
       const { notifyOnRequest, notifyOnFinish } = settings.snapshot().values

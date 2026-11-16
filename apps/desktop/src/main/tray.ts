@@ -77,10 +77,12 @@ export function createTray(options: {
     return image
   }
   // The first tick follows right after `createTray` (`syncTray` in index.ts); until then, idle.
-  let shownLook = JSON.stringify(trayLook(IDLE_TRAY_STATE))
+  let shownLook = JSON.stringify(trayLook(IDLE_TRAY_STATE, false))
   let shownTooltip = trayTooltip(IDLE_TRAY_STATE)
+  // The flash alternates on each `setState`, that is on each one-second tick.
+  let flashOn = false
 
-  const tray = new Tray(imageOf(trayLook(IDLE_TRAY_STATE)))
+  const tray = new Tray(imageOf(trayLook(IDLE_TRAY_STATE, false)))
   tray.setToolTip(shownTooltip)
   // The menu is rebuilt on every change (update, notice, settings, hotkey), so its state lives here:
   // otherwise a rebuilt menu would show the startup state, not what holds now.
@@ -140,7 +142,8 @@ export function createTray(options: {
   return {
     setState(state) {
       if (destroyed) return
-      const look = trayLook(state)
+      flashOn = state.flash && !flashOn
+      const look = trayLook(state, flashOn)
       const lookKey = JSON.stringify(look)
       if (lookKey !== shownLook) {
         shownLook = lookKey

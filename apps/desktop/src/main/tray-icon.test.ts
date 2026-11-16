@@ -57,24 +57,36 @@ function colorsOf(look: TrayLook): Set<string> {
 }
 
 const MIDDLE = TRAY_ICON_SIZE / 2
+const calm = { waitingCount: 1, wait: 'yes-no', finishedCount: 0, flash: false } as const
 
 describe('trayLook', () => {
   it('fills the disc with the colour of what waits', () => {
-    expect(trayLook({ waitingCount: 0, wait: 'none', finishedCount: 0 })).toEqual({ fill: TRAY_COLORS.idle })
-    expect(trayLook({ waitingCount: 1, wait: 'yes-no', finishedCount: 0 })).toEqual({ fill: TRAY_COLORS.yesNo })
-    expect(trayLook({ waitingCount: 1, wait: 'choice', finishedCount: 0 })).toEqual({ fill: TRAY_COLORS.choice })
+    expect(trayLook({ waitingCount: 0, wait: 'none', finishedCount: 0, flash: false }, false)).toEqual({ fill: TRAY_COLORS.idle })
+    expect(trayLook({ waitingCount: 1, wait: 'yes-no', finishedCount: 0, flash: false }, false)).toEqual({ fill: TRAY_COLORS.yesNo })
+    expect(trayLook({ waitingCount: 1, wait: 'choice', finishedCount: 0, flash: false }, false)).toEqual({ fill: TRAY_COLORS.choice })
   })
 
   it('turns green for an unseen finish while nothing waits', () => {
-    expect(trayLook({ waitingCount: 0, wait: 'none', finishedCount: 1 })).toEqual({ fill: TRAY_COLORS.done })
+    expect(trayLook({ waitingCount: 0, wait: 'none', finishedCount: 1, flash: false }, false)).toEqual({ fill: TRAY_COLORS.done })
+  })
+
+  it('alternates the flash frame with the normal icon while the state flashes', () => {
+    const flashing = { ...calm, finishedCount: 1, flash: true }
+    const flashFrame = trayLook(flashing, true)
+    expect(flashFrame).toEqual({ fill: TRAY_COLORS.flash, mark: true })
+    expect(trayLook(flashing, false)).toEqual({ fill: TRAY_COLORS.yesNo, ring: TRAY_COLORS.done })
+  })
+
+  it('never shows the flash frame without a flash', () => {
+    expect(trayLook(calm, true)).toEqual({ fill: TRAY_COLORS.yesNo })
   })
 
   it('puts a green ring around what waits when a finish is unseen too', () => {
-    expect(trayLook({ waitingCount: 1, wait: 'yes-no', finishedCount: 2 })).toEqual({
+    expect(trayLook({ waitingCount: 1, wait: 'yes-no', finishedCount: 2, flash: false }, false)).toEqual({
       fill: TRAY_COLORS.yesNo,
       ring: TRAY_COLORS.done,
     })
-    expect(trayLook({ waitingCount: 1, wait: 'choice', finishedCount: 1 })).toEqual({
+    expect(trayLook({ waitingCount: 1, wait: 'choice', finishedCount: 1, flash: false }, false)).toEqual({
       fill: TRAY_COLORS.choice,
       ring: TRAY_COLORS.done,
     })
@@ -110,6 +122,16 @@ describe('trayIconPixels', () => {
     expect(colorsOf(look)).toEqual(new Set([TRAY_COLORS.choice, TRAY_COLORS.done]))
   })
 
+  it('draws the flash frame as a red disc with a white exclamation mark', () => {
+    const look = { fill: TRAY_COLORS.flash, mark: true }
+    const pixels = trayIconPixels(look)
+    // The bar (rows 3 to 9) and the dot (rows 11, 12) in the two middle columns, a gap at row 10.
+    for (const y of [3, 9, 11, 12]) expect(colorAt(pixels, MIDDLE, y)).toBe(TRAY_COLORS.mark)
+    expect(colorAt(pixels, MIDDLE, 10)).toBe(TRAY_COLORS.flash)
+    expect(colorAt(pixels, 2, MIDDLE)).toBe(TRAY_COLORS.flash)
+    expect(colorsOf(look)).toEqual(new Set([TRAY_COLORS.flash, TRAY_COLORS.mark]))
+  })
+
   it('draws the idle icon exactly as resources/tray.png, the source of the app icon', () => {
     const png = decodePng(readFileSync(path.join(here, '../../resources/tray.png')))
     expect([png.width, png.height]).toEqual([TRAY_ICON_SIZE, TRAY_ICON_SIZE])
@@ -140,6 +162,7 @@ describe('TRAY_COLORS', () => {
     ['yesNo', '--accent'],
     ['choice', '--choice'],
     ['done', '--success'],
+    ['flash', '--danger'],
   ] as const)('%s equals the list colour %s', (key, variable) => {
     expect(cssVariable(variable)).toBe(TRAY_COLORS[key])
   })

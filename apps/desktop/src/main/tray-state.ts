@@ -1,6 +1,12 @@
-import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
+import { PERMISSION_RELEASE_AFTER_MS, type DecisionKind, type SessionStatus } from '@claudeswitcher/core'
 import { isChoiceKind } from '../shared/request-kind.js'
 import { hasFinished } from '../shared/session-finished.js'
+
+/**
+ * When the tray starts to flash for a held request nobody has decided: 50 s before the release
+ * (`PERMISSION_RELEASE_AFTER_MS`), so the user still has time to decide it in the app.
+ */
+export const PERMISSION_WARN_AFTER_MS = PERMISSION_RELEASE_AFTER_MS - 50_000
 
 /** The part of a session the tray reads; the daemon's `SessionView` fits it. */
 export interface TraySession {
@@ -15,6 +21,8 @@ export interface TrayDecision {
   kind: DecisionKind
   /** Released by the app (`PERMISSION_RELEASE_AFTER_MS`): it can no longer be decided here. */
   released: boolean
+  /** When the daemon began to hold it (ms, the daemon's clock, `Date.now()`). */
+  createdAt: number
 }
 
 export interface TrayInput {
@@ -22,6 +30,8 @@ export interface TrayInput {
   decisions: readonly TrayDecision[]
   /** The finishes the user has seen (`acknowledgeFinish`): session id to the `stoppedAt` seen. */
   acknowledged: ReadonlyMap<string, number>
+  /** The current time (ms, `Date.now()`), for the age of the held requests. */
+  now: number
 }
 
 /**
@@ -50,10 +60,15 @@ export interface TrayState {
   wait: TrayWait
   /** The sessions that finished (`hasFinished`) and whose finish the user has not seen yet. */
   finishedCount: number
+  /**
+   * A request the app can still decide has been held longer than `PERMISSION_WARN_AFTER_MS`: the
+   * icon flashes until it is decided, released or gone.
+   */
+  flash: boolean
 }
 
 /** Nothing waits and nothing finished: the icon before the first tick. */
-export const IDLE_TRAY_STATE: TrayState = { waitingCount: 0, wait: 'none', finishedCount: 0 }
+export const IDLE_TRAY_STATE: TrayState = { waitingCount: 0, wait: 'none', finishedCount: 0, flash: false }
 
 /** The tray's state from the daemon's state. Pure; `main/index.ts` calls it in the one-second tray tick. */
 export function trayState(input: TrayInput): TrayState {
@@ -67,7 +82,8 @@ export function trayState(input: TrayInput): TrayState {
   const finishedCount = input.sessions.filter(
     (session) => hasFinished(session) && input.acknowledged.get(session.sessionId) !== session.stoppedAt,
   ).length
-  return { waitingCount, wait, finishedCount }
+  const flash = held.some((decision) => input.now - decision.createdAt > PERMISSION_WARN_AFTER_MS)
+  return { waitingCount, wait, finishedCount, flash }
 }
 
 const APP_NAME = 'ClaudeSwitcher'
