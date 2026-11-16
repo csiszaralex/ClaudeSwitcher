@@ -73,12 +73,12 @@ export const TRAY_ICON_SIZE = 16
 const DISC_RADIUS_SQ = 41
 
 /**
- * With a ring: the ring is the disc outside a radius of 4 px (about 2 px wide), and the centre a disc of
- * 3 px radius (6 px across), with a 1 px transparent gap between them, so the two colours do not
- * blur into one at 16 px.
+ * With a ring: the ring is the disc outside a radius of 5 px (about 1.4 px wide, one pixel along the
+ * axes), and the centre a disc of 4 px radius (8 px across), with a 1 px transparent gap between
+ * them, so the two colours do not blur into one at 16 px.
  */
-const RING_INNER_RADIUS_SQ = 16
-const CORE_RADIUS_SQ = 9
+const RING_INNER_RADIUS_SQ = 25
+const CORE_RADIUS_SQ = 16
 
 /** The exclamation mark: 2 px wide in the middle columns, a bar and a dot below it. */
 const MARK_COLUMNS: readonly number[] = [7, 8]

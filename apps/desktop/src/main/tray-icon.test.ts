@@ -114,11 +114,16 @@ describe('trayIconPixels', () => {
     const look = { fill: TRAY_COLORS.choice, ring: TRAY_COLORS.done }
     const pixels = trayIconPixels(look)
     expect(colorAt(pixels, MIDDLE, MIDDLE)).toBe(TRAY_COLORS.choice)
-    // Along the middle row, from the left edge of the disc: ring (x 2, 3), gap (x 4), centre (x 5).
+    // Along the middle row, from the left edge of the disc: outside (x 1), a thin ring (x 2), the
+    // gap (x 3), the centre (x 4 to 11), the gap (x 12), the ring (x 13), outside (x 14).
+    expect(colorAt(pixels, 1, MIDDLE)).toBe('transparent')
     expect(colorAt(pixels, 2, MIDDLE)).toBe(TRAY_COLORS.done)
-    expect(colorAt(pixels, 3, MIDDLE)).toBe(TRAY_COLORS.done)
-    expect(colorAt(pixels, 4, MIDDLE)).toBe('transparent')
-    expect(colorAt(pixels, 5, MIDDLE)).toBe(TRAY_COLORS.choice)
+    expect(colorAt(pixels, 3, MIDDLE)).toBe('transparent')
+    expect(colorAt(pixels, 4, MIDDLE)).toBe(TRAY_COLORS.choice)
+    expect(colorAt(pixels, 11, MIDDLE)).toBe(TRAY_COLORS.choice)
+    expect(colorAt(pixels, 12, MIDDLE)).toBe('transparent')
+    expect(colorAt(pixels, 13, MIDDLE)).toBe(TRAY_COLORS.done)
+    expect(colorAt(pixels, 14, MIDDLE)).toBe('transparent')
     expect(colorsOf(look)).toEqual(new Set([TRAY_COLORS.choice, TRAY_COLORS.done]))
   })
 
