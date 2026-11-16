@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ACTION_BUTTONS, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
 import { DecisionPanel } from './DecisionPanel.js'
-import { requestSource } from '../shared/request-source.js'
+import { requestSource, sessionHost } from '../shared/request-source.js'
 import { RuleEditor } from './RuleEditor.js'
 
 function bashDecision(overrides: Partial<PendingDecisionView> = {}): PendingDecisionView {
@@ -101,6 +101,7 @@ describe('Ctrl+Enter label', () => {
         multilineSuggestions: 0,
         machine: false,
         busy: false,
+        host: sessionHost(undefined),
         onSubmit: () => undefined,
         onCancel: () => undefined,
       }),
@@ -120,6 +121,58 @@ describe('Ctrl+Enter label', () => {
     )
     expect(html).not.toContain('<textarea')
     expect(html).not.toContain(SUBMIT_CHORD_LABEL)
+  })
+})
+
+describe("the session's host in the texts", () => {
+  const plan = bashDecision({ kind: 'plan', toolName: 'ExitPlanMode', plan: '# Plan', summary: 'Plan' })
+
+  it('keeps the VS Code wording for an extension session', () => {
+    const released = render(bashDecision({ released: true }), 0, 'claude-vscode')
+    expect(released).toContain('A VSCode-ban még dönthetsz.')
+    expect(released).toContain('Ugrás a VSCode-ba')
+    expect(render(plan, 0, 'claude-vscode')).toContain('Jóváhagyás a VSCode-ban →')
+  })
+
+  it('names the terminal for a CLI session and a claude -p run', () => {
+    for (const entrypoint of ['cli', 'sdk-cli']) {
+      const released = render(bashDecision({ released: true }), 0, entrypoint)
+      expect(released).toContain('A terminálban még dönthetsz.')
+      expect(released).toContain('Ugrás a terminálhoz')
+      expect(released).not.toContain('VSCode')
+      expect(render(plan, 0, entrypoint)).toContain('Jóváhagyás a terminálban →')
+    }
+  })
+
+  it('names the session itself when the source is unknown', () => {
+    for (const entrypoint of [undefined, 'sdk-future']) {
+      const released = render(bashDecision({ released: true }), 0, entrypoint)
+      expect(released).toContain('A sessionben még dönthetsz.')
+      expect(released).toContain('Ugrás a sessionhöz')
+      expect(render(plan, 0, entrypoint)).toContain('Jóváhagyás a sessionben →')
+    }
+  })
+
+  it('names the host where a long command is cut and on an unreadable request', () => {
+    const long = render(bashDecision({ summary: 'x'.repeat(50_000) }), 0, 'cli')
+    expect(long).toContain('A teljes')
+    expect(long).toContain('a terminálban.')
+    expect(render(bashDecision({ readable: false }), 0, 'cli')).toContain('Ugrás a terminálhoz')
+  })
+
+  it('names the host in the rule editor when a multi-line suggestion was left out', () => {
+    const html = renderToStaticMarkup(
+      createElement(RuleEditor, {
+        initial: '',
+        multilineSuggestions: 1,
+        machine: false,
+        busy: false,
+        host: sessionHost('cli'),
+        onSubmit: () => undefined,
+        onCancel: () => undefined,
+      }),
+    )
+    expect(html).toContain('dönts a terminálban.')
   })
 })
 

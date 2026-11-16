@@ -8,25 +8,26 @@ import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize 
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
-import { requestSource } from '../shared/request-source.js'
+import { requestSource, type SessionHost } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
-import { hasRemoteControl } from './session-marker.js'
+import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
 import './styles.css'
 
 /**
- * Stands in for the panel when the app cannot decide: one line of explanation and the jump to VS Code,
- * so the row is not a dead end.
+ * Stands in for the panel when the app cannot decide: one line of explanation and the jump to the
+ * session's host, so the row is not a dead end.
  */
-function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): JSX.Element {
+function JumpNotice({ text, host, sessionId }: { text: string; host: SessionHost; sessionId: string }): JSX.Element {
   return (
     <section className="decision">
       <div className="decision-actions">
         <div className="decision-row">
           <span className="muted">{text}</span>
           <JumpButton
+            host={host}
             onJump={() => {
               void window.claudeswitcher.focusSession(sessionId)
             }}
@@ -59,7 +60,9 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
 
   // The panel shows the oldest request the app can still decide; the status marker needs all of them.
   const decision = selectedRowView === undefined ? undefined : activeDecision(selectedRowView.decisions)
-  // The status bar's left part: where the selected session comes from, and its folder.
+  // The status bar's left part: where the selected session comes from, and its folder. The source
+  // also names the host in the panel's and the notices' texts.
+  const selectedSource = requestSource(selectedRowView?.session?.entrypoint)
   const selectedFolder = selectedRowView === undefined ? undefined : rowFolder(selectedRowView)
 
   // The latest state for the async handlers (show, the step after a decision). A closure from
@@ -256,11 +259,13 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         <ErrorBoundary
           key={decision.id}
           label="decision panel"
-          fallback={() => <JumpNotice text="A kérés nem jeleníthető meg" sessionId={selectedRowView.sessionId} />}
+          fallback={() => (
+            <JumpNotice text="A kérés nem jeleníthető meg" host={selectedSource.host} sessionId={selectedRowView.sessionId} />
+          )}
         >
           <DecisionPanel
             decision={decision}
-            source={requestSource(selectedRowView.session?.entrypoint)}
+            source={selectedSource}
             agentLabel={subagentLabel(decision, selectedRowView.session?.subagents)}
             remoteControl={selectedRowView.session !== undefined && hasRemoteControl(selectedRowView.session)}
             keyHistory={keyHistory}
@@ -271,7 +276,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
             }}
             onJump={() => {
               // By the session id. For an unknown session the main process finds no window and does
-              // not jump. The native prompt is still there in VS Code.
+              // not jump. The native prompt is still there, in VS Code or in the terminal.
               void window.claudeswitcher.focusSession(selectedRowView.sessionId)
             }}
           />
@@ -280,9 +285,10 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
 
       {decision === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
         // No held request, so nothing to decide, but the row must not be a dead end: the native
-        // prompt is there in VS Code.
+        // prompt is there, in VS Code or in the terminal.
         <JumpNotice
-          text="A VSCode-ban vár jóváhagyásra. Az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett)."
+          text={outsideAppMessage(selectedSource.host)}
+          host={selectedSource.host}
           sessionId={selectedRowView.sessionId}
         />
       )}
@@ -295,7 +301,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         */}
         {selectedRowView !== undefined && (
           <span className="status-session">
-            <SourceLabel source={requestSource(selectedRowView.session?.entrypoint)} />
+            <SourceLabel source={selectedSource} />
             {selectedFolder !== undefined && (
               <span className="status-folder" title={selectedFolder}>
                 {shortenPath(selectedFolder)}

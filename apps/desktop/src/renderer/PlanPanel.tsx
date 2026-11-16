@@ -1,20 +1,23 @@
 import { useState, type JSX } from 'react'
 import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
+import type { SessionHost } from '../shared/request-source.js'
 
 interface Props {
   plan: string | undefined
   busy: boolean
+  /** Where the session's own prompt is, for the approval button's text. */
+  host: SessionHost
   onReject: (feedback: string) => void
   onJump: () => void
 }
 
 /**
  * The plan with its full text. It can be rejected here too, with feedback: the session plans again
- * from it (measured, case K3 in spikes/m2-permission/RESULTS.md). Approving works only in VS Code:
- * Claude Code ignores an approval given from the hook (three independent measurements, cases
- * K2/K2b/K2c there).
+ * from it (measured, case K3 in spikes/m2-permission/RESULTS.md). Approving works only at the
+ * session's own prompt (in VS Code, or in the terminal of a terminal session): Claude Code ignores
+ * an approval given from the hook (three independent measurements, cases K2/K2b/K2c there).
  */
-export function PlanPanel({ plan, busy, onReject, onJump }: Props): JSX.Element {
+export function PlanPanel({ plan, busy, host, onReject, onJump }: Props): JSX.Element {
   const [feedback, setFeedback] = useState('')
   const canReject = feedback.trim() !== '' && !busy
 
@@ -47,7 +50,7 @@ export function PlanPanel({ plan, busy, onReject, onJump }: Props): JSX.Element 
             <kbd>{SUBMIT_CHORD_LABEL}</kbd> Elutasítás visszajelzéssel
           </button>
           <button type="button" onClick={onJump}>
-            Jóváhagyás a VSCode-ban →
+            Jóváhagyás {host.inside} →
           </button>
         </div>
       </form>

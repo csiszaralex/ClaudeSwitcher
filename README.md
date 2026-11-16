@@ -107,7 +107,7 @@ The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"
 | ✓ (green) | "Épp végzett": just finished, and you have not opened it since |
 | ✓ (blue) | "Végzett, már megnyitottad": finished, and you have opened it since |
 | ○ | "Tétlen": idle |
-| ◆ | the app let go of the request; decide it in VS Code |
+| ◆ | the app let go of the request; decide it at the session's own prompt |
 
 The rows are grouped by their marker, in this order: orange ●, burgundy ●, ◆, green ✓, ◐, blue ✓, ○. In the two ● groups the longest waiting row comes first (a request the app holds is let go after 590 seconds): a row with such a request counts from the oldest one's arrival, any other from when its wait began. When the list opens it selects the longest waiting row of the two groups; if no row waits, it keeps the selected row, or selects the top one. The ◐ rows go by name, so they do not swap places while they work. In the other groups the most recently active row comes first (its last transcript event, its finish or its wait, whichever is latest); rows with the same time go by name.
 
@@ -126,11 +126,13 @@ Selecting a waiting session opens its request. What you can do depends on the re
 - **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer).
 - **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there.
 
+Where the app cannot decide (a released request, a plan's approval, a request it does not hold), the texts and the **"Ugrás a VSCode-ba"** (jump to VS Code) button name where the session's own prompt is, by its source: VS Code for an extension session, the terminal for a CLI session and a `claude -p` run (**"Ugrás a terminálhoz"**, **"Jóváhagyás a terminálban →"**, **"A terminálban még dönthetsz."**), and the session itself when the source is unknown or another value (**"Ugrás a sessionhöz"**, **"A sessionben még dönthetsz."**).
+
 Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
 
 The letter keys do not fire for a short moment after a panel appears, on key repeat, or within a moment after you typed in a text field.
 
-The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. From 540 seconds on, the tray icon flashes to warn you. The prompt in VS Code stays and can still be answered there.
+The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. From 540 seconds on, the tray icon flashes to warn you. The session's own prompt (in VS Code or in the terminal) stays and can still be answered there.
 
 ## Uninstall
 

@@ -17,6 +17,8 @@ export interface RequestSource {
    * bar shows the label for a session without a request too.
    */
   title: string
+  /** Where the session's own prompt is, for the texts that send the user there (`sessionHost`). */
+  host: SessionHost
 }
 
 /** The label of a session without a registry record, or a record without `entrypoint`. */
@@ -41,6 +43,7 @@ export function requestSource(entrypoint: string | undefined): RequestSource {
       label: UNKNOWN_LABEL,
       standsOut: true,
       title: 'A session forrása ismeretlen: nincs a nyilvántartásban, vagy nem írja, honnan indult.',
+      host: sessionHost(entrypoint),
     }
   }
   const standsOut = !INTERACTIVE_ENTRYPOINTS.has(entrypoint)
@@ -48,7 +51,47 @@ export function requestSource(entrypoint: string | undefined): RequestSource {
     label: KNOWN_LABELS.get(entrypoint) ?? entrypoint,
     standsOut,
     title: standsOut ? 'Nem interaktívan indított session.' : 'Ebből a környezetből indított session.',
+    host: sessionHost(entrypoint),
   }
+}
+
+/**
+ * Where a session's own prompt is, in the Hungarian texts that send the user there (the jump button,
+ * the plan's approval, the notices of a request the app cannot decide). Both forms are lower case,
+ * for the middle of a sentence; `capitalized` starts a sentence with them.
+ */
+export interface SessionHost {
+  /** Where: "a VSCode-ban", "a terminálban", "a sessionben". */
+  inside: string
+  /** Where to: "a VSCode-ba", "a terminálhoz", "a sessionhöz". */
+  to: string
+}
+
+const VSCODE_HOST: SessionHost = { inside: 'a VSCode-ban', to: 'a VSCode-ba' }
+const TERMINAL_HOST: SessionHost = { inside: 'a terminálban', to: 'a terminálhoz' }
+/** For a source whose host is not known: it names the session itself. */
+const NEUTRAL_HOST: SessionHost = { inside: 'a sessionben', to: 'a sessionhöz' }
+
+/**
+ * The sources that run in a terminal: an interactive session and a headless `claude -p` run, both
+ * the `claude` command.
+ */
+const TERMINAL_ENTRYPOINTS: ReadonlySet<string> = new Set([CLI_ENTRYPOINT, HEADLESS_ENTRYPOINT])
+
+/**
+ * The host of a session from its registry `entrypoint`, the one home of that rule: VS Code for the
+ * extension, the terminal for `cli` and `sdk-cli`, and a neutral wording for anything else, a missing
+ * value included.
+ */
+export function sessionHost(entrypoint: string | undefined): SessionHost {
+  if (entrypoint === VSCODE_ENTRYPOINT) return VSCODE_HOST
+  if (entrypoint !== undefined && TERMINAL_ENTRYPOINTS.has(entrypoint)) return TERMINAL_HOST
+  return NEUTRAL_HOST
+}
+
+/** The phrase with its first letter in upper case, to start a sentence ("A terminálban …"). */
+export function capitalized(phrase: string): string {
+  return phrase.charAt(0).toUpperCase() + phrase.slice(1)
 }
 
 /**

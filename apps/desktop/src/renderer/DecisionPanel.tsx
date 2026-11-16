@@ -50,7 +50,7 @@ interface Props {
   keyHistory: RefObject<KeyHistory>
   /** The daemon accepted the decision: from this App steps the selection or hides the overlay. */
   onDecided: () => void
-  /** Jumps to the session's VS Code window: the native prompt is there all along. */
+  /** Jumps to the session's window (VS Code or its terminal): the native prompt is there all along. */
   onJump: () => void
 }
 
@@ -153,7 +153,7 @@ export function DecisionPanel({
     return (
       <div className="decision-row">
         <span className="muted">{text}</span>
-        <JumpButton onJump={onJump} />
+        <JumpButton host={source.host} onJump={onJump} />
       </div>
     )
   }
@@ -180,7 +180,7 @@ export function DecisionPanel({
   }
 
   function body(): JSX.Element {
-    if (decision.released) return jumpRow(`Az app elengedte. ${releasedMessage(remoteControl)}`)
+    if (decision.released) return jumpRow(`Az app elengedte. ${releasedMessage(remoteControl, source.host)}`)
 
     if (mode === 'deny') {
       return (
@@ -230,6 +230,7 @@ export function DecisionPanel({
           multilineSuggestions={seed.multiline}
           machine={mode === 'rule-machine'}
           busy={busy}
+          host={source.host}
           onSubmit={(rules) => {
             void submit({ type: 'allow-with-rules', rules, destination })
           }}
@@ -241,13 +242,13 @@ export function DecisionPanel({
     }
 
     // An unreadable command, file or URL: the core would reject allowing anyway. The row must not be
-    // a dead end: denying works, and the native prompt is there in VS Code.
+    // a dead end: denying works, and the native prompt is there, in VS Code or in the terminal.
     if (!decision.readable) {
       return (
         <div className="decision-row">
           <span className="muted">{UNREADABLE_REQUEST}</span>
           {actionButton(DENY_BUTTON)}
-          <JumpButton onJump={onJump} />
+          <JumpButton host={source.host} onJump={onJump} />
         </div>
       )
     }
@@ -271,8 +272,8 @@ export function DecisionPanel({
         return <div className="decision-row">{ACTION_BUTTONS.edit.map((button) => actionButton(button))}</div>
       case 'question':
         // An unreadable question cannot be answered (the daemon would reject it too), but the row
-        // must not be a dead end: the native prompt is there in VS Code, or the session gets a deny
-        // with a message.
+        // must not be a dead end: the native prompt is there (VS Code or terminal), or the session
+        // gets a deny with a message.
         if (isUnreadableQuestion(decision)) {
           return (
             <div className="decision-row">
@@ -280,7 +281,7 @@ export function DecisionPanel({
               <button type="button" disabled={busy} onClick={() => { setMode('deny') }}>
                 Tilt…
               </button>
-              <JumpButton onJump={onJump} />
+              <JumpButton host={source.host} onJump={onJump} />
             </div>
           )
         }
@@ -298,6 +299,7 @@ export function DecisionPanel({
           <PlanPanel
             plan={decision.plan}
             busy={busy}
+            host={source.host}
             onReject={(feedback) => {
               void submit({ type: 'deny', message: feedback })
             }}
@@ -331,7 +333,7 @@ export function DecisionPanel({
           </span>
         )}
       </header>
-      <DecisionContent decision={decision} summary={summary} />
+      <DecisionContent decision={decision} summary={summary} host={source.host} />
       <p className="decision-source">
         <SourceLabel source={source} />
         {facts !== undefined && <span className="muted" title={facts}>{facts}</span>}
