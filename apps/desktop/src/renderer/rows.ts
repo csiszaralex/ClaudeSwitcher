@@ -1,19 +1,28 @@
-import type { SessionStatus } from '@claudeswitcher/core'
+import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
 import { lastPathSegment } from '@claudeswitcher/core/browser'
+import type { SeenFinishes } from '../shared/session-finished.js'
+import { statusMarker, type MarkerTone, type StatusMarker } from './session-marker.js'
 
 interface DecisionLike {
   id: string
   sessionId: string
   createdAt: number
   released: boolean
+  kind: DecisionKind
   cwd: string
 }
 
 interface SessionLike {
   sessionId: string
   status: SessionStatus
-  name: string
+  // `name` and `activity` are required in `SessionView`, but at runtime the daemon's message can
+  // lack them (`state-message.ts` `sanitizeState` checks neither), so the types say so, as in
+  // `format.ts` `summarize`: a missing one must not throw in `buildRows` and take down the overlay.
+  name?: string | undefined
   waitingSince?: number | undefined
+  stoppedAt?: number | undefined
+  bridgeSessionId?: unknown
+  activity?: { lastEventAt?: number | undefined } | undefined
 }
 
 /** A row of the list: a known session, or a pending request whose session is not seen yet. */
@@ -26,6 +35,8 @@ export interface Row<S extends SessionLike, D extends DecisionLike> {
   session?: S | undefined
   /** The row's pending requests, the oldest first. */
   decisions: D[]
+  /** The row's status marker (`statusMarker`); its tone decides the row's group in the list. */
+  marker: StatusMarker
 }
 
 /**
@@ -56,20 +67,104 @@ export function pendingBadge(decisions: readonly { released: boolean }[]): strin
 }
 
 /**
- * The sessions and the pending requests in one list.
+ * The list's groups, in order: each marker tone's rank. The tone is the one the row shows
+ * (`statusMarker`), so the order follows the marker rules without a copy of them.
+ */
+const TONE_RANK: Readonly<Record<MarkerTone, number>> = {
+  waiting: 0,
+  choice: 1,
+  released: 2,
+  done: 3,
+  working: 4,
+  seen: 5,
+  idle: 6,
+}
+
+/** The groups that wait for an answer in the app: in them the longest waiting row comes first. */
+const WAITING_TONES: ReadonlySet<MarkerTone> = new Set<MarkerTone>(['waiting', 'choice'])
+
+/**
+ * When the row's wait began. With a held request the app can still decide: the oldest one's
+ * `createdAt`, the clock the release (`PERMISSION_RELEASE_AFTER_MS`) and the tray's flash run on.
+ * Not the daemon's `waitingSince` there: it prefers the Notification's wait, which a
+ * `permission_prompt` Notification starts seconds after the request, and otherwise counts released
+ * requests too. Without such a request (a Notification or registry wait, or only released ones):
+ * `waitingSince`. `undefined` when neither is known.
+ */
+function waitStart(row: {
+  waitingSince?: number | undefined
+  decisions: readonly { createdAt: number; released: boolean }[]
+}): number | undefined {
+  let oldest: number | undefined
+  for (const decision of row.decisions) {
+    if (!decision.released && (oldest === undefined || decision.createdAt < oldest)) oldest = decision.createdAt
+  }
+  return oldest ?? row.waitingSince
+}
+
+/**
+ * The order of two rows by the start of their wait (`waitStart`): the longer waiting first. A row
+ * without a known start counts as the newest. `selection.ts` picks the row to preselect by it too.
+ */
+export function compareWaitStart(
+  a: { waitingSince?: number | undefined; decisions: readonly { createdAt: number; released: boolean }[] },
+  b: { waitingSince?: number | undefined; decisions: readonly { createdAt: number; released: boolean }[] },
+): number {
+  return (waitStart(a) ?? Number.MAX_SAFE_INTEGER) - (waitStart(b) ?? Number.MAX_SAFE_INTEGER)
+}
+
+/**
+ * When the row was last touched: the latest of its last transcript event (`activity.lastEventAt`),
+ * its `stoppedAt` and its `waitingSince`. A missing one does not count; 0 when none is known.
+ */
+function lastTouched(row: Row<SessionLike, DecisionLike>): number {
+  const times = [row.session?.activity?.lastEventAt, row.session?.stoppedAt, row.waitingSince].filter(
+    (time): time is number => time !== undefined,
+  )
+  return times.length === 0 ? 0 : Math.max(...times)
+}
+
+/**
+ * The order of two rows of one group: in a waiting group the longest waiting first
+ * (`compareWaitStart`: nearest to the release, and the overlay preselects it); in the working group
+ * none (so by name), because a working session's `activity.lastEventAt` moves with every new
+ * transcript event and the rows would swap places every few seconds; in any other group the most
+ * recently touched first (`lastTouched`).
+ */
+function compareWithinGroup(a: Row<SessionLike, DecisionLike>, b: Row<SessionLike, DecisionLike>): number {
+  if (WAITING_TONES.has(a.marker.tone)) return compareWaitStart(a, b)
+  if (a.marker.tone === 'working') return 0
+  return lastTouched(b) - lastTouched(a)
+}
+
+/**
+ * The list order: by group (`TONE_RANK`), then within the group (`compareWithinGroup`). Ties go by
+ * name, then by session id, so the order is stable.
+ */
+function compareRows(a: Row<SessionLike, DecisionLike>, b: Row<SessionLike, DecisionLike>): number {
+  const rank = TONE_RANK[a.marker.tone] - TONE_RANK[b.marker.tone]
+  if (rank !== 0) return rank
+  const within = compareWithinGroup(a, b)
+  if (within !== 0) return within
+  return a.name.localeCompare(b.name) || a.sessionId.localeCompare(b.sessionId)
+}
+
+/**
+ * The sessions and the pending requests in one list, in the list's order (`compareRows`); the
+ * daemon's own order of the sessions does not matter.
  *
  * A request whose session is not in the snapshot gets a row of its own (design doc, section 8:
  * approval works without the session discovery too). This is natural in a new session's first
  * seconds (the hook comes at once, the registry is read only every few seconds), but also with a
- * changed registry format. Its name is the last segment of the request's `cwd`, and it counts as
- * waiting.
+ * changed registry format. Its name is the last segment of the request's `cwd`; it counts as
+ * waiting since its oldest request and sorts with the other rows by its marker.
  *
- * The daemon sorts the waiting sessions first by the start of their wait; such a row goes into the
- * same order by its oldest request, before the non-waiting ones.
+ * `seen` are the finishes the user has seen (`useSeenFinishes`), for the ✓ marker's color.
  */
 export function buildRows<S extends SessionLike, D extends DecisionLike>(
   sessions: readonly S[],
   decisions: readonly D[],
+  seen: SeenFinishes,
 ): Row<S, D>[] {
   const bySession = new Map<string, D[]>()
   for (const decision of decisions) {
@@ -78,38 +173,34 @@ export function buildRows<S extends SessionLike, D extends DecisionLike>(
     else list.push(decision)
   }
 
-  const rows: Row<S, D>[] = sessions.map((session) => ({
-    sessionId: session.sessionId,
-    status: session.status,
-    name: session.name,
-    waitingSince: session.waitingSince,
-    session,
-    decisions: bySession.get(session.sessionId) ?? [],
-  }))
+  const rows: Row<S, D>[] = sessions.map((session) => {
+    const own = bySession.get(session.sessionId) ?? []
+    return {
+      sessionId: session.sessionId,
+      status: session.status,
+      name: session.name ?? '',
+      waitingSince: session.waitingSince,
+      session,
+      decisions: own,
+      marker: statusMarker(session, own, seen),
+    }
+  })
 
   const known = new Set(sessions.map((session) => session.sessionId))
-  const orphans: Row<S, D>[] = []
   for (const [sessionId, list] of bySession) {
     if (known.has(sessionId)) continue
     const sorted = [...list].sort((a, b) => a.createdAt - b.createdAt)
     const first = sorted[0]
     if (first === undefined) continue
-    orphans.push({
+    rows.push({
       sessionId,
       status: 'waiting',
       name: lastPathSegment(first.cwd) ?? sessionId,
       waitingSince: first.createdAt,
       session: undefined,
       decisions: sorted,
+      marker: statusMarker({ sessionId, status: 'waiting' }, sorted, seen),
     })
   }
-  orphans.sort((a, b) => (a.waitingSince ?? 0) - (b.waitingSince ?? 0))
-
-  for (const orphan of orphans) {
-    const since = orphan.waitingSince ?? 0
-    const at = rows.findIndex((row) => row.status !== 'waiting' || (row.waitingSince ?? 0) > since)
-    if (at === -1) rows.push(orphan)
-    else rows.splice(at, 0, orphan)
-  }
-  return rows
+  return rows.sort(compareRows)
 }

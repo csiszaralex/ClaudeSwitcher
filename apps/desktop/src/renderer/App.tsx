@@ -10,7 +10,7 @@ import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
-import { hasRemoteControl, statusMarker } from './session-marker.js'
+import { hasRemoteControl } from './session-marker.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
 import './styles.css'
@@ -49,8 +49,9 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   const [now, setNow] = useState(Date.now())
 
   // The rows: the sessions, plus a row of its own for each pending request whose session the
-  // snapshot does not know yet (rows.ts). All selection and stepping works on this list.
-  const rows = buildRows(sessions, decisions)
+  // snapshot does not know yet, in the list's order (rows.ts). All selection and stepping works on
+  // this list.
+  const rows = buildRows(sessions, decisions, seenFinishes)
   const ids = rows.map((row) => row.sessionId)
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedRowView = selected === -1 ? undefined : rows[selected]
@@ -186,8 +187,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         )}
         {rows.map((row, index) => {
           const pending = activeDecision(row.decisions)
-          // The row of a session the snapshot does not know yet: the pending request holds it, so it is waiting.
-          const marker = statusMarker(row.session ?? { sessionId: row.sessionId, status: row.status }, row.decisions, seenFinishes)
+          const marker = row.marker
           const badge = pendingBadge(row.decisions)
           // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
           const source = requestSource(row.session?.entrypoint)

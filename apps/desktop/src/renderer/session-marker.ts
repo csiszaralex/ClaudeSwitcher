@@ -9,7 +9,7 @@ import { finishState, type SeenFinishes } from '../shared/session-finished.js'
  * (`isChoiceKind`): the same dot in another color. `done` is a finish the user has not seen yet,
  * `seen` one they have (`finishState`): the same ✓ in another color.
  */
-type MarkerTone = 'waiting' | 'choice' | 'released' | 'working' | 'done' | 'seen' | 'idle'
+export type MarkerTone = 'waiting' | 'choice' | 'released' | 'working' | 'done' | 'seen' | 'idle'
 
 export interface StatusMarker {
   tone: MarkerTone

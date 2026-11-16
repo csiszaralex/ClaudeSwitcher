@@ -1,12 +1,13 @@
 import { recentlyTyped } from './key-guard.js'
+import { compareWaitStart } from './rows.js'
 
 /**
  * The index of the selected session in the current list, or -1 if the list is empty.
  *
- * The selection is tracked by session id, not by index. The list is sorted (waiting sessions jump
- * to the top), so an index-based selection would silently point to a DIFFERENT session after a
- * reorder, and Enter would jump to the wrong window. If the selected session is gone, it falls
- * back to the first one.
+ * The selection is tracked by session id, not by index. The list is sorted (rows.ts `buildRows`:
+ * waiting sessions jump to the top), so an index-based selection would silently point to a
+ * DIFFERENT session after a reorder, and Enter would jump to the wrong window. If the selected
+ * session is gone, it falls back to the first one.
  */
 export function resolveSelectedIndex(
   ids: readonly string[],
@@ -32,19 +33,27 @@ export function moveSelection(
 interface SessionLike {
   sessionId: string
   status: string
+  /**
+   * The daemon's wait start (`SessionView.waitingSince`, an orphan row's oldest request). It counts
+   * only for a session without a held request the app can decide (`compareWaitStart`).
+   */
+  waitingSince?: number | undefined
 }
 
 interface DecisionLike {
   id: string
   sessionId: string
+  /** When the request arrived: the wait start of a session that has it held (`compareWaitStart`). */
+  createdAt: number
   /** The app has already released it (`PERMISSION_RELEASE_AFTER_MS`): from here only VS Code can decide. */
   released: boolean
 }
 
 /**
- * The id of the first waiting session in list order, on two tiers. The daemon sorts the waiting
- * sessions first and the longest-waiting one to the very front, so within a tier the first is the
- * one waiting longest.
+ * The id of the session waiting longest (`compareWaitStart`), on two tiers; between equal waits the
+ * first in list order. Not simply the first in list order: the list puts the yes/no requests before
+ * the choice requests and sorts the released ones by recent activity (rows.ts `buildRows`), but the
+ * one to preselect is the one that has waited longest, whatever its group.
  *
  * Tier 1: the app can still decide something. The session has a decision that is not released, or
  *    it has no held decision but its `status` is `waiting` (a Notification wait, e.g. a question in
@@ -58,23 +67,43 @@ function firstWaiting(
   decisions: readonly DecisionLike[],
   skip?: string,
 ): string | undefined {
-  const held = new Set<string>()
+  const held = new Map<string, DecisionLike[]>()
   const decidable = new Set<string>()
   for (const d of decisions) {
-    held.add(d.sessionId)
+    const list = held.get(d.sessionId)
+    if (list === undefined) held.set(d.sessionId, [d])
+    else list.push(d)
     if (!d.released) decidable.add(d.sessionId)
   }
   const candidates = sessions.filter((s) => s.sessionId !== skip)
-  const first = candidates.find(
-    (s) => decidable.has(s.sessionId) || (!held.has(s.sessionId) && s.status === 'waiting'),
+  const first = longestWaiting(
+    candidates.filter((s) => decidable.has(s.sessionId) || (!held.has(s.sessionId) && s.status === 'waiting')),
+    held,
   )
-  return (first ?? candidates.find((s) => held.has(s.sessionId)))?.sessionId
+  return (first ?? longestWaiting(candidates.filter((s) => held.has(s.sessionId)), held))?.sessionId
+}
+
+/**
+ * The session waiting longest (`compareWaitStart`, with the session's held requests from `held`);
+ * between equal waits the first one in the list.
+ */
+function longestWaiting(
+  sessions: readonly SessionLike[],
+  held: ReadonlyMap<string, readonly DecisionLike[]>,
+): SessionLike | undefined {
+  const wait = (session: SessionLike) => ({ waitingSince: session.waitingSince, decisions: held.get(session.sessionId) ?? [] })
+  let best: SessionLike | undefined
+  for (const session of sessions) if (best === undefined || compareWaitStart(wait(session), wait(best)) < 0) best = session
+  return best
 }
 
 /**
  * The selection when the overlay appears: the session waiting longest, matching the user's flow
  * "open it, decide the oldest". It jumps to a released request only if nothing else waits (see
- * `firstWaiting`). If nobody waits, the current selection stays.
+ * `firstWaiting`). If nobody waits, the current selection stays while it is in the list; otherwise
+ * the first row is selected by its id. An `undefined` selection would make the list highlight its
+ * first row (`resolveSelectedIndex`), so the highlight would move whenever another row came to the
+ * top.
  *
  * `preferred` is the session a clicked notification asked for: it wins if it is still in the list.
  * Otherwise (it ended meanwhile) the rule above applies.
@@ -86,7 +115,10 @@ export function selectOnShow(
   preferred?: string,
 ): string | undefined {
   if (preferred !== undefined && sessions.some((s) => s.sessionId === preferred)) return preferred
-  return firstWaiting(sessions, decisions) ?? current
+  const waiting = firstWaiting(sessions, decisions)
+  if (waiting !== undefined) return waiting
+  if (current !== undefined && sessions.some((s) => s.sessionId === current)) return current
+  return sessions[0]?.sessionId
 }
 
 export interface AfterDecision {
@@ -101,7 +133,7 @@ export interface AfterDecision {
  *
  * `sessions` and `decisions` can be one step behind: the decision's reply and the daemon's next
  * state travel separately. So the decided request is excluded by id, and the decided session is
- * not taken as waiting either; the daemon puts it on top of the non-waiting ones anyway.
+ * not taken as waiting either; once answered it moves to the group its new marker belongs to.
  * The exception is when the same session has ANOTHER request that can still be decided (parallel
  * tool calls): then the selection stays there and the overlay does not hide, because there is still
  * something to decide. A released sibling is no reason to stay.

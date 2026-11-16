@@ -4,7 +4,8 @@ import type { SeenFinishes } from '../shared/session-finished.js'
 /**
  * The seen finishes from the IPC reply (`OVERLAY_CHANNELS.finishesSeen`): `[sessionId, stoppedAt]`
  * pairs. Never throws: a malformed pair drops out, anything else gives an empty map, so the worst
- * case is a green ✓ that should be blue.
+ * case is a green ✓ that should be blue, in the unseen finishes' group of the list instead of the
+ * seen ones' (`rows.ts` `TONE_RANK`).
  */
 export function readSeenFinishes(raw: unknown): SeenFinishes {
   const seen = new Map<string, number>()
