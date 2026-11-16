@@ -62,6 +62,7 @@ import {
   createUpdateController,
   updateChoice,
   updateLabel,
+  updateNotice,
   updatePrompt,
   type UpdateController,
 } from './updater.js'
@@ -527,10 +528,14 @@ async function startApp(): Promise<void> {
     onUpdate: () => {
       if (!quitSequence.isQuitting()) updates?.install()
     },
+    // The item is shown only with `updates` (`onManualCheck`), that is in the installed app.
+    onCheckUpdate: () => {
+      if (!quitSequence.isQuitting()) updates?.checkNow()
+    },
   })
 
   // The installed app only: a repo build has no `app-update.yml` and no updater at all, so no
-  // check and no tray line.
+  // check, no tray line and no manual check item.
   const updates: UpdateController | undefined = app.isPackaged
     ? createUpdateController({
         updater: (requireRuntime('electron-updater') as typeof import('electron-updater')).autoUpdater,
@@ -542,6 +547,10 @@ async function startApp(): Promise<void> {
         // No parent window: the overlay is hidden by then, and the setup window may be closed.
         prompt: (version) =>
           dialog.showMessageBox(updatePrompt(version, app.getVersion())).then(({ response }) => updateChoice(response)),
+        notify: (notice) => dialog.showMessageBox(updateNotice(notice, app.getVersion())),
+        onManualCheck: (state) => {
+          tray.setUpdateCheck(state)
+        },
         overlayVisible: overlay.isVisible,
         onOverlayHidden: overlay.onHidden,
         skippedVersion: stored.skippedVersion,

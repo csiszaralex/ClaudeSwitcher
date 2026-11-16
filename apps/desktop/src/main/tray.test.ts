@@ -33,7 +33,7 @@ const { IDLE_TRAY_STATE } = await import('./tray-state.js')
 
 const noop = (): void => {}
 
-function newTray(onOpenLog: () => void = noop): ReturnType<typeof createTray> {
+function newTray(onOpenLog: () => void = noop, onCheckUpdate: () => void = noop): ReturnType<typeof createTray> {
   return createTray({
     settings: { values: DEFAULT_SETTINGS, confirmed: new Set(), installed: true },
     hotkey: { requested: 'Control+Shift+F9', status: 'registered' },
@@ -44,6 +44,7 @@ function newTray(onOpenLog: () => void = noop): ReturnType<typeof createTray> {
     onQuit: noop,
     onNotice: noop,
     onUpdate: noop,
+    onCheckUpdate,
   })
 }
 
@@ -66,6 +67,34 @@ describe('createTray menu', () => {
     // Electron passes (menuItem, window, event); the handler ignores them.
     ;(item?.click as (() => void) | undefined)?.()
     expect(onOpenLog).toHaveBeenCalledOnce()
+  })
+
+  it('has no update check item until one is set (a repo build has none)', () => {
+    newTray()
+    const names = labels(built.templates.at(-1) ?? [])
+    expect(names).not.toContain('Frissítés keresése most')
+    expect(names).not.toContain('Frissítés keresése…')
+  })
+
+  it('shows the update check item after "Napló megnyitása": idle calls onCheckUpdate, busy is disabled', () => {
+    const onCheckUpdate = vi.fn()
+    const tray = newTray(noop, onCheckUpdate)
+    tray.setUpdateCheck('idle')
+    let template = built.templates.at(-1) ?? []
+    const at = labels(template).indexOf('Napló megnyitása') + 1
+    const idle = template[at]
+    expect(idle?.label).toBe('Frissítés keresése most')
+    expect(idle?.enabled).toBe(true)
+    ;(idle?.click as (() => void) | undefined)?.()
+    expect(onCheckUpdate).toHaveBeenCalledOnce()
+
+    tray.setUpdateCheck('busy')
+    template = built.templates.at(-1) ?? []
+    expect(template[at]?.label).toBe('Frissítés keresése…')
+    expect(template[at]?.enabled).toBe(false)
+
+    tray.setUpdateCheck('hidden')
+    expect(labels(built.templates.at(-1) ?? [])).not.toContain('Frissítés keresése…')
   })
 })
 

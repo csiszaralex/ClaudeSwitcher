@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   UPDATE_CHECK_INTERVAL_MS,
   createUpdateController,
+  manualCheckLabel,
   updateChoice,
   updateLabel,
+  updateNotice,
   updatePrompt,
+  type ManualCheckState,
   type UpdateChoice,
+  type UpdateNotice,
   type Updater,
   type UpdaterLog,
 } from './updater.js'
@@ -110,7 +114,7 @@ function fakeOverlay(visible: boolean) {
 
 function setup(
   enabled: boolean,
-  options: { skippedVersion?: string; overlayVisible?: boolean; saveFails?: boolean } = {},
+  options: { skippedVersion?: string; overlayVisible?: boolean; saveFails?: boolean; notifyThrows?: boolean } = {},
 ) {
   const fake = fakeUpdater()
   const timers = fakeEvery()
@@ -121,6 +125,10 @@ function setup(
   /** Every popup shown, with the answer the test gives. */
   const prompts: { version: string; answer: Deferred }[] = []
   const saved: string[] = []
+  /** Every box shown, with the close the test gives. */
+  const notices: { notice: UpdateNotice; closed: Deferred }[] = []
+  /** Every state of the manual check's tray item. */
+  const manualStates: ManualCheckState[] = []
   const controller = createUpdateController({
     updater: fake.updater,
     enabled,
@@ -131,6 +139,15 @@ function setup(
       const answer = deferred()
       prompts.push({ version, answer })
       return answer.promise.then((choice) => choice as UpdateChoice)
+    },
+    notify: (notice) => {
+      if (options.notifyThrows === true) throw new Error('no dialog')
+      const closed = deferred()
+      notices.push({ notice, closed })
+      return closed.promise
+    },
+    onManualCheck: (state) => {
+      manualStates.push(state)
     },
     overlayVisible: () => overlay.visible,
     onOverlayHidden: (listener) => {
@@ -144,7 +161,7 @@ function setup(
     log,
     every: timers.every,
   })
-  return { ...fake, ...timers, log, offers, prompts, saved, overlay, controller }
+  return { ...fake, ...timers, log, offers, prompts, saved, notices, manualStates, overlay, controller }
 }
 
 describe('updateLabel', () => {
@@ -443,5 +460,266 @@ describe('the update popup', () => {
     prompts[1]?.answer.resolve('skip')
     await settle()
     expect(log.errors).toEqual([new Error('no dialog'), new Error('disk full')])
+  })
+})
+
+describe('manualCheckLabel and updateNotice', () => {
+  it('labels the tray item idle and busy', () => {
+    expect(manualCheckLabel('idle')).toBe('Frissítés keresése most')
+    expect(manualCheckLabel('busy')).toBe('Frissítés keresése…')
+  })
+
+  it('names the running version in the "latest" box, and points to the log in the "failed" one', () => {
+    expect(updateNotice('latest', '0.1.0')).toEqual({
+      type: 'info',
+      title: 'ClaudeSwitcher',
+      message: 'A legfrissebb verzió fut (0.1.0).',
+    })
+    expect(updateNotice('failed', '0.1.0')).toEqual({
+      type: 'warning',
+      title: 'ClaudeSwitcher',
+      message: 'Nem sikerült ellenőrizni a frissítést. Részletek a naplóban.',
+    })
+  })
+})
+
+describe('the manual check', () => {
+  it('shows the tray item idle from the start', () => {
+    const { manualStates } = setup(false)
+    expect(manualStates).toEqual(['idle'])
+  })
+
+  it('opens the popup of the update on offer again, without a check, but never a second one while it is open', async () => {
+    const { controller, checks, listeners, prompts, installs } = setup(false)
+    listeners.downloaded?.({ version: '0.2.0' })
+    controller.checkNow()
+    expect(prompts).toHaveLength(1)
+
+    prompts[0]?.answer.resolve('later')
+    await settle()
+    controller.checkNow()
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0', '0.2.0'])
+    expect(checks).toHaveLength(0)
+
+    // Its choices work as on the first popup.
+    prompts[1]?.answer.resolve('install')
+    await settle()
+    expect(installs).toEqual([[true, true]])
+  })
+
+  it('checks with the setting off, shows the item busy meanwhile, and offers the download in the popup', async () => {
+    const { controller, checks, downloads, listeners, prompts, offers, notices, manualStates } = setup(false)
+    controller.checkNow()
+    expect(checks).toHaveLength(1)
+    expect(manualStates).toEqual(['idle', 'busy'])
+
+    checks[0]?.resolve(found('0.2.0'))
+    await settle()
+    expect(downloads).toHaveLength(1)
+    expect(manualStates).toEqual(['idle', 'busy'])
+
+    listeners.downloaded?.({ version: '0.2.0' })
+    downloads[0]?.resolve([])
+    await settle()
+    expect(offers).toEqual(['0.2.0'])
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
+    expect(manualStates).toEqual(['idle', 'busy', 'idle'])
+    expect(notices).toEqual([])
+  })
+
+  it('shows the popup even for a version whose popup this run already showed', async () => {
+    const { controller, checks, downloads, listeners, prompts } = setup(false)
+    listeners.downloaded?.({ version: '0.2.0' })
+    prompts[0]?.answer.resolve('skip')
+    await settle()
+
+    controller.checkNow()
+    checks[0]?.resolve(found('0.2.0'))
+    await settle()
+    listeners.downloaded?.({ version: '0.2.0' })
+    downloads[0]?.resolve([])
+    await settle()
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0', '0.2.0'])
+  })
+
+  it('offers a skipped version, which stays skipped for the automatic checks', async () => {
+    const { controller, checks, downloads, listeners, prompts, offers, saved, running } = setup(false, {
+      skippedVersion: '0.2.0',
+    })
+    controller.checkNow()
+    checks[0]?.resolve(found('0.2.0'))
+    await settle()
+    expect(downloads).toHaveLength(1)
+    listeners.downloaded?.({ version: '0.2.0' })
+    downloads[0]?.resolve([])
+    await settle()
+    expect(offers).toEqual(['0.2.0'])
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
+
+    // "Verzió kihagyása" again: the tray line goes, the version stays skipped, nothing new is saved.
+    prompts[0]?.answer.resolve('skip')
+    await settle()
+    expect(offers).toEqual(['0.2.0', undefined])
+    expect(saved).toEqual([])
+
+    // The automatic checks still leave it.
+    controller.setEnabled(true)
+    checks[1]?.resolve(found('0.2.0'))
+    await settle()
+    expect(downloads).toHaveLength(1)
+    listeners.downloaded?.({ version: '0.2.0' })
+    expect(offers).toEqual(['0.2.0', undefined])
+    expect(running()).toHaveLength(1)
+  })
+
+  it('"Most ne" on a manually offered skipped version keeps its tray line and the install', async () => {
+    const { controller, checks, downloads, listeners, prompts, offers, installs } = setup(false, {
+      skippedVersion: '0.2.0',
+    })
+    controller.checkNow()
+    checks[0]?.resolve(found('0.2.0'))
+    await settle()
+    listeners.downloaded?.({ version: '0.2.0' })
+    downloads[0]?.resolve([])
+    await settle()
+    prompts[0]?.answer.resolve('later')
+    await settle()
+    expect(offers).toEqual(['0.2.0'])
+    controller.install()
+    expect(installs).toEqual([[true, true]])
+  })
+
+  it('answers "latest" when nothing is newer, after the overlay hides', async () => {
+    const { controller, checks, notices, manualStates, overlay } = setup(false, { overlayVisible: true })
+    controller.checkNow()
+    checks[0]?.resolve(upToDate)
+    await settle()
+    expect(manualStates).toEqual(['idle', 'busy', 'idle'])
+    expect(notices).toEqual([])
+
+    overlay.hide()
+    expect(notices.map((shown) => shown.notice)).toEqual(['latest'])
+  })
+
+  it('answers "failed" and logs when the check or the download fails', async () => {
+    const { controller, checks, downloads, notices, log } = setup(false)
+    controller.checkNow()
+    checks[0]?.reject(new Error('offline'))
+    await settle()
+    expect(notices.map((shown) => shown.notice)).toEqual(['failed'])
+    expect(log.errors).toEqual([new Error('offline')])
+
+    notices[0]?.closed.resolve()
+    await settle()
+    controller.checkNow()
+    checks[1]?.resolve(found('0.2.0'))
+    await settle()
+    downloads[0]?.reject(new Error('bad latest.yml'))
+    await settle()
+    expect(notices.map((shown) => shown.notice)).toEqual(['failed', 'failed'])
+    expect(log.errors).toEqual([new Error('offline'), new Error('bad latest.yml')])
+  })
+
+  it('logs a box that throws instead of rejecting, and is idle again for the next click', async () => {
+    const { controller, checks, log, manualStates } = setup(false, { notifyThrows: true })
+    controller.checkNow()
+    checks[0]?.resolve(upToDate)
+    await settle()
+    expect(log.errors).toEqual([new Error('no dialog')])
+    expect(manualStates.at(-1)).toBe('idle')
+
+    controller.checkNow()
+    expect(checks).toHaveLength(2)
+    expect(manualStates.at(-1)).toBe('busy')
+  })
+
+  it('still shows the next dialog after a box threw synchronously', async () => {
+    const { controller, checks, listeners, log, prompts } = setup(false, { notifyThrows: true })
+    controller.checkNow()
+    checks[0]?.resolve(upToDate)
+    await settle()
+    expect(log.errors).toEqual([new Error('no dialog')])
+
+    listeners.downloaded?.({ version: '0.2.0' })
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
+  })
+
+  it('keeps one dialog at a time: a popup waits for its open box to close', async () => {
+    const { controller, checks, listeners, prompts, notices } = setup(false)
+    controller.checkNow()
+    checks[0]?.resolve(upToDate)
+    await settle()
+    expect(notices.map((shown) => shown.notice)).toEqual(['latest'])
+
+    listeners.downloaded?.({ version: '0.2.0' })
+    expect(prompts).toHaveLength(0)
+    notices[0]?.closed.resolve()
+    await settle()
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
+  })
+
+  it('ignores a click while its check runs', () => {
+    const { controller, checks, manualStates } = setup(false)
+    controller.checkNow()
+    controller.checkNow()
+    expect(checks).toHaveLength(1)
+    expect(manualStates).toEqual(['idle', 'busy'])
+  })
+
+  it('joins an automatic check that runs, instead of starting a second one', async () => {
+    const { controller, checks, notices, manualStates } = setup(true)
+    controller.checkNow()
+    expect(checks).toHaveLength(1)
+    expect(manualStates).toEqual(['idle', 'busy'])
+
+    checks[0]?.resolve(upToDate)
+    await settle()
+    expect(checks).toHaveLength(1)
+    expect(notices.map((shown) => shown.notice)).toEqual(['latest'])
+    expect(manualStates).toEqual(['idle', 'busy', 'idle'])
+  })
+
+  it('downloads the skipped version a joined automatic check left', async () => {
+    const { controller, checks, downloads, listeners, prompts } = setup(true, { skippedVersion: '0.2.0' })
+    controller.checkNow()
+    checks[0]?.resolve(found('0.2.0'))
+    await settle()
+    expect(checks).toHaveLength(1)
+    expect(downloads).toHaveLength(1)
+    listeners.downloaded?.({ version: '0.2.0' })
+    downloads[0]?.resolve([])
+    await settle()
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
+  })
+
+  it('starts no automatic check while it runs', () => {
+    const { controller, checks, running } = setup(false)
+    controller.checkNow()
+    controller.setEnabled(true)
+    running()[0]?.fn()
+    expect(checks).toHaveLength(1)
+  })
+
+  it('shows nothing after stop', async () => {
+    const { controller, checks, notices, prompts, manualStates } = setup(false)
+    controller.checkNow()
+    controller.stop()
+    checks[0]?.resolve(upToDate)
+    await settle()
+    controller.checkNow()
+    expect(checks).toHaveLength(1)
+    expect(notices).toEqual([])
+    expect(prompts).toEqual([])
+    expect(manualStates).toEqual(['idle', 'busy'])
+  })
+
+  it('shows no waiting box after stop', async () => {
+    const { controller, checks, notices, overlay } = setup(false, { overlayVisible: true })
+    controller.checkNow()
+    checks[0]?.reject(new Error('offline'))
+    await settle()
+    controller.stop()
+    overlay.hide()
+    expect(notices).toEqual([])
   })
 })
