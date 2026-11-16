@@ -13,23 +13,39 @@ export const TRAY_COLORS = {
   yesNo: '#d97757',
   /** A request that asks for a choice (a question or a plan): `--choice`. */
   choice: '#b8406a',
+  /** A session finished and the user has not seen it yet: `--success`, the list's ✓. */
+  done: '#8fbf7a',
 } as const
 
-/** What the icon shows: a disc in one colour. */
+/**
+ * What the icon shows: a disc in one colour, or, with `ring`, a ring in that colour around a
+ * smaller disc in `fill`.
+ */
 export interface TrayLook {
   fill: string
+  ring?: string | undefined
 }
 
-/** The icon for a tray state. */
-export function trayLook(state: TrayState): TrayLook {
+function waitColor(state: TrayState): string | undefined {
   switch (state.wait) {
     case 'none':
-      return { fill: TRAY_COLORS.idle }
+      return undefined
     case 'yes-no':
-      return { fill: TRAY_COLORS.yesNo }
+      return TRAY_COLORS.yesNo
     case 'choice':
-      return { fill: TRAY_COLORS.choice }
+      return TRAY_COLORS.choice
   }
+}
+
+/**
+ * The icon for a tray state. What waits is the stronger sign, so it keeps the centre; a finish
+ * nobody has seen yet turns an idle icon green, and puts a green ring around a waiting one.
+ */
+export function trayLook(state: TrayState): TrayLook {
+  const waiting = waitColor(state)
+  const finished = state.finishedCount > 0
+  if (waiting === undefined) return { fill: finished ? TRAY_COLORS.done : TRAY_COLORS.idle }
+  return finished ? { fill: waiting, ring: TRAY_COLORS.done } : { fill: waiting }
 }
 
 /** Only 16x16 for now: the size Windows shows in the taskbar at 100 % scaling. */
@@ -40,6 +56,14 @@ export const TRAY_ICON_SIZE = 16
  * radius of about 6.4 px) gives the 12 px disc of `resources/tray.png` exactly.
  */
 const DISC_RADIUS_SQ = 41
+
+/**
+ * With a ring: the ring is the disc outside a radius of 4 px (about 2 px wide), and the centre a disc of
+ * 3 px radius (6 px across), with a 1 px transparent gap between them, so the two colours do not
+ * blur into one at 16 px.
+ */
+const RING_INNER_RADIUS_SQ = 16
+const CORE_RADIUS_SQ = 9
 
 const BYTES_PER_PIXEL = 4
 
@@ -56,7 +80,11 @@ function distanceSq(x: number, y: number): number {
 
 /** The colour of one pixel, `undefined` for a transparent one. */
 function pixelColor(look: TrayLook, x: number, y: number): string | undefined {
-  return distanceSq(x, y) <= DISC_RADIUS_SQ ? look.fill : undefined
+  const distance = distanceSq(x, y)
+  if (distance > DISC_RADIUS_SQ) return undefined
+  if (look.ring === undefined) return look.fill
+  if (distance > RING_INNER_RADIUS_SQ) return look.ring
+  return distance <= CORE_RADIUS_SQ ? look.fill : undefined
 }
 
 /** The icon as `TRAY_ICON_SIZE` x `TRAY_ICON_SIZE` RGBA pixels, row by row; transparent pixels are all zero. */

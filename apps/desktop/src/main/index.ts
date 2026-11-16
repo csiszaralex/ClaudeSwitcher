@@ -56,7 +56,7 @@ import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createToaster } from './toast.js'
 import { createTray } from './tray.js'
-import { trayState } from './tray-state.js'
+import { acknowledgeFinish, trayState } from './tray-state.js'
 import {
   CONSOLE_UPDATER_LOG,
   createUpdateController,
@@ -395,6 +395,10 @@ async function startApp(): Promise<void> {
   }
   await running.refresh()
 
+  // The finishes the user has seen by jumping to the session (`acknowledgeFinish`); the tray tick
+  // reads them. In memory only, as the daemon's `stoppedAt` itself (`SessionStore`).
+  const finishesSeen = new Map<string, number>()
+
   // Every handler first checks the sender (`handleFrom`). Where the reply has a failure shape, a
   // foreign sender gets that; the other handlers throw, which is a rejected promise in the renderer.
   handleFrom(RENDERER, OVERLAY_CHANNELS.connection, () => {
@@ -431,6 +435,8 @@ async function startApp(): Promise<void> {
       // fallback handles it.
       const outcome = await focusSessionWindow(view)
       overlay.hide()
+      // The user has opened the session: its finish is seen, and the tray's done mark goes.
+      if (outcome !== 'failed') acknowledgeFinish(finishesSeen, view)
       // The exact tab only AFTER the window, and only if every condition of `tabFocusUri` holds.
       // The decisions are read AFTER the focus: a file-write request may have arrived during the
       // wait. Not awaited: the renderer gets the result of the window focus, as before.
@@ -683,7 +689,7 @@ async function startApp(): Promise<void> {
 
   const syncTray = (): void => {
     const state = running.state()
-    tray.setState(trayState(state))
+    tray.setState(trayState({ ...state, acknowledged: finishesSeen }))
     // Never lets a failing toast stop the tray tick.
     try {
       const { notifyOnRequest, notifyOnFinish } = settings.snapshot().values

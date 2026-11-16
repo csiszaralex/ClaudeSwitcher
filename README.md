@@ -65,7 +65,7 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 ### The tray
 
-The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). The tooltip says how many sessions wait, and adds **"választásra vár"** (waits for a choice) for a burgundy icon. Clicking the icon opens the list. The right-click menu:
+The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). When a session has finished its turn (the ✓ in the list) and you have not opened it since, the icon turns green, or, while something waits, gets a green ring around the waiting colour. Opening that session from the list (Enter, or a double click) clears its mark; so does its next turn. The tooltip says how many sessions wait, adds **"választásra vár"** (waits for a choice) for a burgundy icon, and **"N végzett"** (N finished) for the finished sessions not opened yet. Clicking the icon opens the list. The right-click menu:
 
 - **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded and not skipped; see [Updating](#updating).
 - **"Megnyitás"** (open): opens the list.

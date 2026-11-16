@@ -60,9 +60,24 @@ const MIDDLE = TRAY_ICON_SIZE / 2
 
 describe('trayLook', () => {
   it('fills the disc with the colour of what waits', () => {
-    expect(trayLook({ waitingCount: 0, wait: 'none' })).toEqual({ fill: TRAY_COLORS.idle })
-    expect(trayLook({ waitingCount: 1, wait: 'yes-no' })).toEqual({ fill: TRAY_COLORS.yesNo })
-    expect(trayLook({ waitingCount: 1, wait: 'choice' })).toEqual({ fill: TRAY_COLORS.choice })
+    expect(trayLook({ waitingCount: 0, wait: 'none', finishedCount: 0 })).toEqual({ fill: TRAY_COLORS.idle })
+    expect(trayLook({ waitingCount: 1, wait: 'yes-no', finishedCount: 0 })).toEqual({ fill: TRAY_COLORS.yesNo })
+    expect(trayLook({ waitingCount: 1, wait: 'choice', finishedCount: 0 })).toEqual({ fill: TRAY_COLORS.choice })
+  })
+
+  it('turns green for an unseen finish while nothing waits', () => {
+    expect(trayLook({ waitingCount: 0, wait: 'none', finishedCount: 1 })).toEqual({ fill: TRAY_COLORS.done })
+  })
+
+  it('puts a green ring around what waits when a finish is unseen too', () => {
+    expect(trayLook({ waitingCount: 1, wait: 'yes-no', finishedCount: 2 })).toEqual({
+      fill: TRAY_COLORS.yesNo,
+      ring: TRAY_COLORS.done,
+    })
+    expect(trayLook({ waitingCount: 1, wait: 'choice', finishedCount: 1 })).toEqual({
+      fill: TRAY_COLORS.choice,
+      ring: TRAY_COLORS.done,
+    })
   })
 })
 
@@ -75,12 +90,24 @@ describe('trayIconPixels', () => {
   })
 
   it('draws a plain disc in one colour, edge and centre alike', () => {
-    for (const fill of [TRAY_COLORS.idle, TRAY_COLORS.yesNo, TRAY_COLORS.choice]) {
+    for (const fill of [TRAY_COLORS.idle, TRAY_COLORS.yesNo, TRAY_COLORS.choice, TRAY_COLORS.done]) {
       const pixels = trayIconPixels({ fill })
       expect(colorAt(pixels, MIDDLE, MIDDLE)).toBe(fill)
       expect(colorAt(pixels, 2, MIDDLE)).toBe(fill)
       expect(colorsOf({ fill })).toEqual(new Set([fill]))
     }
+  })
+
+  it('draws a ring in the ring colour around a centre in the fill colour, with a gap between', () => {
+    const look = { fill: TRAY_COLORS.choice, ring: TRAY_COLORS.done }
+    const pixels = trayIconPixels(look)
+    expect(colorAt(pixels, MIDDLE, MIDDLE)).toBe(TRAY_COLORS.choice)
+    // Along the middle row, from the left edge of the disc: ring (x 2, 3), gap (x 4), centre (x 5).
+    expect(colorAt(pixels, 2, MIDDLE)).toBe(TRAY_COLORS.done)
+    expect(colorAt(pixels, 3, MIDDLE)).toBe(TRAY_COLORS.done)
+    expect(colorAt(pixels, 4, MIDDLE)).toBe('transparent')
+    expect(colorAt(pixels, 5, MIDDLE)).toBe(TRAY_COLORS.choice)
+    expect(colorsOf(look)).toEqual(new Set([TRAY_COLORS.choice, TRAY_COLORS.done]))
   })
 
   it('draws the idle icon exactly as resources/tray.png, the source of the app icon', () => {
@@ -112,6 +139,7 @@ describe('TRAY_COLORS', () => {
   it.each([
     ['yesNo', '--accent'],
     ['choice', '--choice'],
+    ['done', '--success'],
   ] as const)('%s equals the list colour %s', (key, variable) => {
     expect(cssVariable(variable)).toBe(TRAY_COLORS[key])
   })

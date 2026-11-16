@@ -1,6 +1,7 @@
 import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
 import { isChoiceKind } from '../shared/request-kind.js'
+import { hasFinished } from '../shared/session-finished.js'
 
 /**
  * The states of the mark at the start of the row; the CSS class `tone-…` gives its color. `waiting`
@@ -49,8 +50,8 @@ function releasedMarker(remoteControl: boolean): StatusMarker {
  * Order: a request the app can still decide (not released) is the strongest sign, in the choice
  * color if one of them asks for more than a yes or a no; if there are only released ones, that is a
  * state of its own, because from there the app can no longer decide.
- * Then come the Notification wait, running, and "just finished", the last only if the session
- * neither runs nor waits: a session working again next to an old `stoppedAt` has not "finished".
+ * Then come the Notification wait, running, and "just finished" (`hasFinished`, the rule the tray's
+ * done mark follows too).
  */
 export function statusMarker(
   view: { status: SessionStatus; stoppedAt?: number | undefined; bridgeSessionId?: unknown },
@@ -62,7 +63,7 @@ export function statusMarker(
   if (decisions.length > 0) return releasedMarker(hasRemoteControl(view))
   if (view.status === 'waiting') return MARKERS.waiting
   if (view.status === 'working') return MARKERS.working
-  if (view.stoppedAt !== undefined) return MARKERS.done
+  if (hasFinished(view)) return MARKERS.done
   return MARKERS.idle
 }
 
