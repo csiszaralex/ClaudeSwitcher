@@ -30,6 +30,11 @@ function isDecision(value: unknown): value is PendingDecisionView {
     // Optional in `PermissionRequestInfo`: absent when the tool gives no description. If present it
     // must be a string, the panel renders it as one.
     optionalString(value['description']) &&
+    // `cwd` is always a string from the daemon ('' when the body had none): the panel shows it and
+    // `buildRows` takes the name of a row without a session from it.
+    typeof value['cwd'] === 'string' &&
+    // Optional: the raw `permission_mode`, shown by the panel when it is not `default`.
+    optionalString(value['permissionMode']) &&
     typeof value['released'] === 'boolean' &&
     // Required: from it the panel decides whether to offer allowing. A missing flag must not count as readable.
     typeof value['readable'] === 'boolean' &&

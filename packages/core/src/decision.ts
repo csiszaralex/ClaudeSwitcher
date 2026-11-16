@@ -57,6 +57,8 @@ export interface PermissionRequestInfo {
   /** Present only on a subagent's request. A subagent comes with its PARENT's session_id; this tells them apart. */
   agentId?: string | undefined
   agentType?: string | undefined
+  /** The body's `permission_mode`, raw (`default`, `acceptEdits`, `plan` seen). Absent when missing or not a string. */
+  permissionMode?: string | undefined
   kind: DecisionKind
   /**
    * A short summary: the command, the file, the URL, the first question, the plan's title or the
@@ -256,6 +258,7 @@ export function parsePermissionRequest(body: unknown): PermissionRequestInfo | u
     toolInput,
     agentId: nonEmptyString(body['agent_id']),
     agentType: nonEmptyString(body['agent_type']),
+    permissionMode: nonEmptyString(body['permission_mode']),
     kind,
     summary: summarize(kind, toolName, toolInput, questions),
     description: describeTool(kind, toolName, toolInput),

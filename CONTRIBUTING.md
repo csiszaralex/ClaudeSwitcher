@@ -146,6 +146,8 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 - `shared/settings.ts`: the one list of user settings (`SETTINGS`, `DEFAULT_SETTINGS`, `DEFAULT_HOTKEY`), including `checkForUpdates`, which `main/updater.ts` follows.
 - `main/updater.ts`: the in-app update of the installed app on electron-updater (`createUpdateController`): the check interval (`UPDATE_CHECK_INTERVAL_MS`), the tray line (`updateLabel`), the update popup's texts and choices (`updatePrompt`, `updateChoice`), when the popup appears and what a skipped version (`config.ts` `saveSkippedVersion`) suppresses, and why `quitAndInstall` goes through the normal quit sequence and the installer's `--quit` helper (the comment in `install`).
 - `main/log-file.ts`: the log of the main process (`installFileLog`, `ensureLogFile`): its folder and file names (`logDir`, `logFilePath`, `OLD_LOG_FILE_NAME`), the size limit (`LOG_MAX_BYTES`), the line format and the rotation. It wraps `console.log`, `console.warn` and `console.error` once, from `index.ts`, so no call site changes; the renderer's console is not captured. The tray's "Napló megnyitása" opens the file.
+- `renderer/request-source.ts`: where a request comes from: the label of a registry `entrypoint` and whether it stands out (`requestSource`, the one home of the label texts and of the "stands out" rule), and the panel's folder and permission mode line (`requestFacts`).
+- `shared/entrypoint.ts`: the registry `entrypoint` values the app knows (`VSCODE_ENTRYPOINT`, `CLI_ENTRYPOINT`, `HEADLESS_ENTRYPOINT`); `main/focus-window.ts` and `renderer/request-source.ts` use them.
 - `shared/overlay-channels.ts`, `shared/setup-channels.ts`: the IPC channel names and reply types of the two windows.
 
 ## Claude Code coupling points
@@ -159,11 +161,12 @@ The app reads several undocumented Claude Code internals. If Claude Code changes
 | `~/.claude/ide/<port>.lock` and the VS Code process image names | core `session-registry.ts` `parseIdeLock`, `liveness.ts` `VSCODE_IMAGE_NAMES` |
 | The transcript, `projects/<encoded cwd>/<sessionId>.jsonl`, and the shape of its blocks | core `paths.ts` `projectsDir`, `transcript.ts` (`findTranscriptPath`, `readActivityFromLines`), `tool-detail.ts` |
 | Subagent files (`<sessionId>/subagents/agent-<id>.jsonl` and `agent-<id>.meta.json`) | core `paths.ts` `subagentsDirOf`, `subagent.ts` (`subagentIdFromFile`, `subagentMetaFile`), read in daemon `scanner.ts` `readSubagents` |
-| Hook payloads | daemon `hook-server.ts`, core `decision.ts` `parsePermissionRequest`. The measured shapes: `packages/core/fixtures/hook-payloads.json`, `spikes/m2-permission/RESULTS.md` |
+| The registry `entrypoint` values (`claude-vscode`, `cli`, `sdk-cli`) | desktop `shared/entrypoint.ts`, `main/focus-window.ts` (jump) and `renderer/request-source.ts` (the source label) |
+| Hook payloads (`permission_mode` included) | daemon `hook-server.ts`, core `decision.ts` `parsePermissionRequest`. The measured shapes: `packages/core/fixtures/hook-payloads.json`, `spikes/m2-permission/RESULTS.md` |
 | The hook response (`hookSpecificOutput`, `updatedPermissions`) | core `decision-response.ts` `buildHookResponse` |
 | The hook configuration in `settings.json` | desktop `main/claude-integration.ts`; the list of hooks in core `hook-contract.ts` |
 | Notification types and their roughly 6 s delay after the permission request | daemon `session-store.ts` `WAITING_TYPES`, `LATE_PROMPT_WINDOW_MS` |
-| The tab URI (`vscode://anthropic.claude-code/open?session=`) and `entrypoint === 'claude-vscode'` | desktop `main/focus-window.ts` `tabFocusUri`, `VSCODE_ENTRYPOINT` |
+| The tab URI (`vscode://anthropic.claude-code/open?session=`) and `entrypoint === 'claude-vscode'` | desktop `main/focus-window.ts` `tabFocusUri`; the entrypoint constant is `shared/entrypoint.ts` `VSCODE_ENTRYPOINT` |
 | Tool names and `tool_input` fields | core `tool-names.ts`, `decision.ts`, `tool-detail.ts`; renderer `edit-preview.ts`, `tool-details.ts` |
 
 ## Environment notes

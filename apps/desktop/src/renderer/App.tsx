@@ -7,6 +7,7 @@ import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decis
 import { formatDuration, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
+import { requestSource } from './request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 import type { OverlayState } from './useDaemonState.js'
@@ -184,11 +185,14 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
           // The row of a session the snapshot does not know yet: the pending request holds it, so it is waiting.
           const marker = statusMarker(row.session ?? { status: row.status }, row.decisions)
           const badge = pendingBadge(row.decisions)
+          // The source tag shows only on a row with a request and only when it stands out (request-source.ts).
+          const source = requestSource(row.session?.entrypoint)
+          const flagged = source.standsOut && row.decisions.length > 0
           return (
             <li
               key={row.sessionId}
               ref={index === selected ? selectedRow : null}
-              className={`session ${row.status} ${index === selected ? 'selected' : ''}`}
+              className={`session ${row.status} ${index === selected ? 'selected' : ''} ${flagged ? 'flagged' : ''}`}
               onClick={() => {
                 setSelectedId(row.sessionId)
               }}
@@ -207,6 +211,11 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
                 {row.session !== undefined && hasRemoteControl(row.session) && (
                   <span className="remote" title="Remote Control: telefonról is elérhető">
                     ●
+                  </span>
+                )}
+                {flagged && (
+                  <span className="source-tag" title={source.title}>
+                    {source.label}
                   </span>
                 )}
                 {badge !== undefined && (
@@ -244,6 +253,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
         >
           <DecisionPanel
             decision={decision}
+            source={requestSource(selectedRowView.session?.entrypoint)}
             agentLabel={subagentLabel(decision, selectedRowView.session?.subagents)}
             remoteControl={selectedRowView.session !== undefined && hasRemoteControl(selectedRowView.session)}
             keyHistory={keyHistory}
