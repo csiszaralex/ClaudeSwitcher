@@ -126,14 +126,21 @@ export function fileTimeToDecimal(low: number, high: number): string {
 export interface ProcessListEntry {
   pid: number
   image: string
+  /**
+   * `th32ParentProcessID`: the pid of the process that created it, recorded at its creation. That
+   * parent may have exited since, and its pid may belong to an unrelated, later process now.
+   */
+  parentPid: number
 }
 
 /** A list entry from the relevant fields of the struct, or `undefined` if it has no name. */
-export function entryFromStruct(raw: Pick<ProcessEntry32, 'th32ProcessID' | 'szExeFile'>): ProcessListEntry | undefined {
+export function entryFromStruct(
+  raw: Pick<ProcessEntry32, 'th32ProcessID' | 'th32ParentProcessID' | 'szExeFile'>,
+): ProcessListEntry | undefined {
   const nul = raw.szExeFile.indexOf('\0')
   const exe = nul === -1 ? raw.szExeFile : raw.szExeFile.slice(0, nul)
   if (exe === '') return undefined
-  return { pid: raw.th32ProcessID, image: imageNameFromExe(exe) }
+  return { pid: raw.th32ProcessID, image: imageNameFromExe(exe), parentPid: raw.th32ParentProcessID }
 }
 
 /**
@@ -160,6 +167,27 @@ export function snapshotFromEntries(
       starts.set(pid, start ?? null)
       return start
     },
+  }
+}
+
+/** The parent links of a process list, for walking up from a process to its ancestors. */
+export interface ProcessTree {
+  /** The recorded parent pid (see `ProcessListEntry.parentPid`), or `undefined` if the pid is not listed. */
+  parentOf(pid: number): number | undefined
+  /** As `ProcessSnapshot.startFileTime`: it tells a live parent from a later process on a reused pid. */
+  startFileTime(pid: number): string | undefined
+}
+
+/** A process tree from a process list; the start times come from `snapshotFromEntries`. */
+export function treeFromEntries(
+  entries: readonly ProcessListEntry[],
+  queryStart: (pid: number) => string | undefined,
+): ProcessTree {
+  const parents = new Map(entries.map((entry) => [entry.pid, entry.parentPid]))
+  const snapshot = snapshotFromEntries(entries, queryStart)
+  return {
+    parentOf: (pid) => parents.get(pid),
+    startFileTime: (pid) => snapshot.startFileTime(pid),
   }
 }
 
@@ -228,6 +256,23 @@ function snapshotWith(api: Kernel32): ProcessSnapshot {
 export function takeNativeSnapshot(): ProcessSnapshot | undefined {
   const api = loadKernel32()
   return api === null ? undefined : snapshotWith(api)
+}
+
+/**
+ * The process tree now, from one Toolhelp32 snapshot, or `undefined` if the kernel32 bindings cannot
+ * be loaded or the snapshot fails. The jump to a terminal session takes one per request
+ * (`focus-window.ts` `terminalWindowOf`). A failed snapshot is logged and gives `undefined`: a jump
+ * that cannot see the tree only fails, it must not throw into the IPC handler.
+ */
+export function takeProcessTree(): ProcessTree | undefined {
+  const api = loadKernel32()
+  if (api === null) return undefined
+  try {
+    return treeFromEntries(listProcesses(api), (pid) => queryStartTime(api, pid))
+  } catch (error) {
+    console.error('[probe] process tree unavailable', error)
+    return undefined
+  }
 }
 
 /**

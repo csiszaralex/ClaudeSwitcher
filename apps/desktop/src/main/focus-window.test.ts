@@ -1,24 +1,35 @@
 import { exec, execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import type { SessionView } from '@claudeswitcher/core'
+import type { ProcessTree } from './process-probe.js'
 import {
+  CLASSIC_CONSOLE_CLASS,
   CLI_EXEC_OPTIONS,
   FOREGROUND_POLL_ATTEMPTS,
   FOREGROUND_POLL_INTERVAL_MS,
+  GW_HWNDNEXT,
+  GW_OWNER,
+  MAX_ANCESTORS,
+  PSEUDO_CONSOLE_CLASS,
   TAB_FOCUS_SETTLE_MS,
+  ancestorChain,
   bringToFront,
   codeCliCommand,
   countMainWindows,
   findMainWindow,
+  findTerminalWindow,
   focusWith,
   foregroundWindow,
   isFastFocusAvailable,
   isSafeForCli,
+  liveTerminalScanner,
   quoteForCli,
   scanWindowsForPid,
   tabFocusUri,
+  terminalWindowOf,
   type FocusApi,
   type FocusOutcome,
+  type TerminalWindowScanner,
   type WindowScanner,
 } from './focus-window.js'
 
@@ -132,6 +143,273 @@ describe('scanWindowsForPid', () => {
   })
 })
 
+/** A fake process tree: each process with its recorded parent and, optionally, its start time. */
+function fakeTree(processes: Array<{ pid: number; parent: number; start?: string }>): ProcessTree {
+  const byPid = new Map(processes.map((p) => [p.pid, p]))
+  return {
+    parentOf: (pid) => byPid.get(pid)?.parent,
+    startFileTime: (pid) => byPid.get(pid)?.start,
+  }
+}
+
+/** A fake desktop for the terminal search: top-level windows in Z order, with class and owner. */
+function fakeDesktop(
+  windows: Array<{ hwnd: number; pid: number; cls: string; owner?: number; visible?: boolean }>,
+): TerminalWindowScanner {
+  const byHwnd = new Map(windows.map((w) => [w.hwnd, w]))
+  const order = windows.map((w) => w.hwnd)
+  return {
+    GetTopWindow: () => order[0] ?? 0,
+    GetWindow: (hWnd: number, uCmd: number) => {
+      // The module's own constants, and any other command fails: a wrong value cannot pass silently.
+      if (uCmd === GW_OWNER) return byHwnd.get(hWnd)?.owner ?? 0
+      if (uCmd !== GW_HWNDNEXT) throw new Error(`unexpected GetWindow command ${String(uCmd)}`)
+      const index = order.indexOf(hWnd)
+      return index === -1 ? 0 : (order[index + 1] ?? 0)
+    },
+    GetWindowThreadProcessId: (hWnd: number, pid: [number]) => {
+      pid[0] = byHwnd.get(hWnd)?.pid ?? 0
+      return 0
+    },
+    IsWindowVisible: (hWnd: number) => (byHwnd.get(hWnd)?.visible === true ? 1 : 0),
+    className: (hWnd: number) => byHwnd.get(hWnd)?.cls ?? '',
+  }
+}
+
+const VSCODE_CLASS = 'Chrome_WidgetWin_1'
+const TERMINAL_CLASS = 'CASCADIA_HOSTING_WINDOW_CLASS'
+const SESSION_PID = 4100
+const SHELL_PID = 4000
+
+function terminalWindowFor(tree: ProcessTree, desktop: TerminalWindowScanner, pid = SESSION_PID): number {
+  return findTerminalWindow(desktop, ancestorChain(tree, pid))
+}
+
+describe('ancestorChain', () => {
+  it('walks from the process up its listed ancestors, nearest first', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 1000 },
+      { pid: 1000, parent: 600 },
+    ])
+    // 600 is not listed: it has exited, so the walk stops before it.
+    expect(ancestorChain(tree, SESSION_PID)).toEqual([SESSION_PID, SHELL_PID, 1000])
+  })
+
+  it('is empty for a process that is no longer listed', () => {
+    expect(ancestorChain(fakeTree([{ pid: SHELL_PID, parent: 1000 }]), SESSION_PID)).toEqual([])
+  })
+
+  it('stops at a cycle of stale parent ids', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 3000 },
+      { pid: 3000, parent: SESSION_PID },
+    ])
+    expect(ancestorChain(tree, SESSION_PID)).toEqual([SESSION_PID, SHELL_PID, 3000])
+    const self = fakeTree([{ pid: 0, parent: 0 }])
+    expect(ancestorChain(self, 0)).toEqual([0])
+  })
+
+  it('stops at a parent that started after its child: a later process on a reused pid', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID, start: '133000000000000200' },
+      { pid: SHELL_PID, parent: 1000, start: '133000000000000300' },
+      { pid: 1000, parent: 600, start: '133000000000000100' },
+    ])
+    expect(ancestorChain(tree, SESSION_PID)).toEqual([SESSION_PID])
+  })
+
+  it('keeps a parent whose start time is unknown', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID, start: '133000000000000200' },
+      { pid: SHELL_PID, parent: 1000 },
+    ])
+    expect(ancestorChain(tree, SESSION_PID)).toEqual([SESSION_PID, SHELL_PID])
+  })
+
+  it('walks at most MAX_ANCESTORS processes', () => {
+    const processes = Array.from({ length: MAX_ANCESTORS * 3 }, (_, i) => ({ pid: 10_000 + i, parent: 10_001 + i }))
+    expect(ancestorChain(fakeTree(processes), 10_000)).toHaveLength(MAX_ANCESTORS)
+  })
+})
+
+describe('findTerminalWindow', () => {
+  it("finds the VS Code window whose integrated terminal runs the session, not the main process's other window", () => {
+    // claude → pwsh → Code (pty host) → Code (main) → explorer. The main process owns both VS Code
+    // windows; the shell's pseudo console is owned by the right one.
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 3000 },
+      { pid: 3000, parent: 2000 },
+      { pid: 2000, parent: 1000 },
+      { pid: 1000, parent: 600 },
+    ])
+    const desktop = fakeDesktop([
+      { hwnd: 50, pid: 2000, cls: VSCODE_CLASS, visible: true },
+      { hwnd: 60, pid: 2000, cls: VSCODE_CLASS, visible: true },
+      { hwnd: 70, pid: 4500, cls: PSEUDO_CONSOLE_CLASS, owner: 50 },
+      { hwnd: 80, pid: SHELL_PID, cls: PSEUDO_CONSOLE_CLASS, owner: 60 },
+    ])
+    expect(terminalWindowFor(tree, desktop)).toBe(60)
+  })
+
+  it('finds the Windows Terminal window a session started inside it runs in', () => {
+    // claude → pwsh → WindowsTerminal → svchost.
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 3500 },
+      { pid: 3500, parent: 800 },
+      { pid: 800, parent: 700 },
+    ])
+    const desktop = fakeDesktop([
+      { hwnd: 90, pid: 3500, cls: TERMINAL_CLASS, visible: true },
+      { hwnd: 91, pid: SHELL_PID, cls: PSEUDO_CONSOLE_CLASS, owner: 90 },
+    ])
+    expect(terminalWindowFor(tree, desktop)).toBe(90)
+  })
+
+  it('finds the Windows Terminal window after the default-terminal hand-off, where the chain ends in explorer', () => {
+    // claude → cmd → explorer: Windows Terminal is not an ancestor, only the pseudo console's owner.
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 1000 },
+      { pid: 1000, parent: 600 },
+    ])
+    const desktop = fakeDesktop([
+      { hwnd: 95, pid: 1000, cls: 'Shell_TrayWnd', visible: true },
+      { hwnd: 90, pid: 3600, cls: TERMINAL_CLASS, visible: true },
+      { hwnd: 92, pid: 3600, cls: TERMINAL_CLASS, visible: true },
+      { hwnd: 91, pid: SHELL_PID, cls: PSEUDO_CONSOLE_CLASS, owner: 92 },
+    ])
+    expect(terminalWindowFor(tree, desktop)).toBe(92)
+  })
+
+  it('takes a visible classic console window itself, and ignores a hidden one', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 1000 },
+      { pid: 1000, parent: 600 },
+    ])
+    const visible = fakeDesktop([
+      { hwnd: 30, pid: 1000, cls: CLASSIC_CONSOLE_CLASS },
+      { hwnd: 40, pid: SHELL_PID, cls: CLASSIC_CONSOLE_CLASS, visible: true },
+    ])
+    expect(terminalWindowFor(tree, visible)).toBe(40)
+    const hidden = fakeDesktop([{ hwnd: 40, pid: SHELL_PID, cls: CLASSIC_CONSOLE_CLASS }])
+    expect(terminalWindowFor(tree, hidden)).toBe(0)
+  })
+
+  it('prefers the nearest ancestor, whatever the Z order', () => {
+    // A session in a shell nested in another terminal's shell: the inner one shows the session.
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 3900 },
+      { pid: 3900, parent: 1000 },
+      { pid: 1000, parent: 600 },
+    ])
+    const desktop = fakeDesktop([
+      { hwnd: 71, pid: 3900, cls: PSEUDO_CONSOLE_CLASS, owner: 90 },
+      { hwnd: 72, pid: SHELL_PID, cls: PSEUDO_CONSOLE_CLASS, owner: 60 },
+    ])
+    expect(terminalWindowFor(tree, desktop)).toBe(60)
+  })
+
+  it("finds nothing for a nearer pseudo console without an owner, rather than a farther ancestor's window", () => {
+    // The farther console shows another terminal: a missed focus is better than a wrong one. Both Z
+    // orders, so the result does not depend on which console the walk meets first.
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 3500 },
+      { pid: 3500, parent: 800 },
+    ])
+    const ownerless = { hwnd: 72, pid: SHELL_PID, cls: PSEUDO_CONSOLE_CLASS }
+    const farther = { hwnd: 73, pid: 3500, cls: PSEUDO_CONSOLE_CLASS, owner: 90 }
+    expect(terminalWindowFor(tree, fakeDesktop([ownerless, farther]))).toBe(0)
+    expect(terminalWindowFor(tree, fakeDesktop([farther, ownerless]))).toBe(0)
+  })
+
+  it("still takes a farther ancestor's console past a nearer hidden classic console window", () => {
+    // A hidden ConsoleWindowClass window belongs to a background program: it does not decide.
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 3500 },
+      { pid: 3500, parent: 800 },
+    ])
+    const desktop = fakeDesktop([
+      { hwnd: 72, pid: SHELL_PID, cls: CLASSIC_CONSOLE_CLASS },
+      { hwnd: 73, pid: 3500, cls: PSEUDO_CONSOLE_CLASS, owner: 90 },
+    ])
+    expect(terminalWindowFor(tree, desktop)).toBe(90)
+  })
+
+  it('finds nothing when no process of the chain owns a console window', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: 1000 },
+    ])
+    const desktop = fakeDesktop([
+      { hwnd: 50, pid: SHELL_PID, cls: VSCODE_CLASS, visible: true },
+      { hwnd: 70, pid: 4500, cls: PSEUDO_CONSOLE_CLASS, owner: 50 },
+    ])
+    expect(terminalWindowFor(tree, desktop)).toBe(0)
+  })
+
+  it('ends after a parent cycle without looping', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID },
+      { pid: SHELL_PID, parent: SESSION_PID },
+    ])
+    const desktop = fakeDesktop([{ hwnd: 91, pid: SHELL_PID, cls: PSEUDO_CONSOLE_CLASS, owner: 90 }])
+    expect(terminalWindowFor(tree, desktop)).toBe(90)
+  })
+
+  it('finds nothing for a stale session pid, even when a console of that pid exists', () => {
+    // The session process exited: the pid is not listed, so no window is taken for it.
+    const tree = fakeTree([{ pid: SHELL_PID, parent: 1000 }])
+    const desktop = fakeDesktop([{ hwnd: 91, pid: SESSION_PID, cls: PSEUDO_CONSOLE_CLASS, owner: 90 }])
+    expect(terminalWindowFor(tree, desktop)).toBe(0)
+  })
+
+  it('ignores the console of a later process on a reused parent pid', () => {
+    const tree = fakeTree([
+      { pid: SESSION_PID, parent: SHELL_PID, start: '133000000000000200' },
+      { pid: SHELL_PID, parent: 1000, start: '133000000000000300' },
+    ])
+    const desktop = fakeDesktop([{ hwnd: 91, pid: SHELL_PID, cls: PSEUDO_CONSOLE_CLASS, owner: 90 }])
+    expect(terminalWindowFor(tree, desktop)).toBe(0)
+  })
+})
+
+describe('terminalWindowOf (live)', () => {
+  it.skipIf(!onWindows)('walks the real process tree and desktop and ends with a plain number', () => {
+    // Proves that the bindings and the process tree load and that both walks stop. It does NOT prove
+    // that a class name is read (the next test does): the value depends on where the test runs (a
+    // terminal or not), so only its type is checked. It only reads, nothing comes to the front.
+    expect(isFastFocusAvailable()).toBe(true)
+    expect(Number.isInteger(terminalWindowOf(process.pid))).toBe(true)
+    expect(terminalWindowOf(999_999_998)).toBe(0)
+  })
+
+  it.skipIf(!onWindows)('reads a non-empty class name through the real GetClassNameW binding', () => {
+    // Every window has a class, so if no top-level window reads one, the binding or the decoding of
+    // its buffer does not work, and the terminal search could never match a class. It only reads the
+    // first windows in Z order, nothing comes to the front.
+    const scanner = liveTerminalScanner()
+    expect(scanner).toBeDefined()
+    if (scanner === undefined) return
+    const names: string[] = []
+    let hwnd = Number(scanner.GetTopWindow(0))
+    for (let scanned = 0; hwnd !== 0 && scanned < 50; scanned++) {
+      names.push(scanner.className(hwnd))
+      hwnd = Number(scanner.GetWindow(hwnd, GW_HWNDNEXT))
+    }
+    expect(names.some((name) => name.length > 0)).toBe(true)
+    // The length the binding returns cuts the buffer: no name carries the zero padding behind it.
+    expect(names.every((name) => !name.includes('\u0000'))).toBe(true)
+  })
+})
+
 describe('foregroundWindow', () => {
   it.skipIf(!onWindows)('reads the foreground handle through loaded bindings, without changing it', () => {
     // `bringToFront` checks with the same GetForegroundWindow call that the focus change really
@@ -198,14 +476,23 @@ function extensionView(over: Partial<SessionView> = {}): SessionView {
   }
 }
 
+/** A terminal session (`cli`), with its own process id and, by cwd, a VS Code lock as well. */
+function terminalView(over: Partial<SessionView> = {}): SessionView {
+  return extensionView({ entrypoint: 'cli', pid: 4100, ...over })
+}
+
 /** Fake focus steps: they record what was asked of them and bring nothing forward. */
-function fakeSteps(result: { pid: boolean; cli: boolean }): {
+function fakeSteps(result: { pid: boolean; cli: boolean; terminal?: boolean; ancestors?: readonly number[] }): {
   steps: Parameters<typeof focusWith>[1]
   pidCalls: number[]
   cliCalls: string[]
+  terminalCalls: number[]
+  runsUnderCalls: Array<[number, number]>
 } {
   const pidCalls: number[] = []
   const cliCalls: string[] = []
+  const terminalCalls: number[] = []
+  const runsUnderCalls: Array<[number, number]> = []
   return {
     steps: {
       byPid: (pid) => {
@@ -216,9 +503,19 @@ function fakeSteps(result: { pid: boolean; cli: boolean }): {
         cliCalls.push(folder)
         return Promise.resolve(result.cli)
       },
+      byTerminal: (pid) => {
+        terminalCalls.push(pid)
+        return Promise.resolve(result.terminal ?? false)
+      },
+      runsUnder: (pid, ancestor) => {
+        runsUnderCalls.push([pid, ancestor])
+        return (result.ancestors ?? []).includes(ancestor)
+      },
     },
     pidCalls,
     cliCalls,
+    terminalCalls,
+    runsUnderCalls,
   }
 }
 
@@ -263,19 +560,79 @@ describe('focusWith', () => {
     // for it.
     for (const entrypoint of ['cli', 'sdk-ts', 'Claude-VSCode']) {
       const fake = fakeSteps({ pid: false, cli: true })
-      expect(await focusWith(extensionView({ entrypoint }), fake.steps)).toBe<FocusOutcome>('failed')
+      expect(await focusWith(terminalView({ entrypoint }), fake.steps)).toBe<FocusOutcome>('failed')
       expect(fake.cliCalls).toEqual([])
       const unknownWindow = fakeSteps({ pid: false, cli: true })
-      const view = extensionView({ entrypoint, windowPid: undefined, workspaceFolder: undefined })
+      const view = terminalView({ entrypoint, windowPid: undefined, workspaceFolder: undefined })
       expect(await focusWith(view, unknownWindow.steps)).toBe<FocusOutcome>('failed')
       expect(unknownWindow.cliCalls).toEqual([])
     }
   })
 
-  it('still tries the verified pid path for a session outside the extension', async () => {
-    const fake = fakeSteps({ pid: true, cli: true })
-    expect(await focusWith(extensionView({ entrypoint: 'cli' }), fake.steps)).toBe<FocusOutcome>('pid')
-    expect(fake.pidCalls).toEqual([900])
+  it('brings a terminal session up by its own process and reports the terminal path', async () => {
+    const fake = fakeSteps({ pid: true, cli: true, terminal: true })
+    expect(await focusWith(terminalView(), fake.steps)).toBe<FocusOutcome>('terminal')
+    expect(fake.terminalCalls).toEqual([4100])
+  })
+
+  it('never takes the lock pid for a terminal session, which only its cwd matched to a VS Code window', async () => {
+    // A CLI in Windows Terminal whose cwd is inside an open workspace gets that window's lock; with
+    // one VS Code window the fast path would bring up VS Code instead of the terminal.
+    const found = fakeSteps({ pid: true, cli: true, terminal: true })
+    await focusWith(terminalView(), found.steps)
+    expect(found.pidCalls).toEqual([])
+    const missed = fakeSteps({ pid: true, cli: true, terminal: false })
+    expect(await focusWith(terminalView(), missed.steps)).toBe<FocusOutcome>('failed')
+    expect(missed.pidCalls).toEqual([])
+  })
+
+  it('fails a terminal session without a process id, without trying anything else', async () => {
+    const fake = fakeSteps({ pid: true, cli: true, terminal: true })
+    expect(await focusWith(terminalView({ pid: undefined }), fake.steps)).toBe<FocusOutcome>('failed')
+    expect([...fake.pidCalls, ...fake.terminalCalls]).toEqual([])
+    expect(fake.cliCalls).toEqual([])
+  })
+
+  it('falls back to the VS Code way when the terminal search misses and the VS Code process is an ancestor', async () => {
+    // A `claude -p` started by an extension session's tool: no pseudo console of its own, but it runs
+    // under the VS Code whose lock it got.
+    const view = terminalView({ entrypoint: 'sdk-cli' })
+    const byPid = fakeSteps({ pid: true, cli: true, terminal: false, ancestors: [900] })
+    expect(await focusWith(view, byPid.steps)).toBe<FocusOutcome>('pid')
+    expect(byPid.runsUnderCalls).toEqual([[4100, 900]])
+    expect(byPid.cliCalls).toEqual([])
+    const byCli = fakeSteps({ pid: false, cli: true, terminal: false, ancestors: [900] })
+    expect(await focusWith(view, byCli.steps)).toBe<FocusOutcome>('workspace')
+    expect(byCli.pidCalls).toEqual([900])
+    expect(byCli.cliCalls).toEqual(['p:\\proj\\alpha'])
+    const neither = fakeSteps({ pid: false, cli: false, terminal: false, ancestors: [900] })
+    expect(await focusWith(view, neither.steps)).toBe<FocusOutcome>('failed')
+  })
+
+  it('takes no VS Code way when the VS Code process is not an ancestor, as for a CLI in Windows Terminal', async () => {
+    const fake = fakeSteps({ pid: true, cli: true, terminal: false, ancestors: [3500] })
+    expect(await focusWith(terminalView(), fake.steps)).toBe<FocusOutcome>('failed')
+    expect(fake.runsUnderCalls).toEqual([[4100, 900]])
+    expect(fake.pidCalls).toEqual([])
+    expect(fake.cliCalls).toEqual([])
+  })
+
+  it('checks no ancestry when the terminal search found the window, or no VS Code window is known', async () => {
+    const found = fakeSteps({ pid: true, cli: true, terminal: true, ancestors: [900] })
+    expect(await focusWith(terminalView(), found.steps)).toBe<FocusOutcome>('terminal')
+    expect(found.runsUnderCalls).toEqual([])
+    const unknown = fakeSteps({ pid: true, cli: true, terminal: false, ancestors: [900] })
+    expect(await focusWith(terminalView({ windowPid: undefined }), unknown.steps)).toBe<FocusOutcome>('failed')
+    expect(unknown.runsUnderCalls).toEqual([])
+    expect(unknown.cliCalls).toEqual([])
+  })
+
+  it('never takes the terminal path for an extension session or an unknown entrypoint', async () => {
+    for (const entrypoint of ['claude-vscode', undefined]) {
+      const fake = fakeSteps({ pid: false, cli: true, terminal: true })
+      await focusWith(extensionView({ entrypoint, pid: 4100 }), fake.steps)
+      expect(fake.terminalCalls).toEqual([])
+    }
   })
 
   it('keeps the CLI fallback when the entrypoint is unknown', async () => {
@@ -403,6 +760,13 @@ describe('tabFocusUri', () => {
     const view = extensionView({ windowPid: undefined, workspaceFolder: undefined })
     expect(tabFocusUri(view, 'pid', true, [])).toBeUndefined()
     expect(tabFocusUri(view, 'workspace', true, [])).toBeUndefined()
+  })
+
+  it('never sends the URI after the terminal path', () => {
+    // The window that came up is a terminal's: the extension has no tab of the session there. Even
+    // with a contradictory view that claims the extension, the outcome alone refuses it.
+    expect(tabFocusUri(terminalView(), 'terminal', true, [])).toBeUndefined()
+    expect(tabFocusUri(extensionView({ pid: 4100 }), 'terminal', true, [])).toBeUndefined()
   })
 
   it('sends nothing for a session that does not run in the VS Code extension', () => {
