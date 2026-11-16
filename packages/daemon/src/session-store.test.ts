@@ -21,6 +21,7 @@ describe('SessionStore', () => {
     const [view] = store.views()
     expect(view!.sessionId).toBe('s1')
     expect(view!.name).toBe('alpha-01')
+    expect(view!.pid).toBe(1)
     expect(view!.windowPid).toBe(900)
     expect(view!.workspaceFolder).toBe('p:\\proj\\alpha')
     expect(view!.bridgeSessionId).toBe('session_01x')

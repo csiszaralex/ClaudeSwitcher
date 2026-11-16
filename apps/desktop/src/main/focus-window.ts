@@ -2,13 +2,18 @@ import { exec, type ExecOptions } from 'node:child_process'
 import { createRequire } from 'node:module'
 import type { PermissionRequestInfo, SessionView } from '@claudeswitcher/core'
 import { VSCODE_ENTRYPOINT } from '../shared/entrypoint.js'
+import { takeProcessTree, type ProcessTree } from './process-probe.js'
 
 // Not named `require`: in the module wrapper of the CJS bundle `require` already exists as a
 // parameter, and a `const` of the same name would clash with it.
 const requireNative = createRequire(import.meta.url)
 
 const SW_RESTORE = 9
-const GW_HWNDNEXT = 2
+/** `GetWindow` commands (`winuser.h`): the next window in Z order, and the owner window. */
+export const GW_HWNDNEXT = 2
+export const GW_OWNER = 4
+/** The longest window class name is 256 characters (`WNDCLASS`); this is the buffer for `GetClassNameW`. */
+const CLASS_NAME_CHARS = 256
 
 interface User32 {
   // In koffi an `intptr` return value can be a `number` or a `bigint` at run time.
@@ -17,6 +22,8 @@ interface User32 {
   GetWindowThreadProcessId(hWnd: number, pid: [number]): number
   IsWindowVisible(hWnd: number): number
   GetWindowTextLengthW(hWnd: number): number
+  /** Writes the class name as UTF-16 into `buffer` and returns its length in characters, 0 on error. */
+  GetClassNameW(hWnd: number, buffer: Buffer, maxChars: number): number
   GetForegroundWindow(): number | bigint
   SetForegroundWindow(hWnd: number): number
   IsIconic(hWnd: number): number
@@ -32,7 +39,8 @@ let user32: User32 | null | undefined
  * Deliberately not at module level: `index.ts` imports `focus-window.ts` before `app.whenReady()`,
  * so a module-level koffi error would throw BEFORE the startup error dialog is wired up, and the
  * app would die silently, without a dialog. This way an unavailable native module only disables the
- * fast focus path; the `code` CLI fallback keeps working.
+ * paths that need user32: the fast pid path of a VS Code session, whose `code` CLI fallback keeps
+ * working, and the terminal path, which has no fallback, so a terminal session's jump then fails.
  */
 function loadUser32(): User32 | null {
   if (user32 !== undefined) return user32
@@ -48,13 +56,14 @@ function loadUser32(): User32 | null {
       // A Win32 BOOL is a 4-byte int, not the 1-byte C bool.
       IsWindowVisible: lib.func('int IsWindowVisible(intptr hWnd)'),
       GetWindowTextLengthW: lib.func('int GetWindowTextLengthW(intptr hWnd)'),
+      GetClassNameW: lib.func('int GetClassNameW(intptr hWnd, _Out_ uint8_t *lpClassName, int nMaxCount)'),
       GetForegroundWindow: lib.func('intptr GetForegroundWindow()'),
       SetForegroundWindow: lib.func('int SetForegroundWindow(intptr hWnd)'),
       IsIconic: lib.func('int IsIconic(intptr hWnd)'),
       ShowWindowAsync: lib.func('int ShowWindowAsync(intptr hWnd, int nCmdShow)'),
     }
   } catch (error) {
-    console.error('[focus] user32 bindings unavailable; falling back to the code CLI only', error)
+    console.error('[focus] user32 bindings unavailable; only the code CLI fallback is left', error)
     user32 = null
   }
   return user32
@@ -138,9 +147,10 @@ export function countMainWindows(targetPid: number): number {
 }
 
 /**
- * True if the fast, pid-based focus path is available, that is the user32 bindings loaded. For the
- * startup log: because of the lazy loading `koffi` would otherwise load only on the first focus
- * request, and until then nothing would prove that it works in the Electron main process.
+ * True if the user32 bindings loaded: the fast, pid-based path of a VS Code session needs them, and
+ * so does the terminal path, which has no fallback (without them a terminal session's jump fails).
+ * For the startup log: because of the lazy loading `koffi` would otherwise load only on the first
+ * focus request, and until then nothing would prove that it works in the Electron main process.
  */
 export function isFastFocusAvailable(): boolean {
   return loadUser32() !== null
@@ -200,6 +210,164 @@ async function focusByPid(pid: number): Promise<boolean> {
   const hwnd = findMainWindow(pid)
   if (hwnd === 0) return false
   return bringToFront(api, hwnd)
+}
+
+/**
+ * The class of the hidden window a pseudo console (ConPTY) has. Measured (2026-11-16, Claude Code
+ * 2.1.325, `docs/design.md` "Mapping to terminal windows"): the shell a terminal session runs in owns
+ * one, and its owner (`GW_OWNER`) is the top-level window that shows the terminal: a Windows Terminal
+ * window or the right VS Code window.
+ */
+export const PSEUDO_CONSOLE_CLASS = 'PseudoConsoleWindow'
+
+/**
+ * The class of a classic console host window (conhost without Windows Terminal). Never seen as a
+ * session's console on the measuring machine. It counts only when visible, because the hidden ones
+ * belong to background console programs: on the measuring machine every one was such (7 of 7).
+ */
+export const CLASSIC_CONSOLE_CLASS = 'ConsoleWindowClass'
+
+/**
+ * Upper bound on the ancestors walked. For the native `claude.exe` started from pwsh or cmd the shell
+ * is the session's parent (measured, `docs/design.md` "Mapping to terminal windows"), so a handful is
+ * enough; the bound and the seen set keep a cycle of stale parent ids from looping.
+ */
+export const MAX_ANCESTORS = 32
+
+/** True if both start times are known and `parent` started after `child`: a later process on a reused pid. */
+function startedAfter(tree: ProcessTree, parent: number, child: number): boolean {
+  const parentStart = tree.startFileTime(parent)
+  const childStart = tree.startFileTime(child)
+  if (parentStart === undefined || childStart === undefined) return false
+  if (!/^\d+$/.test(parentStart) || !/^\d+$/.test(childStart)) return false
+  return BigInt(parentStart) > BigInt(childStart)
+}
+
+/**
+ * The process and its live ancestors, nearest first, at most `MAX_ANCESTORS` of them. Empty if the
+ * process itself is not listed (it has exited).
+ *
+ * `th32ParentProcessID` is only what was recorded at creation, so the walk stops at a parent that
+ * is not listed (it exited), at one that started after its child (its pid was reused by a later
+ * process, which is not an ancestor), and at a pid it has already seen (a cycle of such stale ids).
+ *
+ * In Git Bash the walk can end early: an MSYS program that an MSYS process starts through `exec`
+ * (bash running the npm `claude` sh shim, or a bash started inside bash) records as its parent a
+ * process that has already exited (measured, `docs/design.md` "Mapping to terminal windows"). The
+ * chain then stops before the shell that owns the console, and the jump finds no window.
+ */
+export function ancestorChain(tree: ProcessTree, pid: number): number[] {
+  if (tree.parentOf(pid) === undefined) return []
+  const chain = [pid]
+  const seen = new Set(chain)
+  let child = pid
+  while (chain.length < MAX_ANCESTORS) {
+    const parent = tree.parentOf(child)
+    if (parent === undefined || seen.has(parent) || tree.parentOf(parent) === undefined) break
+    if (startedAfter(tree, parent, child)) break
+    chain.push(parent)
+    seen.add(parent)
+    child = parent
+  }
+  return chain
+}
+
+/** The user32 subset the terminal window search needs, so it can be tested with a fake desktop. */
+export interface TerminalWindowScanner
+  extends Pick<User32, 'GetTopWindow' | 'GetWindow' | 'GetWindowThreadProcessId' | 'IsWindowVisible'> {
+  className(hWnd: number): string
+}
+
+/**
+ * The window that shows the terminal of the given process chain (`ancestorChain`), or 0.
+ *
+ * The first process of the chain, nearest first, that owns a `PSEUDO_CONSOLE_CLASS` window gives
+ * that window's owner; one that owns a visible `CLASSIC_CONSOLE_CLASS` window gives that window. A
+ * pseudo console without an owner decides too: the result is 0, and a farther ancestor's console
+ * window does not win, because it shows another terminal (a missed focus is better than a wrong one).
+ * A hidden classic console window does not decide: it belongs to a background program. The parent
+ * chain alone is not enough (measured): for Windows Terminal's default-terminal hand-off it ends in
+ * `explorer.exe`, and VS Code's main process owns all of its windows.
+ *
+ * One walk over the top-level windows (the same GetTopWindow + GetWindow chain as
+ * `scanWindowsForPid`, and the same `MAX_WINDOWS_SCANNED` bound; the hidden pseudo console windows
+ * are top-level too). The class is read only for the windows of the chain's processes.
+ */
+export function findTerminalWindow(api: TerminalWindowScanner, chain: readonly number[]): number {
+  const rank = new Map(chain.map((pid, index) => [pid, index]))
+  const pidOut: [number] = [0]
+  let best: { rank: number; hwnd: number } | undefined
+  let hwnd = Number(api.GetTopWindow(0))
+
+  for (let scanned = 0; hwnd !== 0 && scanned < MAX_WINDOWS_SCANNED; scanned++) {
+    // Reset first: for a window destroyed meanwhile the call fails and need not write the pid, and
+    // the previous window's pid must not stand in for it.
+    pidOut[0] = 0
+    api.GetWindowThreadProcessId(hwnd, pidOut)
+    const at = rank.get(pidOut[0])
+    if (at !== undefined && (best === undefined || at < best.rank)) {
+      const found = consoleTarget(api, hwnd)
+      if (found !== undefined) {
+        best = { rank: at, hwnd: found }
+        if (at === 0) break
+      }
+    }
+    hwnd = Number(api.GetWindow(hwnd, GW_HWNDNEXT))
+  }
+  return best?.hwnd ?? 0
+}
+
+/**
+ * What a window of the chain decides: the window to bring forward, 0 for a pseudo console without an
+ * owner (nothing to bring forward, see `findTerminalWindow`), or `undefined` if it does not decide.
+ */
+function consoleTarget(api: TerminalWindowScanner, hwnd: number): number | undefined {
+  const name = api.className(hwnd)
+  if (name === PSEUDO_CONSOLE_CLASS) return Number(api.GetWindow(hwnd, GW_OWNER))
+  if (name === CLASSIC_CONSOLE_CLASS && api.IsWindowVisible(hwnd) !== 0) return hwnd
+  return undefined
+}
+
+/** The real scanner: user32 plus a class name reader over one reused buffer. */
+function terminalScanner(api: User32): TerminalWindowScanner {
+  const buffer = Buffer.alloc(CLASS_NAME_CHARS * 2)
+  return {
+    ...api,
+    className: (hWnd) => buffer.toString('utf16le', 0, api.GetClassNameW(hWnd, buffer, CLASS_NAME_CHARS) * 2),
+  }
+}
+
+/** The real terminal window scanner, or `undefined` if the user32 bindings did not load. */
+export function liveTerminalScanner(): TerminalWindowScanner | undefined {
+  const api = loadUser32()
+  return api === null ? undefined : terminalScanner(api)
+}
+
+/**
+ * The window that shows the terminal of the process `pid`, or 0, from one process snapshot and one
+ * window walk. Only reads, brings nothing forward.
+ */
+export function terminalWindowOf(pid: number): number {
+  const scanner = liveTerminalScanner()
+  if (scanner === undefined) return 0
+  const tree = takeProcessTree()
+  if (tree === undefined) return 0
+  return findTerminalWindow(scanner, ancestorChain(tree, pid))
+}
+
+/** Brings up the window that shows the terminal of the session's process (`SessionView.pid`). */
+async function focusByTerminal(pid: number): Promise<boolean> {
+  const api = loadUser32()
+  if (api === null) return false
+  const hwnd = terminalWindowOf(pid)
+  if (hwnd === 0) return false
+  return bringToFront(api, hwnd)
+}
+
+/** True if `ancestor` is in the live ancestor chain of `pid` (`ancestorChain`), from one snapshot. */
+function runsUnder(pid: number, ancestor: number): boolean {
+  const tree = takeProcessTree()
+  return tree !== undefined && ancestorChain(tree, pid).includes(ancestor)
 }
 
 /**
@@ -297,41 +465,68 @@ function focusByCli(folder: string): Promise<boolean> {
  * - `cwd`: the `code` CLI got the session's cwd because the folder is unknown. If the cwd is open
  *   nowhere, this opened a BRAND NEW window, so it is unknown whether the session's window is in
  *   front;
- * - `failed`: neither path succeeded, or the CLI was skipped because the session is known not to
- *   run in the VSCode extension.
+ * - `terminal`: the window showing a terminal session's console came up (`findTerminalWindow`) and
+ *   was checked (`bringToFront`). Only the window: Windows Terminal stays on its current tab, VS Code
+ *   does not open its terminal panel;
+ * - `failed`: no path succeeded.
  */
-export type FocusOutcome = 'pid' | 'workspace' | 'cwd' | 'failed'
+export type FocusOutcome = 'pid' | 'workspace' | 'cwd' | 'terminal' | 'failed'
 
-/** The two focus steps, so the order in `focusWith` can be tested without bringing up a window. */
+/** The focus steps, so the order in `focusWith` can be tested without bringing up a window. */
 export interface FocusSteps {
   byPid(pid: number): Promise<boolean>
   byCli(folder: string): Promise<boolean>
+  /** By the session's own process (`SessionView.pid`), up to the window showing its terminal. */
+  byTerminal(pid: number): Promise<boolean>
+  /** True if `ancestor` is a live ancestor of the process `pid` (`ancestorChain`). Only reads. */
+  runsUnder(pid: number, ancestor: number): boolean
 }
 
 /**
  * The decision logic of `focusSessionWindow`, with injected steps.
  *
- * First by the pid known from the lock file, because that is fast and its result is checked. But
- * only if that pid has exactly one window (see `findMainWindow`: a VSCode main process can own
- * several windows, and then the pid does not identify a window). With several windows, and
- * whenever the fast path fails for any reason, the `code` CLI decides by the folder.
+ * A session whose `entrypoint` is known and is not the VSCode extension's (a terminal or SDK
+ * session) goes the terminal way first: from its own process up to the window that shows its
+ * console. Not the `windowPid` fast path first: the daemon gives a session the lock of any VS Code
+ * window whose workspace contains its cwd (core `liveness.ts` `resolveLiveSessions`), wherever the
+ * session runs. For a CLI in Windows Terminal inside an open workspace that window is the wrong one,
+ * and for a CLI in VS Code's integrated terminal the pseudo console's owner is already the right
+ * window (measured, `docs/design.md` "Mapping to terminal windows").
  *
- * The CLI is skipped if the session's `entrypoint` is known and is not the VSCode extension's: a
- * terminal or SDK session has no VSCode window, and `code <folder>` would only open a new window for
- * it. With an unknown `entrypoint` the CLI fallback stays.
+ * If the terminal way finds nothing, such a session takes the VS Code way below only when the lock's
+ * process is a live ancestor of the session's own process (`runsUnder`): then the session really
+ * runs under that VS Code, for example a `claude -p` started by an extension session's tool. A CLI in
+ * Windows Terminal does not have the VS Code process in its chain (measured, the same section), so it
+ * does not get that window. Without such an ancestor it goes no further: the session has no VSCode
+ * window of its own, and `code <folder>` would only open a new one.
+ *
+ * Every other session (the extension's, or an unknown `entrypoint`): first by the pid known from the
+ * lock file, because that is fast and its result is checked. But only if that pid has exactly one
+ * window (see `findMainWindow`: a VSCode main process can own several windows, and then the pid does
+ * not identify a window). With several windows, and whenever the fast path fails for any reason, the
+ * `code` CLI decides by the folder.
  */
 export async function focusWith(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
+  if (view.entrypoint !== undefined && view.entrypoint !== VSCODE_ENTRYPOINT) {
+    if (view.pid === undefined) return 'failed'
+    if (await steps.byTerminal(view.pid)) return 'terminal'
+    if (view.windowPid === undefined || !steps.runsUnder(view.pid, view.windowPid)) return 'failed'
+  }
+  return focusVSCodeWindow(view, steps)
+}
+
+/** The VS Code way of `focusWith`: the lock's pid, then the `code` CLI with the folder, else the cwd. */
+async function focusVSCodeWindow(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
   if (view.windowPid !== undefined && (await steps.byPid(view.windowPid))) return 'pid'
-  if (view.entrypoint !== undefined && view.entrypoint !== VSCODE_ENTRYPOINT) return 'failed'
   if (view.workspaceFolder !== undefined) {
     return (await steps.byCli(view.workspaceFolder)) ? 'workspace' : 'failed'
   }
   return (await steps.byCli(view.cwd)) ? 'cwd' : 'failed'
 }
 
-/** Brings the session's VSCode window to the front and says by which path (see `FocusOutcome`). */
+/** Brings the session's window to the front and says by which path (see `FocusOutcome`). */
 export function focusSessionWindow(view: SessionView): Promise<FocusOutcome> {
-  return focusWith(view, { byPid: focusByPid, byCli: focusByCli })
+  return focusWith(view, { byPid: focusByPid, byCli: focusByCli, byTerminal: focusByTerminal, runsUnder })
 }
 
 /**
@@ -356,7 +551,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  *   came to the front, and on the `workspace` path VSCode resolved it itself from the lock file's
  *   folder. The `cwd` path is not enough: `code <cwd>` may have opened a new window, and there the
  *   URI would open a second copy of the running session. With `failed` the topmost window can be
- *   any window;
+ *   any window. Nor `terminal`: the window is a terminal's, where the extension has no tab of the
+ *   session (and such a session's `entrypoint` fails the extension check below anyway);
  * - the session's window is known (`windowPid` or `workspaceFolder`), regardless of the outcome
  *   too, so that a contradictory outcome cannot open a tab either;
  * - the session runs in the VSCode extension: for a CLI or terminal session the extension would

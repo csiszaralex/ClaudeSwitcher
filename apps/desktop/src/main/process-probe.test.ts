@@ -7,6 +7,8 @@ import {
   imageNameFromExe,
   snapshotFromEntries,
   takeNativeSnapshot,
+  takeProcessTree,
+  treeFromEntries,
 } from './process-probe.js'
 
 const onWindows = process.platform === 'win32'
@@ -51,23 +53,27 @@ describe('fileTimeToDecimal', () => {
 })
 
 describe('entryFromStruct', () => {
-  it('maps the pid and the exe name to the image name', () => {
-    expect(entryFromStruct({ th32ProcessID: 1234, szExeFile: 'claude.exe' })).toEqual({ pid: 1234, image: 'claude' })
+  it('maps the pid, the exe name to the image name, and the parent pid', () => {
+    expect(entryFromStruct({ th32ProcessID: 1234, th32ParentProcessID: 1200, szExeFile: 'claude.exe' })).toEqual({
+      pid: 1234,
+      image: 'claude',
+      parentPid: 1200,
+    })
   })
 
   it('cuts the exe name at the first NUL', () => {
-    expect(entryFromStruct({ th32ProcessID: 7, szExeFile: 'Code.exe\0\0garbage' })).toEqual({ pid: 7, image: 'Code' })
+    expect(entryFromStruct({ th32ProcessID: 7, th32ParentProcessID: 4, szExeFile: 'Code.exe\0\0garbage' })).toEqual({ pid: 7, image: 'Code', parentPid: 4 })
   })
 
   it('rejects an entry with no name', () => {
-    expect(entryFromStruct({ th32ProcessID: 7, szExeFile: '' })).toBeUndefined()
+    expect(entryFromStruct({ th32ProcessID: 7, th32ParentProcessID: 4, szExeFile: '' })).toBeUndefined()
   })
 })
 
 describe('snapshotFromEntries', () => {
   const entries = [
-    { pid: 100, image: 'claude' },
-    { pid: 900, image: 'Code' },
+    { pid: 100, image: 'claude', parentPid: 90 },
+    { pid: 900, image: 'Code', parentPid: 4 },
   ]
 
   it('answers image names from the list', () => {
@@ -96,6 +102,30 @@ describe('snapshotFromEntries', () => {
   })
 })
 
+describe('treeFromEntries', () => {
+  const entries = [
+    { pid: 100, image: 'claude', parentPid: 90 },
+    { pid: 90, image: 'pwsh', parentPid: 4 },
+  ]
+
+  it('answers the recorded parent of a listed pid, and nothing for an unlisted one', () => {
+    const tree = treeFromEntries(entries, () => undefined)
+    expect(tree.parentOf(100)).toBe(90)
+    expect(tree.parentOf(90)).toBe(4)
+    expect(tree.parentOf(4)).toBeUndefined()
+  })
+
+  it('queries start times lazily, once per listed pid', () => {
+    const query = vi.fn((pid: number) => String(pid))
+    const tree = treeFromEntries(entries, query)
+    expect(query).not.toHaveBeenCalled()
+    expect(tree.startFileTime(90)).toBe('90')
+    expect(tree.startFileTime(90)).toBe('90')
+    expect(tree.startFileTime(4)).toBeUndefined()
+    expect(query).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('native process probe (live)', () => {
   it.skipIf(!onWindows)('loads the kernel32 bindings', () => {
     expect(createNativeProcessProbe()).toBeDefined()
@@ -106,6 +136,12 @@ describe('native process probe (live)', () => {
     expect(snapshot).toBeDefined()
     expect(snapshot?.size).toBeGreaterThan(10)
     expect(snapshot?.imageName(process.pid)).toBe(path.basename(process.execPath, '.exe'))
+  })
+
+  it.skipIf(!onWindows)('links the current process to its parent in the process tree', () => {
+    const tree = takeProcessTree()
+    expect(tree).toBeDefined()
+    expect(tree?.parentOf(process.pid)).toBe(process.ppid)
   })
 
   it.skipIf(!onWindows)('reads the creation time of the current process', () => {

@@ -2,23 +2,26 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useMemo, type JSX } from 'react'
 import { LINE_MARK, panelContent } from './edit-preview.js'
 import type { SummaryView } from './summary-view.js'
+import type { SessionHost } from '../shared/request-source.js'
 import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
 
 interface Props {
   decision: PendingDecisionView
   /** The panel's `summaryView` of the request: its header shows the line count too. */
   summary: SummaryView
+  /** Where the session's own prompt is, which shows the full text. */
+  host: SessionHost
 }
 
 /** The scrolling middle of the decision panel: warning, description, command, preview and details. */
-export function DecisionContent({ decision, summary }: Props): JSX.Element {
+export function DecisionContent({ decision, summary, host }: Props): JSX.Element {
   // App re-renders every second (for its clocks); formatting a big script or comparing a file line
   // by line must not run on every tick.
   const { preview, details } = useMemo(() => panelContent(decision), [decision])
   const limitNote = (
     <p className="muted">
       Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik. A teljes
-      szöveg a VSCode-ban.
+      szöveg {host.inside}.
     </p>
   )
 

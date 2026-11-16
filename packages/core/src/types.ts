@@ -67,6 +67,12 @@ export interface SessionView {
   cwd: string
   status: SessionStatus
   activity: SessionActivity
+  /**
+   * The session's own process id, the registry record's `pid` (the `claude` process). The jump to a
+   * terminal session walks up from it to the window that shows the terminal. The daemon always fills
+   * it; it is optional, like `windowPid`, so a view built elsewhere need not invent one.
+   */
+  pid?: number | undefined
   windowPid?: number | undefined
   workspaceFolder?: string | undefined
   bridgeSessionId?: string | null | undefined

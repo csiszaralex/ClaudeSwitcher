@@ -1,6 +1,7 @@
 import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
 import { isChoiceKind } from '../shared/request-kind.js'
+import { capitalized, sessionHost, type SessionHost } from '../shared/request-source.js'
 import { finishState, type SeenFinishes } from '../shared/session-finished.js'
 
 /**
@@ -34,16 +35,26 @@ const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
 
 /**
  * Where a released request can be decided. The one place the tooltip's and the decision panel's
- * text come from: the phone is an option only with Remote Control (`hasRemoteControl`).
+ * text come from: the session's own host (`sessionHost`), and the phone only with Remote Control
+ * (`hasRemoteControl`).
  */
-export function releasedMessage(remoteControl: boolean): string {
-  return remoteControl ? 'A VSCode-ban vagy a telefonon még dönthetsz.' : 'A VSCode-ban még dönthetsz.'
+export function releasedMessage(remoteControl: boolean, host: SessionHost): string {
+  const where = capitalized(host.inside)
+  return remoteControl ? `${where} vagy a telefonon még dönthetsz.` : `${where} még dönthetsz.`
 }
 
-function releasedMarker(remoteControl: boolean): StatusMarker {
+/**
+ * The notice of a session that waits for a decision the app holds no request for (`rows.ts`
+ * `waitsOutsideApp`): only the session's own prompt can decide it.
+ */
+export function outsideAppMessage(host: SessionHost): string {
+  return `${capitalized(host.inside)} vár jóváhagyásra. Az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett).`
+}
+
+function releasedMarker(remoteControl: boolean, host: SessionHost): StatusMarker {
   return {
     ...MARKERS.released,
-    title: `Az app elengedte (${String(PERMISSION_RELEASE_AFTER_MS / 1000)} mp). ${releasedMessage(remoteControl)}`,
+    title: `Az app elengedte (${String(PERMISSION_RELEASE_AFTER_MS / 1000)} mp). ${releasedMessage(remoteControl, host)}`,
   }
 }
 
@@ -58,14 +69,20 @@ function releasedMarker(remoteControl: boolean): StatusMarker {
  * done mark follows too): green while unseen, blue once seen.
  */
 export function statusMarker(
-  view: { sessionId: string; status: SessionStatus; stoppedAt?: number | undefined; bridgeSessionId?: unknown },
+  view: {
+    sessionId: string
+    status: SessionStatus
+    stoppedAt?: number | undefined
+    bridgeSessionId?: unknown
+    entrypoint?: string | undefined
+  },
   decisions: readonly { released: boolean; kind: DecisionKind }[],
   seen: SeenFinishes,
 ): StatusMarker {
   const held = decisions.filter((d) => !d.released)
   if (held.some((d) => isChoiceKind(d.kind))) return MARKERS.choice
   if (held.length > 0) return MARKERS.waiting
-  if (decisions.length > 0) return releasedMarker(hasRemoteControl(view))
+  if (decisions.length > 0) return releasedMarker(hasRemoteControl(view), sessionHost(view.entrypoint))
   if (view.status === 'waiting') return MARKERS.waiting
   if (view.status === 'working') return MARKERS.working
   switch (finishState(view, seen)) {

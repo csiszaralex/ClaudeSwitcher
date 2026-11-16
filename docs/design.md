@@ -107,6 +107,65 @@ that one); `busy` counts as working.
 
 The `pid` is the VS Code window's process (checked: 8108 → the window whose `MainWindowTitle` is
 "ClaudeSwitcher – …"). Pairing a session with a window: `session.cwd` ⊂ `lock.workspaceFolders`.
+The pairing looks only at the cwd (core `liveness.ts` `resolveLiveSessions`), so a terminal session
+whose cwd is inside an open workspace gets that window's lock too, wherever it really runs.
+
+#### Mapping to terminal windows (measured 2026-11-16, Claude Code 2.1.325)
+
+A terminal session (`entrypoint: "cli"`) has no lock file of its own. Measured read-only on five
+`cli` sessions: two in VS Code's integrated terminal, two as tabs of one Windows Terminal window
+(one started as `pwsh` from the Start menu, which Windows hands over to Windows Terminal, one
+started inside Windows Terminal), and one in `cmd`, which opened in a second Windows Terminal
+window. The registry record's `pid` is the session's `claude` process; its parent chain
+(`Win32_Process`):
+
+| Host | Chain from `claude.exe` up |
+|---|---|
+| VS Code integrated terminal | pwsh → Code.exe (pty host) → Code.exe (main) → explorer |
+| Windows Terminal, started inside it | pwsh → WindowsTerminal.exe → svchost |
+| Default-terminal hand-off (Start menu `pwsh`, `cmd`) | pwsh or cmd → explorer |
+
+So the chain alone does not find the window: after the hand-off Windows Terminal is not in it, and
+VS Code's main process owns all of its windows (its `MainWindowHandle` was another window). The
+windows do: every session's shell (the `claude.exe` parent) owns a hidden top-level
+`PseudoConsoleWindow`, and that window's owner (`GetWindow(GW_OWNER)`) is the top-level window that
+shows the terminal: the right VS Code window (`Chrome_WidgetWin_1`) for the integrated terminal,
+the right Windows Terminal window (`CASCADIA_HOSTING_WINDOW_CLASS`) otherwise.
+
+The rule (`focus-window.ts` `ancestorChain`, `findTerminalWindow`): from the session's process up
+its ancestors, the first one that owns a `PseudoConsoleWindow` gives that window's owner. If that
+pseudo console has no owner, the result is no window: a farther ancestor's console shows another
+terminal. A classic console host without Windows Terminal would own a visible `ConsoleWindowClass`
+window itself; that window counts then (not seen on this machine, where the `ConsoleWindowClass`
+windows are hidden ones of background console programs, and a hidden one does not count). The jump
+uses this first for every session whose `entrypoint` is known and is not `claude-vscode`
+(`focusWith`), instead of the lock's pid: by the cwd pairing above that pid may be a VS Code window
+the session does not run in. Only when the console search finds nothing and the lock's pid is in
+the session's ancestor chain does such a session go the VS Code way (the lock's pid, then the `code`
+CLI): it then runs under that VS Code, for example a `claude -p` started by an extension session's
+tool. Measured 2026-11-17 (`Win32_Process`): eight extension sessions ran as `claude.exe` →
+Code.exe (extension host) → Code.exe (the lock's pid), and a `cli` session in the integrated
+terminal as `claude.exe` → pwsh → Code.exe → Code.exe (the lock's pid). So a process an extension
+session starts has the lock's pid in its chain as long as the chain is unbroken (not measured with
+a real `claude -p`), and a CLI in the integrated terminal whose console search misses falls back
+too. One VS Code main process owns every window (all its locks carry the same pid), so the fallback
+brings up the window the cwd pairing chose, which need not be the window whose terminal runs the
+session. A session in Windows Terminal does not have the lock's pid in its chain (the table above).
+
+Not reachable this way: the exact tab. Windows Terminal comes forward on its current tab, and VS
+Code comes forward without opening its terminal panel on the session's terminal.
+
+Git Bash can break the chain (measured 2026-11-17 with Git for Windows' bash and sh, read-only
+`Win32_Process`). An MSYS program that an MSYS process starts through `exec` gets a new Windows
+process whose recorded parent has already exited: `sh` started from bash, and a bash started
+inside bash, each had a parent that was no longer listed. An MSYS process that `exec`s a native
+program stays alive as its parent. So `claude` installed by npm, whose sh shim bash runs and which
+ends in `exec node`, has the chain node → sh shim and nothing above it, and a session in a bash
+started inside another bash stops at that inner bash. In both cases the chain ends before the shell
+the terminal started (in the measurements above the owner of the pseudo console), and the jump finds
+no window, never a wrong one. Which process owns the pseudo console of a Git Bash tab was not
+measured. The native `claude.exe` measured above, started from pwsh or cmd, has its shell as its
+direct parent.
 
 ### 3.3 Transcript
 
@@ -356,7 +415,7 @@ PermissionRequest ─→ PendingDecision, the HTTP response suspended
 | Bash, PowerShell, WebFetch, MCP, … | the tool, the input, who asks (session or subagent) | Allow · Deny (with a reason) · Project level · Machine level | `allow` / `deny`+`message` / `allow`+`updatedPermissions` |
 | Write, Edit | the file, a diff summary | Allow · Deny · For this session automatically | `allow` / `deny` / `allow`+`setMode acceptEdits session` |
 | AskUserQuestion | the questions and the options | option choice (several for multi-select), free text → Answer | `allow`+`updatedInput.answers` (key: the question's text, value: the option label; several labels joined with `", "`; free text verbatim) |
-| ExitPlanMode | the plan's text | Reject with feedback · **"Jóváhagyás a VSCode-ban"** (approve in VS Code: jumps there) | `deny`+`message`; it cannot be approved from the hook (§10) |
+| ExitPlanMode | the plan's text | Reject with feedback · **"Jóváhagyás a VSCode-ban"** (approve in VS Code: jumps there; for a terminal session "a terminálban") | `deny`+`message`; it cannot be approved from the hook (§10) |
 
 **Project and machine level rule.** Claude Code's suggestion (`permission_suggestions`) **appears
 editable**; the user can rewrite it (narrow it), and Claude Code itself writes the approved
@@ -365,7 +424,8 @@ option asks for a separate confirmation, because it affects every session.
 
 **A late click.** If the decision has already been made (from any source), the overlay's row
 disappears; a click that arrives meanwhile is a no-op. After a release the row stays, but only
-with the "Ugrás a VSCode-ba" (jump to VS Code) button.
+with the "Ugrás a VSCode-ba" (jump to VS Code) button ("Ugrás a terminálhoz" for a terminal session,
+"Ugrás a sessionhöz" for an unknown source: `shared/request-source.ts` `sessionHost`).
 
 ## 6. ~~Presence policy~~: removed
 

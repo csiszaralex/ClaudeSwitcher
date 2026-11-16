@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { requestFacts, requestSource } from './request-source.js'
+import { capitalized, requestFacts, requestSource, sessionHost } from './request-source.js'
 
 describe('requestSource', () => {
   it('labels the VS Code extension and does not emphasise it', () => {
@@ -30,6 +30,38 @@ describe('requestSource', () => {
 
   it('does not treat a prototype key as a known label', () => {
     expect(requestSource('constructor').label).toBe('constructor')
+  })
+})
+
+describe('sessionHost', () => {
+  it('keeps the VS Code wording for an extension session', () => {
+    expect(sessionHost('claude-vscode')).toEqual({ inside: 'a VSCode-ban', to: 'a VSCode-ba' })
+  })
+
+  it('names the terminal for an interactive terminal session and a claude -p run', () => {
+    for (const entrypoint of ['cli', 'sdk-cli']) {
+      expect(sessionHost(entrypoint)).toEqual({ inside: 'a terminálban', to: 'a terminálhoz' })
+    }
+  })
+
+  it('names the session itself when the source is unknown or has no measured meaning', () => {
+    for (const entrypoint of [undefined, 'sdk-future', '', 'Claude-VSCode', 'CLI', 'constructor']) {
+      expect(sessionHost(entrypoint)).toEqual({ inside: 'a sessionben', to: 'a sessionhöz' })
+    }
+  })
+
+  it('is the host the source carries, so the panel and the notices agree', () => {
+    for (const entrypoint of ['claude-vscode', 'cli', 'sdk-cli', 'sdk-future', undefined]) {
+      expect(requestSource(entrypoint).host).toEqual(sessionHost(entrypoint))
+    }
+  })
+})
+
+describe('capitalized', () => {
+  it('starts a sentence with the phrase, accented letters included', () => {
+    expect(capitalized('a terminálban')).toBe('A terminálban')
+    expect(capitalized('új')).toBe('Új')
+    expect(capitalized('')).toBe('')
   })
 })
 

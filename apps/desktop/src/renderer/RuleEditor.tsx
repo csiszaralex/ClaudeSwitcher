@@ -3,6 +3,7 @@ import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
 import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
 import { broadRules, editorRows, suggestionCount } from './rule-editor.js'
+import type { SessionHost } from '../shared/request-source.js'
 
 interface Props {
   /** Claude Code's suggestion, one rule per line; the user can rewrite it. */
@@ -12,6 +13,8 @@ interface Props {
   /** Machine level: it affects every project and session, so it needs a separate confirmation. */
   machine: boolean
   busy: boolean
+  /** Where the session's own prompt is, for the text that sends a multi-line rule there. */
+  host: SessionHost
   onSubmit: (rules: PermissionRule[]) => void
   onCancel: () => void
 }
@@ -20,7 +23,7 @@ interface Props {
  * The editable preview of the rule. While a line cannot be parsed it cannot be submitted: a
  * silently "fixed" rule would grant a different permission than the one the user sees.
  */
-export function RuleEditor({ initial, multilineSuggestions, machine, busy, onSubmit, onCancel }: Props): JSX.Element {
+export function RuleEditor({ initial, multilineSuggestions, machine, busy, host, onSubmit, onCancel }: Props): JSX.Element {
   const [text, setText] = useState(initial)
   const [machineConfirmed, setMachineConfirmed] = useState(false)
   // Which broad rule list the user confirmed. If the list changes, the checkbox must not carry the
@@ -60,7 +63,7 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, onSub
         <p className="decision-error">
           {suggestionCount(multilineSuggestions)}{' '}
           többsoros, ezért kimaradt: soronként egy szabályt olvasunk, így több, mást engedélyező
-          szabállyá esne szét. Írj egysoros szabályt, vagy dönts a VSCode-ban.
+          szabállyá esne szét. Írj egysoros szabályt, vagy dönts {host.inside}.
         </p>
       )}
       <textarea

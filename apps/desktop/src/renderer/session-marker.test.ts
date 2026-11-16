@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionStatus as Status } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
-import { hasRemoteControl, releasedMessage, statusMarker } from './session-marker.js'
+import { sessionHost } from '../shared/request-source.js'
+import { hasRemoteControl, outsideAppMessage, releasedMessage, statusMarker } from './session-marker.js'
 
 const SESSION_ID = '6f1c2a3e-0000-4000-8000-000000000031'
 const session = (status: Status, stoppedAt?: number): { sessionId: string; status: Status; stoppedAt?: number | undefined } => ({
@@ -126,19 +127,37 @@ describe('hasRemoteControl', () => {
   })
 })
 
-describe('releasedMessage', () => {
-  it('names only VS Code without Remote Control', () => {
-    const text = releasedMessage(false)
-    expect(text).toContain('VSCode')
-    expect(text).not.toContain('telefon')
-  })
+/** One `entrypoint` of each host: the extension, the two terminal sources, and unknown ones. */
+const ENTRYPOINTS = ['claude-vscode', 'cli', 'sdk-cli', 'sdk-future', undefined] as const
 
-  it('names VS Code and the phone with Remote Control', () => {
-    expect(releasedMessage(true)).toContain('VSCode-ban vagy a telefonon')
+describe('releasedMessage', () => {
+  it("names the session's own host, and the phone only with Remote Control", () => {
+    expect(releasedMessage(false, sessionHost('claude-vscode'))).toBe('A VSCode-ban még dönthetsz.')
+    expect(releasedMessage(true, sessionHost('claude-vscode'))).toBe('A VSCode-ban vagy a telefonon még dönthetsz.')
+    expect(releasedMessage(false, sessionHost('cli'))).toBe('A terminálban még dönthetsz.')
+    expect(releasedMessage(true, sessionHost('sdk-cli'))).toBe('A terminálban vagy a telefonon még dönthetsz.')
+    expect(releasedMessage(false, sessionHost(undefined))).toBe('A sessionben még dönthetsz.')
+    expect(releasedMessage(true, sessionHost('sdk-future'))).toBe('A sessionben vagy a telefonon még dönthetsz.')
   })
 
   it('has no dash inside the sentence', () => {
-    for (const remote of [false, true]) expect(releasedMessage(remote)).not.toMatch(/[–—]/)
+    for (const entrypoint of ENTRYPOINTS) {
+      for (const remote of [false, true]) expect(releasedMessage(remote, sessionHost(entrypoint))).not.toMatch(/[–—]/)
+    }
+  })
+})
+
+describe('outsideAppMessage', () => {
+  it("names the session's own host at the start of the sentence", () => {
+    const reason = 'Az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett).'
+    expect(outsideAppMessage(sessionHost('claude-vscode'))).toBe(`A VSCode-ban vár jóváhagyásra. ${reason}`)
+    expect(outsideAppMessage(sessionHost('cli'))).toBe(`A terminálban vár jóváhagyásra. ${reason}`)
+    expect(outsideAppMessage(sessionHost('sdk-cli'))).toBe(`A terminálban vár jóváhagyásra. ${reason}`)
+    expect(outsideAppMessage(sessionHost(undefined))).toBe(`A sessionben vár jóváhagyásra. ${reason}`)
+  })
+
+  it('has no dash inside a sentence', () => {
+    for (const entrypoint of ENTRYPOINTS) expect(outsideAppMessage(sessionHost(entrypoint))).not.toMatch(/[–—]/)
   })
 })
 
@@ -149,8 +168,15 @@ describe('statusMarker released tooltip', () => {
     const plain = statusMarker({ sessionId: SESSION_ID, status: 'waiting' }, released, NONE_SEEN)
     const remote = statusMarker({ sessionId: SESSION_ID, status: 'waiting', bridgeSessionId: 'session_01Uj' }, released, NONE_SEEN)
     expect(plain.title).not.toContain('telefon')
-    expect(plain.title).toContain('VSCode')
     expect(remote.title).toContain('telefonon')
+  })
+
+  it("names the session's own host, from its entrypoint", () => {
+    const at = (entrypoint: string | undefined): string =>
+      statusMarker({ sessionId: SESSION_ID, status: 'waiting', entrypoint }, released, NONE_SEEN).title
+    expect(at('claude-vscode')).toContain('A VSCode-ban még dönthetsz.')
+    expect(at('cli')).toContain('A terminálban még dönthetsz.')
+    expect(at(undefined)).toContain('A sessionben még dönthetsz.')
   })
 
   it('keeps the release time in the tooltip', () => {

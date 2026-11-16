@@ -25,7 +25,7 @@ It never starts, stops or prompts a session, and it writes no permission rules i
 ## Requirements
 
 - **Windows.** Window focusing uses Win32 calls; no other platform is supported.
-- **Claude Code in the VS Code extension.** That is what the app is built for and tested with. Sessions started another way (for example `claude` in a terminal) are not filtered out, and their hooks do reach the app, but the app is not tested with them, and the jump can only bring up a VS Code window that has the session's folder open, never a terminal window.
+- **Claude Code in the VS Code extension.** That is what the app is built for and tested with. Sessions started another way (for example `claude` in a terminal) are not filtered out, and their hooks do reach the app, but the app is mostly tested with the extension. For a terminal session the jump brings up the terminal's window, not the exact tab (see [The list](#the-list)).
 - **The GUI is in Hungarian.** The labels below are quoted as the app shows them, with an English gloss.
 
 ## Install
@@ -73,7 +73,7 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 ### The tray
 
-The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). When a session has finished its turn and you have not opened it since (the green ✓ in the list), the icon turns green, or, while something waits, gets a green ring around the waiting colour. Opening that session from the list (Enter, or a double click) clears its mark and turns its ✓ blue, even when the app finds no window to bring to the front (a session in a standalone terminal, for example); its next turn clears the mark too. The green lasts exactly as long as a green ✓ is in the list. The app keeps the finishes, and which of them you have seen, in memory only: after it restarts, no session shows a ✓ until it finishes its next turn. When a request the app can still decide has waited longer than 540 seconds, the icon flashes, about once a second, between its normal image and a red dot with a white exclamation mark: the app lets go of the request at 590 seconds (see [Deciding a request](#deciding-a-request)). The flashing stops when no such request is left. The tooltip says how many sessions wait, adds **"választásra vár"** (waits for a choice) for a burgundy icon, and **"N végzett"** (N finished) for the finished sessions not opened yet. Clicking the icon opens the list. The right-click menu:
+The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). When a session has finished its turn and you have not opened it since (the green ✓ in the list), the icon turns green, or, while something waits, gets a green ring around the waiting colour. Opening that session from the list (Enter, or a double click) clears its mark and turns its ✓ blue, even when the app finds no window to bring to the front (a session in a terminal the app does not recognise, for example); its next turn clears the mark too. The green lasts exactly as long as a green ✓ is in the list. The app keeps the finishes, and which of them you have seen, in memory only: after it restarts, no session shows a ✓ until it finishes its next turn. When a request the app can still decide has waited longer than 540 seconds, the icon flashes, about once a second, between its normal image and a red dot with a white exclamation mark: the app lets go of the request at 590 seconds (see [Deciding a request](#deciding-a-request)). The flashing stops when no such request is left. The tooltip says how many sessions wait, adds **"választásra vár"** (waits for a choice) for a burgundy icon, and **"N végzett"** (N finished) for the finished sessions not opened yet. Clicking the icon opens the list. The right-click menu:
 
 - **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded and not skipped, or once **"Frissítés keresése most"** downloaded a skipped one and you did not skip it again; see [Updating](#updating).
 - **"Megnyitás"** (open): opens the list.
@@ -107,13 +107,15 @@ The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"
 | ✓ (green) | "Épp végzett": just finished, and you have not opened it since |
 | ✓ (blue) | "Végzett, már megnyitottad": finished, and you have opened it since |
 | ○ | "Tétlen": idle |
-| ◆ | the app let go of the request; decide it in VS Code |
+| ◆ | the app let go of the request; decide it at the session's own prompt |
 
 The rows are grouped by their marker, in this order: orange ●, burgundy ●, ◆, green ✓, ◐, blue ✓, ○. In the two ● groups the longest waiting row comes first (a request the app holds is let go after 590 seconds): a row with such a request counts from the oldest one's arrival, any other from when its wait began. When the list opens it selects the longest waiting row of the two groups; if no row waits, it keeps the selected row, or selects the top one. The ◐ rows go by name, so they do not swap places while they work. In the other groups the most recently active row comes first (its last transcript event, its finish or its wait, whichever is latest); rows with the same time go by name.
 
 The status bar at the bottom shows, on the left, where the selected session comes from (the source label described under [Deciding a request](#deciding-a-request)) and its folder, shortened in the middle when it is long (the full path is in its tooltip); on the right, **"ellenőrizve"** (checked) says how long ago the app last scanned the sessions.
 
 Keys: the arrows move the selection, **Enter** jumps to the selected session (so does a double click), **Esc** hides the list.
+
+The jump brings the session's window to the front. For a VS Code extension session that is its VS Code window, and with **"Ugrás a pontos Claude-tabra"** on, its Claude Code tab too. For a terminal session it is the window that shows its terminal: a Windows Terminal window or the VS Code window whose integrated terminal runs it. A classic console window should work too, but has not been measured yet. Only the window comes forward, not the exact tab: Windows Terminal stays on the tab it shows, and VS Code does not open its terminal panel on the session's terminal. When the app finds no terminal window but the session runs under VS Code (a `claude -p` started from an extension session, for example), it jumps to that VS Code window instead. In Git Bash the jump can find nothing: `claude` installed by npm (its sh shim) and a bash started inside bash hide the terminal from the app (see "Mapping to terminal windows" in [`docs/design.md`](docs/design.md)). The native `claude.exe` started from PowerShell or cmd works.
 
 ### Deciding a request
 
@@ -124,11 +126,13 @@ Selecting a waiting session opens its request. What you can do depends on the re
 - **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer).
 - **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there.
 
+Where the app cannot decide (a released request, a plan's approval, a request it does not hold), the texts and the **"Ugrás a VSCode-ba"** (jump to VS Code) button name where the session's own prompt is, by its source: VS Code for an extension session, the terminal for a CLI session and a `claude -p` run (**"Ugrás a terminálhoz"**, **"Jóváhagyás a terminálban →"**, **"A terminálban még dönthetsz."**), and the session itself when the source is unknown or another value (**"Ugrás a sessionhöz"**, **"A sessionben még dönthetsz."**).
+
 Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
 
 The letter keys do not fire for a short moment after a panel appears, on key repeat, or within a moment after you typed in a text field.
 
-The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. From 540 seconds on, the tray icon flashes to warn you. The prompt in VS Code stays and can still be answered there.
+The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. From 540 seconds on, the tray icon flashes to warn you. The session's own prompt (in VS Code or in the terminal) stays and can still be answered there.
 
 ## Uninstall
 

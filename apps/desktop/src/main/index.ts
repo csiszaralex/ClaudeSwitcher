@@ -442,10 +442,10 @@ async function startApp(): Promise<void> {
       const outcome = await focusSessionWindow(view)
       overlay.hide()
       // The user has opened the session from the overlay: its finish is seen whatever the outcome
-      // (a session with no VS Code window to bring forward, such as a CLI in a standalone terminal,
-      // fails every time and would otherwise stay green). The tray's done mark goes and the list's
-      // ✓ turns blue (`finishState`). Recorded only after `overlay.hide()`: the overlay reads the
-      // map on `shown` (`useSeenFinishes`), so its next pull has this finish.
+      // (a session whose window cannot be brought forward, such as a terminal the console search
+      // does not recognise, fails every time and would otherwise stay green). The tray's done mark
+      // goes and the list's ✓ turns blue (`finishState`). Recorded only after `overlay.hide()`: the
+      // overlay reads the map on `shown` (`useSeenFinishes`), so its next pull has this finish.
       acknowledgeFinish(finishesSeen, view)
       // The exact tab only AFTER the window, and only if every condition of `tabFocusUri` holds.
       // The decisions are read AFTER the focus: a file-write request may have arrived during the

@@ -318,6 +318,7 @@ export class SessionStore {
         cwd: session.record.cwd,
         status,
         activity,
+        pid: session.record.pid,
         windowPid: session.window?.pid,
         workspaceFolder: session.window?.workspaceFolders[0],
         bridgeSessionId: session.record.bridgeSessionId,
