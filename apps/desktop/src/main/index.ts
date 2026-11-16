@@ -11,6 +11,7 @@ import {
   ipcMain,
   shell,
 } from 'electron'
+import { APP_USER_MODEL_ID } from './app-id.js'
 import { createAutostart, type LoginItems } from './autostart.js'
 import { loadConfig, saveSettings, saveSkippedVersion } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
@@ -37,6 +38,7 @@ import { readInstanceRecord, removeInstanceRecord, writeInstanceRecord } from '.
 import { createHandleFrom } from './ipc-handle.js'
 import { rendererLocation } from './ipc-sender.js'
 import { ensureLogFile, installFileLog } from './log-file.js'
+import { createNotifier } from './notifier.js'
 import { createOverlayController } from './overlay-window.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { createQuitSequence } from './quit-sequence.js'
@@ -52,6 +54,7 @@ import {
 } from './claude-integration.js'
 import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
+import { createToaster } from './toast.js'
 import { createTray } from './tray.js'
 import {
   CONSOLE_UPDATER_LOG,
@@ -352,6 +355,13 @@ switch (MODE) {
 async function startApp(): Promise<void> {
   // A quit that began during startup (an early `--quit`) must not be followed by a daemon and windows.
   if (quitSequence.isQuitting()) return
+  // So a toast is attributed to the app: the installer's Start menu shortcut carries the same ID
+  // (`resources/installer.nsh` `csApplyShortcut`, from `appId`). Electron 45.1.0's `electron.d.ts`
+  // says only "Changes the Application User Model ID" and nothing about what a toast needs beyond
+  // it, so whether a repo build (no installer shortcut) shows toasts is not settled by the types and
+  // was not measured (agents never launch the app). The installed app is what counts. It runs here,
+  // so not in the `--quit` and `--uninstall` helpers, which show nothing.
+  app.setAppUserModelId(APP_USER_MODEL_ID)
   // The token is persistent and the port is fixed: the installed hooks get these in settings.json,
   // so they stay valid after the app restarts. On a taken port startDaemon rejects, and the startup
   // error dialog appears.
@@ -664,8 +674,28 @@ async function startApp(): Promise<void> {
   // createTray throws on an empty icon, so if this line appears, the tray icon got a visible image.
   console.log(`[claudeswitcher] tray ready, ${hotkeyLogText(hotkey)}`)
 
+  // A toast click opens the list on that session. `overlay.show` ignores the call while quitting.
+  const showToast = createToaster((sessionId) => {
+    overlay.show(sessionId)
+  })
+  const notifier = createNotifier()
+
   const syncTray = (): void => {
-    tray.setWaiting(running.state().sessions.filter((s) => s.status === 'waiting').length)
+    const state = running.state()
+    tray.setWaiting(state.sessions.filter((s) => s.status === 'waiting').length)
+    // Never lets a failing toast stop the tray tick.
+    try {
+      const { notifyOnRequest, notifyOnFinish } = settings.snapshot().values
+      for (const notice of notifier.observe({
+        state,
+        settings: { notifyOnRequest, notifyOnFinish },
+        overlayVisible: overlay.isVisible(),
+      })) {
+        showToast(notice)
+      }
+    } catch (error) {
+      console.error('[claudeswitcher] notification check failed', error)
+    }
   }
   syncTray()
   const trayTimer = setInterval(syncTray, 1000)

@@ -53,7 +53,7 @@ body {
 .marker.tone-working { color: var(--info); }
 .marker.tone-done { color: var(--success); }
 .marker.tone-idle { color: var(--text-faint); }
-/* A request from a run the user did not start interactively (request-source.ts `standsOut`): the waiting mark turns red. */
+/* A request from a run the user did not start interactively (shared/request-source.ts `standsOut`): the waiting mark turns red. */
 .session.flagged .marker.tone-waiting { color: var(--danger); }
 
 /* Flex, so only the text is truncated (…), never the Remote Control dot. */

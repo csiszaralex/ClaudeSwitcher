@@ -72,10 +72,19 @@ The tray icon changes when a session waits for you, and its tooltip says how man
 - **"Gyorsbillentyű: Shift+Alt+Space"** (hotkey): the hotkey in effect, or what is wrong with it if it could not be registered.
 - **"Beállítások…"** (settings): the settings window, with the integration section.
 - **"Napló megnyitása"** (open the log): opens the log file in your default text editor. The app writes its diagnostic lines, and any uncaught error, to `%APPDATA%\@claudeswitcher\desktop\logs\claudeswitcher.log`. At 1 MiB the file moves to `claudeswitcher.old.log` (replacing the previous one) and a new one starts. The first line of a run names the version. Send the file in when reporting a problem.
-- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Frissítések keresése"** (check for updates, see [Updating](#updating)). All four are on by default.
+- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Értesítés engedélykérésnél"** (notify on a permission request), **"Értesítés, ha egy session végzett"** (notify when a session finished), **"Frissítések keresése"** (check for updates, see [Updating](#updating)). All are on by default except the notification for a finished session; see [Notifications](#notifications).
 - **"Kilépés"** (quit).
 
 If the installed integration is out of date, a line **"Integráció elavult, telepítsd újra"** (integration out of date, install again) appears in the menu, with the reason in brackets: **"hiányzó hook"** (a newer version expects a hook the old install lacks) or **"rossz token"** (the token in `settings.json` is not the app's, for example in a `settings.json` brought from another machine; every hook would then be rejected). Clicking the line opens the settings window, where **"Telepítés"** fixes it.
+
+### Notifications
+
+With the list closed, a Windows toast tells you when a session needs you, so a request does not wait unseen:
+
+- **"Értesítés engedélykérésnél"** (on by default): a toast **"<session> engedélyt kér"** (asks for permission) for every new permission request. The text is the request as the row shows it, with the source label first when the source stands out (for example `claude -p · Bash: pnpm test`). A second request of the same session notifies again.
+- **"Értesítés, ha egy session végzett"** (off by default): a toast **"<session> végzett"** (finished) when a session ends its turn, with the start of its last answer. It is off because every turn ends this way, which is noisy with many sessions.
+
+Both can be switched in the tray and in the settings window, and take effect at once. Clicking a toast opens the list with that session selected. Nothing is shown while the list is open, and a request that was already waiting when the app started does not notify (the tray icon shows it). Windows "Do not disturb" (Focus) and full-screen rules can hold a toast back; it then waits in the notification centre. Toasts are meant for the installed app: a repo build may show none, and the log says when toasts are unsupported.
 
 ### The list
 

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { ACTION_BUTTONS, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
 import { DecisionPanel } from './DecisionPanel.js'
-import { requestSource } from './request-source.js'
+import { requestSource } from '../shared/request-source.js'
 import { RuleEditor } from './RuleEditor.js'
 
 function bashDecision(overrides: Partial<PendingDecisionView> = {}): PendingDecisionView {

@@ -1,4 +1,4 @@
-import { CLI_ENTRYPOINT, HEADLESS_ENTRYPOINT, VSCODE_ENTRYPOINT } from '../shared/entrypoint.js'
+import { CLI_ENTRYPOINT, HEADLESS_ENTRYPOINT, VSCODE_ENTRYPOINT } from './entrypoint.js'
 
 /** Where a permission request comes from, as the row and the decision panel show it. */
 export interface RequestSource {

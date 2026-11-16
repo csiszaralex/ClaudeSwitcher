@@ -4,10 +4,11 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, pendingRowText, subagentLabel, subagentTooltip, summarize } from './format.js'
+import { formatDuration, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
-import { requestSource } from './request-source.js'
+import { pendingRowText } from '../shared/row-text.js'
+import { requestSource } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl, statusMarker } from './session-marker.js'
 import type { OverlayState } from './useDaemonState.js'
@@ -84,16 +85,17 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
     if (next !== undefined) setSelectedId(next)
   }, [decisions])
 
-  // On show, jump to the session that has been waiting longest, and the panel arms again: the first
-  // keystroke could still go to the old selection. The signal is the main process's `show` event
+  // On show, jump to the session that has been waiting longest (or the one a clicked notification
+  // named, `preferred`), and the panel arms again: the
+  // first keystroke could still go to the old selection. The signal is the main process's `show` event
   // (the reason is in `createOverlay` in the main process).
   useEffect(
     () =>
-      window.claudeswitcher.onShown(() => {
+      window.claudeswitcher.onShown((preferred) => {
         const armedAt = armUntil(Date.now())
         keyHistory.current.shownArmedAt = armedAt
         rerenderOnShow(armedAt)
-        setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current))
+        setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current, preferred))
       }),
     [],
   )
@@ -185,7 +187,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
           // The row of a session the snapshot does not know yet: the pending request holds it, so it is waiting.
           const marker = statusMarker(row.session ?? { status: row.status }, row.decisions)
           const badge = pendingBadge(row.decisions)
-          // The source tag shows only on a row with a request and only when it stands out (request-source.ts).
+          // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
           const source = requestSource(row.session?.entrypoint)
           const flagged = source.standsOut && row.decisions.length > 0
           return (

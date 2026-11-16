@@ -20,7 +20,7 @@ import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
-import { requestFacts, type RequestSource } from './request-source.js'
+import { requestFacts, type RequestSource } from '../shared/request-source.js'
 import { releasedMessage } from './session-marker.js'
 import { summaryView } from './summary-view.js'
 
@@ -39,7 +39,7 @@ type Mode = 'buttons' | Extract<DecisionAction, 'deny' | 'rule-project' | 'rule-
 
 interface Props {
   decision: PendingDecisionView
-  /** Where the request comes from (request-source.ts `requestSource`); emphasised when it stands out. */
+  /** Where the request comes from (shared/request-source.ts `requestSource`); emphasised when it stands out. */
   source: RequestSource
   /** The requesting subagent's label in the header (format.ts `subagentLabel`); absent for the main session. */
   agentLabel: string | undefined

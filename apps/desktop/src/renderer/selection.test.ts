@@ -55,6 +55,16 @@ describe('moveSelection', () => {
 })
 
 describe('selectOnShow', () => {
+  it('selects the session a clicked notification named, even when another one waits longer', () => {
+    const sessions = [view('w1', 'waiting'), view('i', 'idle')]
+    expect(selectOnShow(sessions, [], undefined, 'i')).toBe('i')
+  })
+
+  it('falls back to the longest waiting session when the named one is gone', () => {
+    const sessions = [view('w1', 'waiting'), view('i', 'idle')]
+    expect(selectOnShow(sessions, [], 'i', 'gone')).toBe('w1')
+  })
+
   it('selects the first waiting session: the daemon sorts the oldest wait first', () => {
     const sessions = [view('w1', 'waiting'), view('w2', 'waiting'), view('i', 'idle')]
     expect(selectOnShow(sessions, [], 'i')).toBe('w1')

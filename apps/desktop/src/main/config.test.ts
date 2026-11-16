@@ -7,7 +7,7 @@ import { configPath, loadConfig, saveSettings, saveSkippedVersion } from './conf
 
 const freshDir = (): Promise<string> => tempDir('cs-config-')
 
-const DEFAULTS = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true, jumpToTab: true, checkForUpdates: true }
+const DEFAULTS = { hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: true, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true }
 
 /** Values only: most tests do not care which settings were confirmed. */
 async function loadValues(dir: string): Promise<Awaited<ReturnType<typeof loadConfig>>['values']> {
@@ -34,7 +34,7 @@ describe('loadConfig', () => {
     const dir = await freshDir()
     const older = JSON.stringify({ hotkey: 'Control+Shift+F9' })
     await writeFile(configPath(dir), older)
-    expect(await loadValues(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: true, jumpToTab: true, checkForUpdates: true })
+    expect(await loadValues(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: true, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     expect(await readFile(configPath(dir), 'utf8')).toBe(older)
   })
 
@@ -42,7 +42,7 @@ describe('loadConfig', () => {
     const dir = await freshDir()
     const older = JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: false })
     await writeFile(configPath(dir), older)
-    expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: true, checkForUpdates: true })
+    expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     expect(await readFile(configPath(dir), 'utf8')).toBe(older)
   })
 
@@ -50,7 +50,7 @@ describe('loadConfig', () => {
     const dir = await freshDir()
     const older = JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: false })
     await writeFile(configPath(dir), older)
-    expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: false, checkForUpdates: true })
+    expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: false, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     expect(await readFile(configPath(dir), 'utf8')).toBe(older)
   })
 
@@ -60,21 +60,21 @@ describe('loadConfig', () => {
     expect((await loadValues(dir)).checkForUpdates).toBe(false)
     for (const bad of ['false', 0, null, {}]) {
       await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', jumpToTab: false, checkForUpdates: bad }))
-      expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: false, checkForUpdates: true })
+      expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: false, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     }
   })
 
   it('returns the tab-jump setting the user turned off', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', jumpToTab: false }))
-    expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: false, checkForUpdates: true })
+    expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: false, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
   })
 
   it('ignores a tab-jump value that is not a boolean, without losing the other keys', async () => {
     for (const bad of ['false', 0, null, {}]) {
       const dir = await freshDir()
       await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: bad }))
-      expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: true, checkForUpdates: true })
+      expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     }
   })
 
@@ -87,14 +87,14 @@ describe('loadConfig', () => {
   it('reads each setting on its own: a bad hotkey does not lose a valid auto-hide value', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 42, hideAfterLastDecision: false }))
-    expect(await loadValues(dir)).toEqual({ hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: false, jumpToTab: true, checkForUpdates: true })
+    expect(await loadValues(dir)).toEqual({ hotkey: DEFAULT_HOTKEY, hideAfterLastDecision: false, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
   })
 
   it('ignores an auto-hide value that is not a boolean', async () => {
     for (const bad of ['false', 0, null, {}]) {
       const dir = await freshDir()
       await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', hideAfterLastDecision: bad }))
-      expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: true, checkForUpdates: true })
+      expect(await loadValues(dir)).toEqual({ hotkey: 'F9', hideAfterLastDecision: true, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     }
   })
 
@@ -133,12 +133,12 @@ describe('confirmed settings', () => {
       JSON.stringify({ hotkey: 'Shift+Alt+K', hideAfterLastDecision: false, jumpToTab: true }),
     )
     const config = await loadConfig(dir)
-    expect(config.values).toEqual({ hotkey: 'Shift+Alt+K', hideAfterLastDecision: false, jumpToTab: true, checkForUpdates: true })
+    expect(config.values).toEqual({ hotkey: 'Shift+Alt+K', hideAfterLastDecision: false, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     expect(config.confirmed.size).toBe(0)
   })
 
-  it('leaves the update check unconfirmed in a file that confirmed every earlier setting', async () => {
-    // The update that adds the setting: the first-run window asks exactly this one, once.
+  it('leaves the update check and the notifications unconfirmed in a file that confirmed every earlier setting', async () => {
+    // The update that adds the settings: the first-run window asks exactly these, once.
     const dir = await freshDir()
     await writeFile(
       configPath(dir),
@@ -150,9 +150,9 @@ describe('confirmed settings', () => {
       }),
     )
     const config = await loadConfig(dir)
-    expect(config.values).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: false, checkForUpdates: true })
+    expect(config.values).toEqual({ hotkey: 'F9', hideAfterLastDecision: false, jumpToTab: false, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
     expect([...config.confirmed]).toEqual(['autostart', 'hideAfterLastDecision', 'jumpToTab', 'hotkey'])
-    expect(settingsToAsk(config.confirmed, { installed: true })).toEqual(['checkForUpdates'])
+    expect(settingsToAsk(config.confirmed, { installed: true })).toEqual(['notifyOnRequest', 'notifyOnFinish', 'checkForUpdates'])
   })
 
   it('ignores unknown and malformed confirmed entries', async () => {
@@ -256,7 +256,7 @@ describe('saveSettings', () => {
       note: 'kézzel',
       hideAfterLastDecision: false,
     })
-    expect(await loadValues(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: false, jumpToTab: true, checkForUpdates: true })
+    expect(await loadValues(dir)).toEqual({ hotkey: 'Control+Shift+F9', hideAfterLastDecision: false, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true })
   })
 
   it('merges the tab-jump key into the file, keeping the auto-hide value and the user keys', async () => {

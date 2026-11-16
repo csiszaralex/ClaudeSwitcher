@@ -16,7 +16,14 @@ import { isRecord } from '@claudeswitcher/core/browser'
  */
 export const DEFAULT_HOTKEY = 'Shift+Alt+Space'
 
-export type SettingKey = 'autostart' | 'hideAfterLastDecision' | 'jumpToTab' | 'checkForUpdates' | 'hotkey'
+export type SettingKey =
+  | 'autostart'
+  | 'hideAfterLastDecision'
+  | 'jumpToTab'
+  | 'notifyOnRequest'
+  | 'notifyOnFinish'
+  | 'checkForUpdates'
+  | 'hotkey'
 
 export interface SettingValues {
   /** Start at login. The OS login item is the source of truth; the config only records the answer. */
@@ -25,6 +32,10 @@ export interface SettingValues {
   hideAfterLastDecision: boolean
   /** Focusing a session also brings up its exact Claude Code tab, not only the window. */
   jumpToTab: boolean
+  /** A toast when a session asks for permission (`main/notifier.ts`). */
+  notifyOnRequest: boolean
+  /** A toast when a session has finished its turn (`main/notifier.ts`). Off by default: every turn ends with a Stop. */
+  notifyOnFinish: boolean
   /** The installed app looks for a new release and downloads it (`main/updater.ts`). */
   checkForUpdates: boolean
   /** Electron accelerator, e.g. `Shift+Alt+Space`. */
@@ -44,6 +55,8 @@ export const SETTINGS: readonly SettingDefinition[] = [
   { key: 'autostart', kind: 'boolean', label: 'Induljon el bejelentkezéskor' },
   { key: 'hideAfterLastDecision', kind: 'boolean', label: 'Elrejtés az utolsó döntés után' },
   { key: 'jumpToTab', kind: 'boolean', label: 'Ugrás a pontos Claude-tabra' },
+  { key: 'notifyOnRequest', kind: 'boolean', label: 'Értesítés engedélykérésnél' },
+  { key: 'notifyOnFinish', kind: 'boolean', label: 'Értesítés, ha egy session végzett' },
   { key: 'checkForUpdates', kind: 'boolean', label: 'Frissítések keresése' },
   { key: 'hotkey', kind: 'hotkey', label: 'Gyorsbillentyű' },
 ]
@@ -52,6 +65,8 @@ export const DEFAULT_SETTINGS: SettingValues = {
   autostart: true,
   hideAfterLastDecision: true,
   jumpToTab: true,
+  notifyOnRequest: true,
+  notifyOnFinish: false,
   checkForUpdates: true,
   hotkey: DEFAULT_HOTKEY,
 }
@@ -86,17 +101,19 @@ export function isHotkeyValue(value: unknown): value is string {
 export function parseSettingValues(raw: unknown): SettingValues | undefined {
   if (!isRecord(raw)) return undefined
   if (Object.keys(raw).length !== SETTINGS.length) return undefined
-  const { autostart, hideAfterLastDecision, jumpToTab, checkForUpdates, hotkey } = raw
+  const { autostart, hideAfterLastDecision, jumpToTab, notifyOnRequest, notifyOnFinish, checkForUpdates, hotkey } = raw
   if (
     typeof autostart !== 'boolean' ||
     typeof hideAfterLastDecision !== 'boolean' ||
     typeof jumpToTab !== 'boolean' ||
+    typeof notifyOnRequest !== 'boolean' ||
+    typeof notifyOnFinish !== 'boolean' ||
     typeof checkForUpdates !== 'boolean'
   ) {
     return undefined
   }
   if (!isHotkeyValue(hotkey)) return undefined
-  return { autostart, hideAfterLastDecision, jumpToTab, checkForUpdates, hotkey }
+  return { autostart, hideAfterLastDecision, jumpToTab, notifyOnRequest, notifyOnFinish, checkForUpdates, hotkey }
 }
 
 /** The settings the user has not confirmed yet, in window order. */
@@ -124,6 +141,12 @@ export function pickSettings(values: SettingValues, keys: Iterable<SettingKey>):
         break
       case 'jumpToTab':
         picked.jumpToTab = values.jumpToTab
+        break
+      case 'notifyOnRequest':
+        picked.notifyOnRequest = values.notifyOnRequest
+        break
+      case 'notifyOnFinish':
+        picked.notifyOnFinish = values.notifyOnFinish
         break
       case 'checkForUpdates':
         picked.checkForUpdates = values.checkForUpdates

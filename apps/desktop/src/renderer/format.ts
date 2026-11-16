@@ -1,5 +1,6 @@
 import type { SessionActivity, SessionStatus, SubagentView } from '@claudeswitcher/core'
-import { flatText, isCommandTool, truncate } from '@claudeswitcher/core/browser'
+import { isCommandTool } from '@claudeswitcher/core/browser'
+import { clip } from '../shared/row-text.js'
 
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
@@ -37,21 +38,6 @@ function subagentWork(subagent: SubagentView): string {
 export function subagentTooltip(subagents: readonly SubagentView[] | undefined): string | undefined {
   if (subagents === undefined || subagents.length === 0) return undefined
   return subagents.map((subagent) => `↳ ${subagentWork(subagent)}`).join('\n')
-}
-
-/** The longest a row text may be; core `TOOL_DETAIL_MAX` is sized against it. */
-const ROW_TEXT_MAX = 80
-
-function clip(raw: string): string {
-  return truncate(flatText(raw) ?? '', ROW_TEXT_MAX)
-}
-
-/**
- * A pending request in the row: `Bash: <command>`, cut to one line. So a command of several hundred
- * kilobytes does not go whole into the DOM on every per-second re-render; the full text is the panel's.
- */
-export function pendingRowText(pending: { toolName: string; summary: string }): string {
-  return clip(`${pending.toolName}: ${pending.summary}`)
 }
 
 /** The Agent tool's default type: it is almost always this one, so on its own it says nothing. */

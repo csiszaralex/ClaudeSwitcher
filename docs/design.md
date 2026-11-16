@@ -170,7 +170,7 @@ test and the permission spike).
   app and showed as a normal waiting row, indistinguishable from a VS Code session's (the VS Code
   session in the same folder: `entrypoint: "claude-vscode"`, `kind: "interactive"`). The SDK
   runs (`sdk-ts`, `sdk-py`) were not measured. The app labels a request from the `entrypoint`
-  (`renderer/request-source.ts`) and does not read `kind`.
+  (`shared/request-source.ts`) and does not read `kind`.
 - **Subagent transcripts** are in a separate file: `<session>/subagents/agent-<id>.jsonl`
   (`isSidechain: true`, `agentId`, with the **parent's** `sessionId`); they are not in the main
   transcript.
