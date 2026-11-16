@@ -194,7 +194,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
             <li
               key={row.sessionId}
               ref={index === selected ? selectedRow : null}
-              className={`session ${row.status} ${index === selected ? 'selected' : ''} ${flagged ? 'flagged' : ''}`}
+              className={`session ${row.status} ${index === selected ? 'selected' : ''}`}
               onClick={() => {
                 setSelectedId(row.sessionId)
               }}

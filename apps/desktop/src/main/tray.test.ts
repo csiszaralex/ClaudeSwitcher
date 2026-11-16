@@ -6,8 +6,7 @@ import { DEFAULT_SETTINGS } from '../shared/settings.js'
 const built = vi.hoisted(() => ({ templates: [] as MenuItemConstructorOptions[][] }))
 
 vi.mock('electron', () => ({
-  app: { isPackaged: false },
-  nativeImage: { createFromPath: () => ({ isEmpty: () => false }) },
+  nativeImage: { createFromBuffer: () => ({ isEmpty: () => false }) },
   Menu: {
     buildFromTemplate: (template: MenuItemConstructorOptions[]) => {
       built.templates.push(template)

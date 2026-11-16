@@ -65,7 +65,7 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 ### The tray
 
-The tray icon changes when a session waits for you, and its tooltip says how many. Clicking the icon opens the list. The right-click menu:
+The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). The tooltip says how many sessions wait, and adds **"választásra vár"** (waits for a choice) for a burgundy icon. Clicking the icon opens the list. The right-click menu:
 
 - **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded and not skipped; see [Updating](#updating).
 - **"Megnyitás"** (open): opens the list.
@@ -92,7 +92,8 @@ The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"
 
 | Marker | Meaning |
 |---|---|
-| ● | "Válaszra vár": waiting for you |
+| ● (orange) | "Válaszra vár": waiting for you, with a yes or a no |
+| ● (burgundy) | "Választásra vár": waiting for a choice, a question or a plan |
 | ◐ | "Dolgozik": working |
 | ✓ | "Épp végzett": just finished |
 | ○ | "Tétlen": idle |
@@ -109,7 +110,7 @@ Selecting a waiting session opens its request. What you can do depends on the re
 - **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer).
 - **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there.
 
-Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag and a red waiting mark, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
+Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
 
 The letter keys do not fire for a short moment after a panel appears, on key repeat, or within a moment after you typed in a text field.
 

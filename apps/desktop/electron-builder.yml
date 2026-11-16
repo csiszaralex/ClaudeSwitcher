@@ -9,12 +9,6 @@ files:
   - package.json
   # Already bundled into out/main (BUNDLED_WORKSPACE_PACKAGES in electron.vite.config.ts).
   - '!node_modules/@claudeswitcher/**'
-# The tray icons, read through `resourcesDir` (src/main/resources.ts).
-extraResources:
-  - from: resources
-    to: icons
-    filter:
-      - tray*.png
 # The update source of `electron-updater`: the build writes `app-update.yml` into the app and
 # `latest.yml` next to the installer. The `dist` script passes `--publish never`: CI uploads the
 # files to the GitHub Release itself (`.github/workflows/release.yml`).

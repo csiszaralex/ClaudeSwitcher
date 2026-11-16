@@ -56,6 +56,7 @@ import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createToaster } from './toast.js'
 import { createTray } from './tray.js'
+import { trayState } from './tray-state.js'
 import {
   CONSOLE_UPDATER_LOG,
   createUpdateController,
@@ -682,7 +683,7 @@ async function startApp(): Promise<void> {
 
   const syncTray = (): void => {
     const state = running.state()
-    tray.setWaiting(state.sessions.filter((s) => s.status === 'waiting').length)
+    tray.setState(trayState(state))
     // Never lets a failing toast stop the tray tick.
     try {
       const { notifyOnRequest, notifyOnFinish } = settings.snapshot().values

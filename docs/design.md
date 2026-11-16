@@ -300,8 +300,9 @@ cannot be an ES module), and the workspace packages are built into the main proc
 owner, and the lifecycle is simpler. The module boundary is there, though, in case it has to be
 moved out later.
 
-**Form factor:** a tray icon + a global hotkey overlay. Normally invisible; the tray badge shows
-the number of waiting sessions, and the hotkey brings up a compact list.
+**Form factor:** a tray icon + a global hotkey overlay. Normally invisible; the tray icon's colour
+shows what waits and its tooltip the number of waiting sessions (README, "The tray"), and the
+hotkey brings up a compact list.
 
 **Keys** (`App.tsx` `onKey`, `decision-actions.ts` `SHORTCUTS`; since changed: the shortcut table
 is now `ACTION_BUTTONS`, read by `shortcutFor`):
