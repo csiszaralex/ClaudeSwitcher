@@ -25,6 +25,8 @@ export interface ClaudeSwitcherApi {
   /**
    * Subscribes to the overlay's appearance; the returned function unsubscribes. The renderer gets
    * only its own callback, not the `IpcRendererEvent`: through that `ipcRenderer` would be reachable.
+   * The callback gets the session id the main process asked to select (a clicked notification), or
+   * `undefined`; the preload passes it on only if it is a string.
    */
-  onShown: (callback: () => void) => () => void
+  onShown: (callback: (preferredSessionId: string | undefined) => void) => () => void
 }

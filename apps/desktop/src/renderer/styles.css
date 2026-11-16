@@ -13,6 +13,7 @@
   --text-soft: #8a8885; /* the command description */
   --text-faint: #6b6a67; /* muted text */
   --accent: #d97757; /* waiting, key letters, focus, primary button */
+  --choice: #b8406a; /* the waiting dot of a question or a plan; the tray icon repeats it (main/tray-icon.ts) */
   --accent-tint: #d977572e; /* the pending-count badge */
   --danger: #e0796b; /* warnings, errors, removed diff lines */
   --danger-tint: #e0796b1a; /* removed diff lines */
@@ -46,15 +47,15 @@ body {
 }
 
 .session.selected { background: var(--raised); }
-/* The status marker (session-marker.ts): the shape differs besides the color. */
+/* The status marker (session-marker.ts): the shape differs besides the color, except between the
+   yes/no and the choice dot, which tell the kind of the request. */
 .marker { cursor: default; }
 .marker.tone-waiting { color: var(--accent); }
+.marker.tone-choice { color: var(--choice); }
 .marker.tone-released { color: var(--warning); }
 .marker.tone-working { color: var(--info); }
 .marker.tone-done { color: var(--success); }
 .marker.tone-idle { color: var(--text-faint); }
-/* A request from a run the user did not start interactively (request-source.ts `standsOut`): the waiting mark turns red. */
-.session.flagged .marker.tone-waiting { color: var(--danger); }
 
 /* Flex, so only the text is truncated (…), never the Remote Control dot. */
 .name { display: flex; align-items: baseline; min-width: 0; font-weight: 600; }

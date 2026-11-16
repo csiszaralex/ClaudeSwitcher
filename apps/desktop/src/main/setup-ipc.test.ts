@@ -5,7 +5,7 @@ import type { HotkeySwitch } from './hotkey.js'
 import type { SettingsSnapshot } from './settings-service.js'
 import { parseSaveRequest, saveSetup, setupState, type SaveRequest } from './setup-ipc.js'
 
-const VALUES: SettingValues = { autostart: true, hideAfterLastDecision: true, jumpToTab: true, checkForUpdates: true, hotkey: 'Shift+Alt+Space' }
+const VALUES: SettingValues = { autostart: true, hideAfterLastDecision: true, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true, hotkey: 'Shift+Alt+Space' }
 
 describe('parseSaveRequest', () => {
   it('accepts a valid request', () => {
@@ -141,7 +141,7 @@ describe('setupState', () => {
     const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(['jumpToTab']), installed: true }
     expect(setupState(snapshot, { hotkey, integration: { kind: 'stale', missing: ['Stop'], tokenMismatch: false }, showAll: true })).toEqual({
       values: VALUES,
-      ask: ['autostart', 'hideAfterLastDecision', 'checkForUpdates', 'hotkey'],
+      ask: ['autostart', 'hideAfterLastDecision', 'notifyOnRequest', 'notifyOnFinish', 'checkForUpdates', 'hotkey'],
       installed: true,
       hotkey,
       integration: 'stale',
@@ -183,7 +183,7 @@ describe('setupState', () => {
   it('never asks for an installed-only setting in a repo build, and never for the integration', () => {
     const snapshot: SettingsSnapshot = {
       values: VALUES,
-      confirmed: new Set(['hideAfterLastDecision', 'jumpToTab', 'hotkey']),
+      confirmed: new Set(['hideAfterLastDecision', 'jumpToTab', 'notifyOnRequest', 'notifyOnFinish', 'hotkey']),
       installed: false,
     }
     const state = setupState(snapshot, { hotkey, integration: { kind: 'not-installed' }, showAll: false })

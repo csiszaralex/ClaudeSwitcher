@@ -15,8 +15,8 @@ const api: ClaudeSwitcherApi = {
   decide: (id, decision) => ipcRenderer.invoke(OVERLAY_CHANNELS.decide, id, decision),
   settings: () => ipcRenderer.invoke(OVERLAY_CHANNELS.settings),
   onShown: (callback) => {
-    const listener = (): void => {
-      callback()
+    const listener = (_event: unknown, preferred: unknown): void => {
+      callback(typeof preferred === 'string' ? preferred : undefined)
     }
     ipcRenderer.on(OVERLAY_CHANNELS.shown, listener)
     return () => {

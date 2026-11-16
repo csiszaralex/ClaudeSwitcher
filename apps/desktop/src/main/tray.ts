@@ -1,16 +1,13 @@
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { Menu, Tray, app, nativeImage, type MenuItemConstructorOptions } from 'electron'
+import { Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
 import { INSTALLED_ONLY_NOTE, SETTINGS, isInstalledOnly, type BooleanSettingKey, type SettingDefinition } from '../shared/settings.js'
 import { hotkeyLabel, type HotkeyRegistration } from '../shared/hotkey-status.js'
-import { resourcesDir } from './resources.js'
 import type { SettingsSnapshot } from './settings-service.js'
-
-const dirname = path.dirname(fileURLToPath(import.meta.url))
-const resources = resourcesDir(app.isPackaged, process.resourcesPath, dirname)
+import { trayIconPng, trayLook, type TrayLook } from './tray-icon.js'
+import { IDLE_TRAY_STATE, trayTooltip, type TrayState } from './tray-state.js'
 
 export interface TrayHandle {
-  setWaiting(count: number): void
+  /** Shows the state (`trayState`) on the icon and in the tooltip; cheap to call on every tick. */
+  setState(state: TrayState): void
   /** A warning line in the menu (an outdated integration); clicking it calls `onNotice`. `undefined` removes it. */
   setNotice(text: string | undefined): void
   /** The update line at the top of the menu (`updateLabel`); clicking it calls `onUpdate`. `undefined` removes it. */
@@ -33,17 +30,17 @@ function isBooleanSetting(setting: SettingDefinition): setting is SettingDefinit
 const TOGGLES = SETTINGS.filter(isBooleanSetting)
 
 /**
- * Loads an icon, and fails loudly if it is empty.
+ * Makes the image of a look, and fails loudly if it is empty.
  *
- * `nativeImage.createFromPath` does NOT throw on a missing or broken file but returns an empty
- * image, and a tray icon created with an empty image is invisible on Windows. The app would run and
- * the user could not find it: a silent failure in an app whose only entry point is the tray icon.
- * The throw reaches the `app.whenReady()` error handler, which shows an error dialog.
+ * `nativeImage.createFromBuffer` does NOT throw on data it cannot decode but returns an empty image,
+ * and a tray icon created with an empty image is invisible on Windows. The app would run and the
+ * user could not find it: a silent failure in an app whose only entry point is the tray icon. The
+ * first image is made in `createTray`, so this throw reaches the `app.whenReady()` error handler,
+ * which shows an error dialog.
  */
-function loadIcon(file: string): Electron.NativeImage {
-  const iconPath = path.join(resources, file)
-  const image = nativeImage.createFromPath(iconPath)
-  if (image.isEmpty()) throw new Error(`Tray icon missing or unreadable: ${iconPath}`)
+function iconImage(look: TrayLook): Electron.NativeImage {
+  const image = nativeImage.createFromBuffer(trayIconPng(look))
+  if (image.isEmpty()) throw new Error(`Tray icon could not be made: ${JSON.stringify(look)}`)
   return image
 }
 
@@ -68,10 +65,25 @@ export function createTray(options: {
   /** The update line was clicked: install the downloaded update. */
   onUpdate: () => void
 }): TrayHandle {
-  const idle = loadIcon('tray.png')
-  const waiting = loadIcon('tray-waiting.png')
+  // One image per look, made once: the tick asks for the same few images again and again.
+  const images = new Map<string, Electron.NativeImage>()
+  const imageOf = (look: TrayLook): Electron.NativeImage => {
+    const key = JSON.stringify(look)
+    let image = images.get(key)
+    if (image === undefined) {
+      image = iconImage(look)
+      images.set(key, image)
+    }
+    return image
+  }
+  // The first tick follows right after `createTray` (`syncTray` in index.ts); until then, idle.
+  let shownLook = JSON.stringify(trayLook(IDLE_TRAY_STATE, false))
+  let shownTooltip = trayTooltip(IDLE_TRAY_STATE)
+  // The flash alternates on each `setState`, that is on each one-second tick.
+  let flashOn = false
 
-  const tray = new Tray(idle)
+  const tray = new Tray(imageOf(trayLook(IDLE_TRAY_STATE, false)))
+  tray.setToolTip(shownTooltip)
   // The menu is rebuilt on every change (update, notice, settings, hotkey), so its state lives here:
   // otherwise a rebuilt menu would show the startup state, not what holds now.
   let settings = options.settings
@@ -127,15 +139,21 @@ export function createTray(options: {
   tray.setContextMenu(buildMenu())
   tray.on('click', options.onOpen)
 
-  let lastCount = -1
   return {
-    setWaiting(count) {
-      if (count === lastCount) return
-      lastCount = count
-      tray.setImage(count > 0 ? waiting : idle)
-      tray.setToolTip(
-        count > 0 ? `ClaudeSwitcher: ${count} session vár rád` : 'ClaudeSwitcher',
-      )
+    setState(state) {
+      if (destroyed) return
+      flashOn = state.flash && !flashOn
+      const look = trayLook(state, flashOn)
+      const lookKey = JSON.stringify(look)
+      if (lookKey !== shownLook) {
+        shownLook = lookKey
+        tray.setImage(imageOf(look))
+      }
+      const tooltip = trayTooltip(state)
+      if (tooltip !== shownTooltip) {
+        shownTooltip = tooltip
+        tray.setToolTip(tooltip)
+      }
     },
     setNotice(text) {
       if (destroyed || text === notice) return

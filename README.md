@@ -65,17 +65,26 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 ### The tray
 
-The tray icon changes when a session waits for you, and its tooltip says how many. Clicking the icon opens the list. The right-click menu:
+The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). When a session has finished its turn (the ✓ in the list) and you have not opened it since, the icon turns green, or, while something waits, gets a green ring around the waiting colour. Opening that session from the list (Enter, or a double click) clears its mark; so does its next turn. When a request the app can still decide has waited longer than 540 seconds, the icon flashes, about once a second, between its normal image and a red dot with a white exclamation mark: the app lets go of the request at 590 seconds (see [Deciding a request](#deciding-a-request)). The flashing stops when no such request is left. The tooltip says how many sessions wait, adds **"választásra vár"** (waits for a choice) for a burgundy icon, and **"N végzett"** (N finished) for the finished sessions not opened yet. Clicking the icon opens the list. The right-click menu:
 
 - **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded and not skipped; see [Updating](#updating).
 - **"Megnyitás"** (open): opens the list.
 - **"Gyorsbillentyű: Shift+Alt+Space"** (hotkey): the hotkey in effect, or what is wrong with it if it could not be registered.
 - **"Beállítások…"** (settings): the settings window, with the integration section.
 - **"Napló megnyitása"** (open the log): opens the log file in your default text editor. The app writes its diagnostic lines, and any uncaught error, to `%APPDATA%\@claudeswitcher\desktop\logs\claudeswitcher.log`. At 1 MiB the file moves to `claudeswitcher.old.log` (replacing the previous one) and a new one starts. The first line of a run names the version. Send the file in when reporting a problem.
-- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Frissítések keresése"** (check for updates, see [Updating](#updating)). All four are on by default.
+- The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Értesítés engedélykérésnél"** (notify on a permission request), **"Értesítés, ha egy session végzett"** (notify when a session finished), **"Frissítések keresése"** (check for updates, see [Updating](#updating)). All are on by default except the notification for a finished session; see [Notifications](#notifications).
 - **"Kilépés"** (quit).
 
 If the installed integration is out of date, a line **"Integráció elavult, telepítsd újra"** (integration out of date, install again) appears in the menu, with the reason in brackets: **"hiányzó hook"** (a newer version expects a hook the old install lacks) or **"rossz token"** (the token in `settings.json` is not the app's, for example in a `settings.json` brought from another machine; every hook would then be rejected). Clicking the line opens the settings window, where **"Telepítés"** fixes it.
+
+### Notifications
+
+With the list closed, a Windows toast tells you when a session needs you, so a request does not wait unseen:
+
+- **"Értesítés engedélykérésnél"** (on by default): a toast **"<session> engedélyt kér"** (asks for permission) for every new permission request. The text is the request as the row shows it, with the source label first when the source stands out (for example `claude -p · Bash: pnpm test`). A second request of the same session notifies again.
+- **"Értesítés, ha egy session végzett"** (off by default): a toast **"<session> végzett"** (finished) when a session ends its turn, with the start of its last answer. It is off because every turn ends this way, which is noisy with many sessions.
+
+Both can be switched in the tray and in the settings window, and take effect at once. Clicking a toast opens the list with that session selected. Nothing is shown while the list is open, and a request that was already waiting when the app started does not notify (the tray icon shows it). Windows "Do not disturb" (Focus) and full-screen rules can hold a toast back; it then waits in the notification centre. Toasts are meant for the installed app: a repo build may show none, and the log says when toasts are unsupported.
 
 ### The list
 
@@ -83,7 +92,8 @@ The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"
 
 | Marker | Meaning |
 |---|---|
-| ● | "Válaszra vár": waiting for you |
+| ● (orange) | "Válaszra vár": waiting for you, with a yes or a no |
+| ● (burgundy) | "Választásra vár": waiting for a choice, a question or a plan |
 | ◐ | "Dolgozik": working |
 | ✓ | "Épp végzett": just finished |
 | ○ | "Tétlen": idle |
@@ -100,11 +110,11 @@ Selecting a waiting session opens its request. What you can do depends on the re
 - **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer).
 - **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there.
 
-Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag and a red waiting mark, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
+Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
 
 The letter keys do not fire for a short moment after a panel appears, on key repeat, or within a moment after you typed in a text field.
 
-The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. The prompt in VS Code stays and can still be answered there.
+The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. From 540 seconds on, the tray icon flashes to warn you. The prompt in VS Code stays and can still be answered there.
 
 ## Uninstall
 

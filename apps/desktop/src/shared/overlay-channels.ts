@@ -13,7 +13,10 @@ export const OVERLAY_CHANNELS = {
   focusSession: 'session:focus',
   hide: 'overlay:hide',
   settings: 'settings:get',
-  /** Pushed by the main process when the overlay window is shown. */
+  /**
+   * Pushed by the main process when the overlay window is shown. The optional argument is the
+   * session id to select (a clicked notification); the renderer reads it with a check.
+   */
   shown: 'overlay:shown',
 } as const
 

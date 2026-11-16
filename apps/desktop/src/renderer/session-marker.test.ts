@@ -10,7 +10,7 @@ const session = (status: Status, stoppedAt?: number): { status: Status; stoppedA
 
 describe('statusMarker', () => {
   it('shows a held decision as waiting for a reply', () => {
-    expect(statusMarker(session('waiting'), [{ released: false }]).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'tool' as const }]).tone).toBe('waiting')
   })
 
   it('shows a Notification wait (no held decision) as waiting too', () => {
@@ -18,12 +18,43 @@ describe('statusMarker', () => {
   })
 
   it('shows a released decision differently: only VS Code or the phone can answer it now', () => {
-    expect(statusMarker(session('waiting'), [{ released: true }]).tone).toBe('released')
+    expect(statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }]).tone).toBe('released')
   })
 
   it('prefers a still-held decision over a released one of the same session', () => {
     // While there is a request the app can decide, that is the more important sign.
-    expect(statusMarker(session('waiting'), [{ released: true }, { released: false }]).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }, { released: false, kind: 'tool' as const }]).tone).toBe('waiting')
+  })
+
+  it('shows a held question or plan in the choice tone, a held command or edit in the yes/no tone', () => {
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'question' }]).tone).toBe('choice')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'plan' }]).tone).toBe('choice')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'tool' }]).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'edit' }]).tone).toBe('waiting')
+  })
+
+  it('shows a row with one choice request among yes/no ones in the choice tone', () => {
+    const decisions = [
+      { released: false, kind: 'tool' as const },
+      { released: false, kind: 'question' as const },
+    ]
+    expect(statusMarker(session('waiting'), decisions).tone).toBe('choice')
+  })
+
+  it('ignores a released choice request: the held yes/no one decides the tone', () => {
+    const decisions = [
+      { released: true, kind: 'plan' as const },
+      { released: false, kind: 'edit' as const },
+    ]
+    expect(statusMarker(session('waiting'), decisions).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: true, kind: 'plan' as const }]).tone).toBe('released')
+  })
+
+  it('gives the choice dot its own Hungarian tooltip', () => {
+    const choice = statusMarker(session('waiting'), [{ released: false, kind: 'question' }])
+    const yesNo = statusMarker(session('waiting'), [{ released: false, kind: 'tool' }])
+    expect(choice.title.trim()).not.toBe('')
+    expect(choice.title).not.toBe(yesNo.title)
   })
 
   it('shows a running session as working', () => {
@@ -46,7 +77,7 @@ describe('statusMarker', () => {
   it('gives every state its own glyph and a Hungarian tooltip', () => {
     const markers = [
       statusMarker(session('waiting'), []),
-      statusMarker(session('waiting'), [{ released: true }]),
+      statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }]),
       statusMarker(session('working'), []),
       statusMarker(session('idle', 1), []),
       statusMarker(session('idle'), []),
@@ -90,7 +121,7 @@ describe('releasedMessage', () => {
 })
 
 describe('statusMarker released tooltip', () => {
-  const released = [{ released: true }]
+  const released = [{ released: true, kind: 'tool' as const }]
 
   it('mentions the phone only for a session with Remote Control', () => {
     const plain = statusMarker({ status: 'waiting' }, released)

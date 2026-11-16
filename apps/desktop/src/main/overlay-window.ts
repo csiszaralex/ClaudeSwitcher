@@ -10,8 +10,12 @@ import { RELOAD_LIMIT, RELOAD_WINDOW_MS, createReloadLimiter } from './reload-li
  * member is a function property, so it can be passed on unbound.
  */
 export interface OverlayController {
-  /** Shows the overlay on the cursor's display. Does nothing while quitting. */
-  readonly show: () => void
+  /**
+   * Shows the overlay on the cursor's display. Does nothing while quitting. With `selectSessionId`
+   * the list opens on that session (a notification was clicked), otherwise on the one waiting
+   * longest. Its parameter is optional, so it still fits `() => void` where it is passed on.
+   */
+  readonly show: (selectSessionId?: string) => void
   /** Hides a visible overlay, otherwise shows it (`show`). */
   readonly toggle: () => void
   /** Hides the overlay if it still exists. */
@@ -41,6 +45,16 @@ export function createOverlayController(options: {
   const allowRendererReload = createReloadLimiter()
   /** The `onHidden` listeners; every window `createOverlay` makes calls them. */
   const hiddenListeners: (() => void)[] = []
+  /** The session to select on the next `shown` signal; `show` sets it, the window's `show` event sends and clears it. */
+  let preferredSessionId: string | undefined
+
+  /** The `shown` signal, with the preferred session when there is one (the renderer reads it with a check). */
+  function sendShown(window: BrowserWindow): void {
+    const preferred = preferredSessionId
+    preferredSessionId = undefined
+    if (preferred === undefined) window.webContents.send(OVERLAY_CHANNELS.shown)
+    else window.webContents.send(OVERLAY_CHANNELS.shown, preferred)
+  }
 
   function createOverlay(): BrowserWindow {
     const window = new BrowserWindow({
@@ -67,7 +81,7 @@ export function createOverlayController(options: {
     // `focus()` (see `bringToFront`), and Chromium's visibility signal depends on window occlusion
     // tracking. `show` always fires when the window really becomes visible, and only then.
     window.on('show', () => {
-      window.webContents.send(OVERLAY_CHANNELS.shown)
+      sendShown(window)
     })
     window.on('hide', () => {
       for (const listener of hiddenListeners) listener()
@@ -112,13 +126,16 @@ export function createOverlayController(options: {
 
   let overlay = createOverlay()
 
-  const show = (): void => {
+  const show = (selectSessionId?: string): void => {
     // While quitting, no new window is created and the old one is not shown.
     if (options.isQuitting()) return
     // Since the `close` handler, the overlay is destroyed only on quit. If it was destroyed anyway
     // (by an unknown path), a new window is better than an "Object has been destroyed" exception.
     if (overlay.isDestroyed()) overlay = createOverlay()
     const window = overlay
+    // A window that is visible already fires no `show` event again, so the signal goes out here.
+    const alreadyVisible = window.isVisible()
+    preferredSessionId = selectSessionId
     // If the renderer stayed dead because of the limit, opening retries (also within the limit).
     if (window.webContents.isCrashed() && allowRendererReload()) window.reload()
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
@@ -128,6 +145,7 @@ export function createOverlayController(options: {
     window.setBounds(overlayBounds(display.workArea))
     window.show()
     window.focus()
+    if (alreadyVisible) sendShown(window)
   }
 
   return {

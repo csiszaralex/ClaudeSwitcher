@@ -1,5 +1,7 @@
-// Generates the installer and exe icon (`resources/icon.png`, 256x256) from the 16x16 tray icon,
-// scaled up nearest-neighbour so the pixel art stays sharp. electron-builder needs at least 256x256.
+// Generates the installer and exe icon (`resources/icon.png`, 256x256) from the 16x16 idle tray icon
+// (`resources/tray.png`), scaled up nearest-neighbour so the pixel art stays sharp. electron-builder
+// needs at least 256x256. The running tray draws its icons itself (`src/main/tray-icon.ts`);
+// `tray-icon.test.ts` checks that its idle icon equals `tray.png`.
 // Run once from `apps/desktop`: `node scripts/make-icon.mjs`. The output is committed.
 //
 // Handles only what `resources/tray.png` is: 8-bit RGBA, non-interlaced. Anything else throws.

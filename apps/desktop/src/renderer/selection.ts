@@ -75,12 +75,17 @@ function firstWaiting(
  * The selection when the overlay appears: the session waiting longest, matching the user's flow
  * "open it, decide the oldest". It jumps to a released request only if nothing else waits (see
  * `firstWaiting`). If nobody waits, the current selection stays.
+ *
+ * `preferred` is the session a clicked notification asked for: it wins if it is still in the list.
+ * Otherwise (it ended meanwhile) the rule above applies.
  */
 export function selectOnShow(
   sessions: readonly SessionLike[],
   decisions: readonly DecisionLike[],
   current: string | undefined,
+  preferred?: string,
 ): string | undefined {
+  if (preferred !== undefined && sessions.some((s) => s.sessionId === preferred)) return preferred
   return firstWaiting(sessions, decisions) ?? current
 }
 

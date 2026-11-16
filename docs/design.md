@@ -170,7 +170,7 @@ test and the permission spike).
   app and showed as a normal waiting row, indistinguishable from a VS Code session's (the VS Code
   session in the same folder: `entrypoint: "claude-vscode"`, `kind: "interactive"`). The SDK
   runs (`sdk-ts`, `sdk-py`) were not measured. The app labels a request from the `entrypoint`
-  (`renderer/request-source.ts`) and does not read `kind`.
+  (`shared/request-source.ts`) and does not read `kind`.
 - **Subagent transcripts** are in a separate file: `<session>/subagents/agent-<id>.jsonl`
   (`isSidechain: true`, `agentId`, with the **parent's** `sessionId`); they are not in the main
   transcript.
@@ -300,8 +300,9 @@ cannot be an ES module), and the workspace packages are built into the main proc
 owner, and the lifecycle is simpler. The module boundary is there, though, in case it has to be
 moved out later.
 
-**Form factor:** a tray icon + a global hotkey overlay. Normally invisible; the tray badge shows
-the number of waiting sessions, and the hotkey brings up a compact list.
+**Form factor:** a tray icon + a global hotkey overlay. Normally invisible; the tray icon's colour
+shows what waits and its tooltip the number of waiting sessions (README, "The tray"), and the
+hotkey brings up a compact list.
 
 **Keys** (`App.tsx` `onKey`, `decision-actions.ts` `SHORTCUTS`; since changed: the shortcut table
 is now `ACTION_BUTTONS`, read by `shortcutFor`):

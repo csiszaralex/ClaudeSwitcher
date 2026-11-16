@@ -1,8 +1,8 @@
 import { flatText, isRecord, lastPathSegment, truncate } from './guards.js'
 
 /**
- * The longest a running tool's detail may be. The row summary stops at `ROW_TEXT_MAX` (renderer
- * `format.ts`) anyway, and the tool's (and the subagent's) name comes before the detail.
+ * The longest a running tool's detail may be. The row summary stops at `ROW_TEXT_MAX` (desktop
+ * `shared/row-text.ts`) anyway, and the tool's (and the subagent's) name comes before the detail.
  */
 export const TOOL_DETAIL_MAX = 60
 
