@@ -4,6 +4,10 @@ import { hotkeyLabel, type HotkeyRegistration } from '../shared/hotkey-status.js
 import type { SettingsSnapshot } from './settings-service.js'
 import { trayIconPng, trayLook, type TrayLook } from './tray-icon.js'
 import { IDLE_TRAY_STATE, trayTooltip, type TrayState } from './tray-state.js'
+import { manualCheckLabel, type ManualCheckState } from './updater.js'
+
+/** The manual update check's menu item: `hidden` without an updater (a repo build). */
+type UpdateCheckItem = ManualCheckState | 'hidden'
 
 export interface TrayHandle {
   /** Shows the state (`trayState`) on the icon and in the tooltip; cheap to call on every tick. */
@@ -12,6 +16,8 @@ export interface TrayHandle {
   setNotice(text: string | undefined): void
   /** The update line at the top of the menu (`updateLabel`); clicking it calls `onUpdate`. `undefined` removes it. */
   setUpdate(text: string | undefined): void
+  /** The manual update check's item (`manualCheckLabel`); clicking it calls `onCheckUpdate`. Hidden at first. */
+  setUpdateCheck(state: UpdateCheckItem): void
   /** Shows the current settings; the setup window can change them while the tray is open. */
   setSettings(snapshot: SettingsSnapshot): void
   /** Shows the hotkey that now holds, after a live switch. */
@@ -64,6 +70,8 @@ export function createTray(options: {
   onNotice: () => void
   /** The update line was clicked: install the downloaded update. */
   onUpdate: () => void
+  /** The manual update check's item was clicked. */
+  onCheckUpdate: () => void
 }): TrayHandle {
   // One image per look, made once: the tick asks for the same few images again and again.
   const images = new Map<string, Electron.NativeImage>()
@@ -84,12 +92,13 @@ export function createTray(options: {
 
   const tray = new Tray(imageOf(trayLook(IDLE_TRAY_STATE, false)))
   tray.setToolTip(shownTooltip)
-  // The menu is rebuilt on every change (update, notice, settings, hotkey), so its state lives here:
+  // The menu is rebuilt on every change (update, update check, notice, settings, hotkey), so its state lives here:
   // otherwise a rebuilt menu would show the startup state, not what holds now.
   let settings = options.settings
   let hotkey = options.hotkey
   let notice: string | undefined
   let update: string | undefined
+  let updateCheck: UpdateCheckItem = 'hidden'
   let destroyed = false
 
   const toggleItem = (setting: SettingDefinition & { key: BooleanSettingKey }): MenuItemConstructorOptions => {
@@ -115,6 +124,12 @@ export function createTray(options: {
   const updateItems = (): MenuItemConstructorOptions[] =>
     update === undefined ? [] : [{ label: update, click: options.onUpdate }, { type: 'separator' }]
 
+  // Disabled while its check runs: a second click would only wait for the same outcome.
+  const updateCheckItems = (): MenuItemConstructorOptions[] =>
+    updateCheck === 'hidden'
+      ? []
+      : [{ label: manualCheckLabel(updateCheck), enabled: updateCheck === 'idle', click: options.onCheckUpdate }]
+
   const buildMenu = (): Menu =>
     Menu.buildFromTemplate([
       ...updateItems(),
@@ -125,6 +140,7 @@ export function createTray(options: {
       { label: hotkeyLabel(hotkey), enabled: false },
       { label: 'Beállítások…', click: options.onSettings },
       { label: 'Napló megnyitása', click: options.onOpenLog },
+      ...updateCheckItems(),
       { type: 'separator' },
       ...TOGGLES.map(toggleItem),
       { type: 'separator' },
@@ -163,6 +179,11 @@ export function createTray(options: {
     setUpdate(text) {
       if (destroyed || text === update) return
       update = text
+      rebuild()
+    },
+    setUpdateCheck(state) {
+      if (destroyed || state === updateCheck) return
+      updateCheck = state
       rebuild()
     },
     setSettings(snapshot) {

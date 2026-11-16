@@ -4,7 +4,8 @@
  * and every `UPDATE_CHECK_INTERVAL_MS` while the `checkForUpdates` setting is on, downloads a new
  * release in the background unless the user skipped that version, and offers it in the tray
  * (`updateLabel`) and once per run in a popup (`updatePrompt`). It installs only on the user's
- * choice, never on its own: the user may be deciding a request.
+ * choice, never on its own: the user may be deciding a request. The tray item
+ * `manualCheckLabel('idle')` checks on the user's request (`checkNow`), whatever the setting.
  */
 
 /** How often the installed app looks for a new release while `checkForUpdates` is on. */
@@ -13,6 +14,34 @@ export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 /** The tray line of a downloaded update; clicking it installs the update. */
 export function updateLabel(version: string): string {
   return `Frissítés elérhető (${version}), telepítés`
+}
+
+/** The manual check's tray item: `idle` offers it, `busy` while its check (or download) runs. */
+export type ManualCheckState = 'idle' | 'busy'
+
+/**
+ * The label of the manual check's tray item. Not "Frissítések keresése": that is the label of the
+ * `checkForUpdates` toggle in the same menu.
+ */
+export function manualCheckLabel(state: ManualCheckState): string {
+  return state === 'idle' ? 'Frissítés keresése most' : 'Frissítés keresése…'
+}
+
+/** The answer to a manual check that has nothing to offer: `latest` (nothing newer) or `failed`. */
+export type UpdateNotice = 'latest' | 'failed'
+
+/** The box of an `UpdateNotice` as `dialog.showMessageBox` options (the part of `MessageBoxOptions` it sets). */
+export interface UpdateNoticeOptions {
+  type: 'info' | 'warning'
+  title: string
+  message: string
+}
+
+/** The box answering a manual check; `currentVersion` is this app's version. */
+export function updateNotice(notice: UpdateNotice, currentVersion: string): UpdateNoticeOptions {
+  return notice === 'latest'
+    ? { type: 'info', title: 'ClaudeSwitcher', message: `A legfrissebb verzió fut (${currentVersion}).` }
+    : { type: 'warning', title: 'ClaudeSwitcher', message: 'Nem sikerült ellenőrizni a frissítést. Részletek a naplóban.' }
 }
 
 /** What the user chose in the update popup. */
@@ -99,9 +128,21 @@ export interface UpdateController {
   readonly setEnabled: (enabled: boolean) => void
   /** The tray line (or "Frissítés most" in the popup): quits and installs the downloaded update. */
   readonly install: () => void
-  /** The quit cleanup: no check, no download, no tray update, no popup and no install after this. */
+  /**
+   * The tray item `manualCheckLabel('idle')`: with a downloaded update on offer, its popup again;
+   * otherwise a check now, whatever the setting, that offers a skipped version too. It ends in the
+   * popup or in an `UpdateNotice` box.
+   */
+  readonly checkNow: () => void
+  /** The quit cleanup: no check, no download, no tray update, no popup, no box and no install after this. */
   readonly stop: () => void
 }
+
+/**
+ * How a check (with its download) ended: `downloaded` (on offer), `none` (nothing newer), `skipped`
+ * (it found the skipped version and left it), `failed` (logged), or `stopped` (quit meanwhile).
+ */
+type CheckOutcome = 'downloaded' | 'none' | 'skipped' | 'failed' | 'stopped'
 
 export function createUpdateController(deps: {
   updater: Updater
@@ -114,9 +155,13 @@ export function createUpdateController(deps: {
   onOffer: (version: string | undefined) => void
   /** Shows the update popup (`updatePrompt`) and resolves with the user's choice. */
   prompt: (version: string) => Promise<UpdateChoice>
+  /** Shows the box of a manual check (`updateNotice`); resolves once it is closed. */
+  notify: (notice: UpdateNotice) => Promise<unknown>
+  /** The manual check's tray item changed (`manualCheckLabel`); called with `idle` at creation. */
+  onManualCheck: (state: ManualCheckState) => void
   /**
-   * Whether the overlay is visible. The overlay hides on blur, so a popup taking the focus would
-   * close it while the user decides a request: the popup waits until the overlay is hidden.
+   * Whether the overlay is visible. The overlay hides on blur, so a popup or box taking the focus
+   * would close it while the user decides a request: they wait until the overlay is hidden.
    */
   overlayVisible: () => boolean
   /** Registers a listener for the overlay being hidden. */
@@ -141,16 +186,27 @@ export function createUpdateController(deps: {
     })
 
   let stopTimer: (() => void) | undefined
-  let checking = false
-  /** The downloaded version on offer (the tray line, `install`). A skipped version is never on offer. */
+  /** The check (and its download) running now: one at a time, automatic or manual. */
+  let running: Promise<CheckOutcome> | undefined
+  /**
+   * The downloaded version on offer (the tray line, `install`). A skipped version is on offer only
+   * after a manual check downloaded it.
+   */
   let downloaded: string | undefined
   let skipped = deps.skippedVersion
+  /** The skipped version a manual check downloads now: `update-downloaded` offers it all the same. */
+  let offeringSkipped: string | undefined
   let stopped = false
-  /** The versions this run has queued a popup for: one popup per run per version. */
+  /** The versions this run has queued a popup for: on its own, one popup per run per version. */
   const prompted = new Set<string>()
-  /** The version whose popup waits for the overlay to hide or for the open popup to close. */
+  /** The version whose popup waits for the overlay to hide or for the open dialog to close. */
   let pendingPrompt: string | undefined
-  let prompting = false
+  /** The manual check's box, waiting the same way. */
+  let pendingNotice: UpdateNotice | undefined
+  /** The version of the open popup, while the open dialog is the popup. */
+  let openPrompt: string | undefined
+  let dialogOpen = false
+  let manualBusy = false
 
   // Installing only on the user's choice: a normal quit must not install (`addQuitHandler` in
   // electron-updater's BaseUpdater installs on quit only while `autoInstallOnAppQuit` is on).
@@ -159,30 +215,41 @@ export function createUpdateController(deps: {
   updater.autoInstallOnAppQuit = false
   updater.logger = log
   updater.on('update-downloaded', (info) => {
-    if (stopped || info.version === skipped) return
+    if (stopped || (info.version === skipped && info.version !== offeringSkipped)) return
     downloaded = info.version
     deps.onOffer(info.version)
     if (prompted.has(info.version)) return
     prompted.add(info.version)
     pendingPrompt = info.version
-    showPrompt()
+    showNext()
   })
   // Without a listener the emitter would throw on `error`. Logged only: the next check tries again.
   updater.on('error', (error) => {
     log.error(error)
   })
   deps.onOverlayHidden(() => {
-    showPrompt()
+    showNext()
   })
 
-  /** Shows the waiting popup: one at a time, never while the overlay is visible, none after stop. */
-  function showPrompt(): void {
-    if (stopped || prompting || pendingPrompt === undefined || deps.overlayVisible()) return
-    const version = pendingPrompt
+  /**
+   * Shows the waiting dialog, the popup before a box: one dialog at a time, never while the overlay
+   * is visible, none after stop.
+   */
+  function showNext(): void {
+    if (stopped || dialogOpen || deps.overlayVisible()) return
+    if (pendingPrompt !== undefined) showPrompt(pendingPrompt)
+    else if (pendingNotice !== undefined) showNotice(pendingNotice)
+  }
+
+  function showPrompt(version: string): void {
     pendingPrompt = undefined
-    prompting = true
-    deps
-      .prompt(version)
+    dialogOpen = true
+    openPrompt = version
+    // Called at once, but a synchronous throw becomes a rejection: otherwise `dialogOpen` would
+    // stay true and no dialog could show again in this run.
+    new Promise<UpdateChoice>((resolve) => {
+      resolve(deps.prompt(version))
+    })
       .then((choice) => {
         if (stopped) return
         switch (choice) {
@@ -190,9 +257,9 @@ export function createUpdateController(deps: {
             install()
             break
           case 'later':
-            // The tray line stays. electron-updater reports the cached download again after the
-            // next start's check (`DownloadedUpdateHelper.validateDownloadedPath`), so the popup
-            // comes back then.
+            // The tray line stays. The popup comes back on the manual check's tray item (`checkNow`),
+            // or after the next start's check: electron-updater reports the cached download again
+            // (`DownloadedUpdateHelper.validateDownloadedPath`).
             break
           case 'skip':
             skip(version)
@@ -203,47 +270,171 @@ export function createUpdateController(deps: {
         log.error(error)
       })
       .finally(() => {
-        prompting = false
-        showPrompt()
+        dialogOpen = false
+        openPrompt = undefined
+        showNext()
       })
   }
 
-  /** Skips `version`: its tray line goes, and it is never downloaded or offered again. */
-  function skip(version: string): void {
-    skipped = version
-    log.info(`skipping version ${version}`)
-    deps.saveSkipped(version).catch((error: unknown) => {
-      log.error(error)
+  function showNotice(notice: UpdateNotice): void {
+    pendingNotice = undefined
+    dialogOpen = true
+    // As in `showPrompt`: a synchronous throw must not leave `dialogOpen` set.
+    new Promise<unknown>((resolve) => {
+      resolve(deps.notify(notice))
     })
+      .catch((error: unknown) => {
+        log.error(error)
+      })
+      .finally(() => {
+        dialogOpen = false
+        showNext()
+      })
+  }
+
+  /**
+   * Skips `version`: its tray line goes, and the automatic checks never download or offer it again
+   * (a manual check still does). Skipping the skipped version again saves nothing.
+   */
+  function skip(version: string): void {
+    log.info(`skipping version ${version}`)
+    if (skipped !== version) {
+      skipped = version
+      deps.saveSkipped(version).catch((error: unknown) => {
+        log.error(error)
+      })
+    }
     if (downloaded === version) {
       downloaded = undefined
       deps.onOffer(undefined)
     }
   }
 
-  /**
-   * One check (and its download) at a time; none while a downloaded update waits for the user. A
-   * skipped update is not on offer, so the checks go on and find the next release.
-   */
-  const check = (): void => {
-    if (stopped || checking || downloaded !== undefined) return
-    checking = true
-    updater
-      .checkForUpdates()
-      .then((result) => {
-        if (stopped || result === null || !result.isUpdateAvailable) return
-        const { version } = result.updateInfo
-        if (version === skipped) {
-          log.info(`version ${version} is skipped; not downloading it`)
-          return
-        }
-        return updater.downloadUpdate()
-      })
-      .catch((error: unknown) => {
+  /** Runs `work` as the one running check; a rejection is logged and ends as `failed`. */
+  function track(work: () => Promise<CheckOutcome>): Promise<CheckOutcome> {
+    const run: Promise<CheckOutcome> = work()
+      .catch((error: unknown): CheckOutcome => {
         log.error(error)
+        return 'failed'
       })
       .finally(() => {
-        checking = false
+        if (running === run) running = undefined
+      })
+    running = run
+    return run
+  }
+
+  /** A check and the download of what it found; `offerSkipped` (a manual check) downloads a skipped version too. */
+  async function checkAndDownload(offerSkipped: boolean): Promise<CheckOutcome> {
+    const result = await updater.checkForUpdates()
+    if (stopped) return 'stopped'
+    if (result === null) {
+      log.warn('the updater is inactive; nothing was checked')
+      return 'failed'
+    }
+    if (!result.isUpdateAvailable) return 'none'
+    const { version } = result.updateInfo
+    if (version === skipped && !offerSkipped) {
+      log.info(`version ${version} is skipped; not downloading it`)
+      return 'skipped'
+    }
+    return download(version)
+  }
+
+  /** Downloads `version`, the one the last check found. */
+  async function download(version: string): Promise<CheckOutcome> {
+    if (version === skipped) offeringSkipped = version
+    try {
+      await updater.downloadUpdate()
+    } finally {
+      offeringSkipped = undefined
+    }
+    if (stopped) return 'stopped'
+    // electron-updater 6.8.11 emits `update-downloaded` before `downloadUpdate` resolves: BaseUpdater
+    // `executeDownload` dispatches it in the `done` that AppUpdater `executeDownload` awaits, for a
+    // cached download as for a fresh one. So the version is on offer by now.
+    if (downloaded === version) return 'downloaded'
+    log.warn(`the download of ${version} finished without an update-downloaded event`)
+    return 'failed'
+  }
+
+  /**
+   * The automatic check: one check (and its download) at a time; none while a downloaded update
+   * waits for the user. A skipped update is not on offer, so the checks go on and find the next release.
+   */
+  const check = (): void => {
+    if (stopped || running !== undefined || downloaded !== undefined) return
+    void track(() => checkAndDownload(false))
+  }
+
+  /**
+   * The manual check's outcome. An automatic check running now is joined, not doubled: its outcome
+   * counts, except that a skipped version it left is downloaded now (the user asked).
+   */
+  async function manualOutcome(): Promise<CheckOutcome> {
+    if (running === undefined) return track(() => checkAndDownload(true))
+    const joined = await running
+    if (joined !== 'skipped' || stopped || skipped === undefined) return joined
+    const version = skipped
+    return track(() => download(version))
+  }
+
+  /** Queues the popup of `version` again, unless it is open or already waiting. */
+  function promptAgain(version: string): void {
+    if (openPrompt === version || pendingPrompt === version) return
+    prompted.add(version)
+    pendingPrompt = version
+    showNext()
+  }
+
+  /** Queues the box of `notice`; one manual check at a time, so at most one waits. */
+  function showNoticeLater(notice: UpdateNotice): void {
+    pendingNotice = notice
+    showNext()
+  }
+
+  function checkNow(): void {
+    if (stopped || manualBusy) return
+    if (downloaded !== undefined) {
+      promptAgain(downloaded)
+      return
+    }
+    manualBusy = true
+    deps.onManualCheck('busy')
+    void manualOutcome()
+      .then((outcome) => {
+        manualBusy = false
+        if (stopped) return
+        deps.onManualCheck('idle')
+        switch (outcome) {
+          case 'downloaded':
+            // `update-downloaded` queued the popup already, unless this run showed it before.
+            if (downloaded !== undefined) promptAgain(downloaded)
+            break
+          case 'none':
+            showNoticeLater('latest')
+            break
+          // A manual check downloads a skipped version, so `skipped` does not reach here; if it
+          // did, the user would still get an answer.
+          case 'skipped':
+          case 'failed':
+            showNoticeLater('failed')
+            break
+          case 'stopped':
+            break
+        }
+      })
+      .catch((error: unknown) => {
+        // A throwing `onManualCheck` (`showPrompt` and `showNotice` catch their own dialog's throw):
+        // logged, and the item is idle again, so the next click checks again.
+        log.error(error)
+        manualBusy = false
+        if (stopped) return
+        try {
+          deps.onManualCheck('idle')
+        } catch (resetError: unknown) {
+          log.error(resetError)
+        }
       })
   }
 
@@ -278,6 +469,7 @@ export function createUpdateController(deps: {
     updater.quitAndInstall(true, true)
   }
 
+  deps.onManualCheck('idle')
   let enabled = deps.enabled
   if (enabled) start()
 
@@ -289,9 +481,11 @@ export function createUpdateController(deps: {
       else halt()
     },
     install,
+    checkNow,
     stop: () => {
       stopped = true
       pendingPrompt = undefined
+      pendingNotice = undefined
       halt()
     },
   }

@@ -15,7 +15,8 @@ const pending = (
   id: string,
   sessionId: string,
   released = false,
-): { id: string; sessionId: string; released: boolean } => ({ id, sessionId, released })
+  createdAt = 0,
+): { id: string; sessionId: string; createdAt: number; released: boolean } => ({ id, sessionId, createdAt, released })
 
 describe('resolveSelectedIndex', () => {
   it('returns -1 for an empty list', () => {
@@ -65,9 +66,14 @@ describe('selectOnShow', () => {
     expect(selectOnShow(sessions, [], 'i', 'gone')).toBe('w1')
   })
 
-  it('selects the first waiting session: the daemon sorts the oldest wait first', () => {
+  it('selects the first waiting session in list order when no wait start is known', () => {
     const sessions = [view('w1', 'waiting'), view('w2', 'waiting'), view('i', 'idle')]
     expect(selectOnShow(sessions, [], 'i')).toBe('w1')
+  })
+
+  it('selects the longest waiting session wherever the list puts it', () => {
+    const sessions = [{ ...view('young', 'waiting'), waitingSince: 20 }, { ...view('old', 'waiting'), waitingSince: 10 }]
+    expect(selectOnShow(sessions, [], undefined)).toBe('old')
   })
 
   it('counts a session with a held decision as waiting even if its status lags', () => {
@@ -77,7 +83,7 @@ describe('selectOnShow', () => {
 
   it('does not jump to a session whose decisions are all released while another one waits', () => {
     // Because of `#pending` the daemon shows a session with a released request as `waiting` too,
-    // and sorts it first: so the status must not lift it back to tier 1.
+    // so the status must not lift it back to tier 1.
     const sessions = [view('r', 'waiting'), view('w', 'waiting')]
     expect(selectOnShow(sessions, [pending('d1', 'r', true), pending('d2', 'w')], 'w')).toBe('w')
   })
@@ -92,7 +98,7 @@ describe('selectOnShow', () => {
     expect(selectOnShow(sessions, [pending('d1', 'm', true), pending('d2', 'm')], undefined)).toBe('m')
   })
 
-  it('falls back to a released session only when nothing else waits, in list order', () => {
+  it('falls back to a released session only when nothing else waits, in list order between equal waits', () => {
     const sessions = [view('r1', 'waiting'), view('r2', 'waiting'), view('i', 'idle')]
     const decisions = [pending('d1', 'r1', true), pending('d2', 'r2', true)]
     expect(selectOnShow(sessions, decisions, 'i')).toBe('r1')
@@ -100,7 +106,27 @@ describe('selectOnShow', () => {
 
   it('keeps the current selection when nothing is waiting', () => {
     expect(selectOnShow([view('a', 'idle'), view('b', 'working')], [], 'b')).toBe('b')
-    expect(selectOnShow([view('a', 'idle')], [], undefined)).toBeUndefined()
+  })
+
+  it('pins the first row by its id when nothing is waiting and nothing (or a gone row) is selected', () => {
+    // An `undefined` selection would highlight whatever row is on top after the next reorder.
+    expect(selectOnShow([view('a', 'idle'), view('b', 'working')], [], undefined)).toBe('a')
+    expect(selectOnShow([view('a', 'idle'), view('b', 'working')], [], 'gone')).toBe('a')
+    expect(selectOnShow([], [], undefined)).toBeUndefined()
+  })
+
+  it('counts a held request from its arrival: a later Notification wait does not make it younger', () => {
+    // The request of `early` came first, but its permission_prompt Notification moved its `waitingSince` later.
+    const sessions = [{ ...view('late', 'waiting'), waitingSince: 12 }, { ...view('early', 'waiting'), waitingSince: 16 }]
+    const decisions = [pending('de', 'early', false, 10), pending('dl', 'late', false, 12)]
+    expect(selectOnShow(sessions, decisions, undefined)).toBe('early')
+  })
+
+  it('does not count an old released request as the wait of a fresh held one', () => {
+    // `mixed` carries the start of its released request as `waitingSince`, but what it holds is newer.
+    const sessions = [{ ...view('mixed', 'waiting'), waitingSince: 1 }, { ...view('steady', 'waiting'), waitingSince: 20 }]
+    const decisions = [pending('dr', 'mixed', true, 1), pending('dm', 'mixed', false, 50), pending('ds', 'steady', false, 20)]
+    expect(selectOnShow(sessions, decisions, undefined)).toBe('steady')
   })
 })
 
@@ -146,6 +172,21 @@ describe('nextAfterDecision', () => {
     const sessions = [view('r', 'waiting'), view('a', 'waiting'), view('w', 'waiting')]
     const decisions = [pending('dr', 'r', true), pending('da', 'a'), pending('dw', 'w')]
     expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'w', hide: false })
+  })
+
+  it('moves to the session whose held request is oldest, not the one with the earliest waitingSince', () => {
+    const sessions = [
+      { ...view('a', 'waiting'), waitingSince: 5 },
+      { ...view('mixed', 'waiting'), waitingSince: 1 },
+      { ...view('b', 'waiting'), waitingSince: 30 },
+    ]
+    const decisions = [
+      pending('da', 'a', false, 5),
+      pending('dr', 'mixed', true, 1),
+      pending('dm', 'mixed', false, 40),
+      pending('db', 'b', false, 30),
+    ]
+    expect(nextAfterDecision(sessions, decisions, pending('da', 'a', false, 5), true)).toEqual({ select: 'b', hide: false })
   })
 
   it('moves to a released-only session when nothing else waits, without hiding', () => {

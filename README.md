@@ -41,10 +41,18 @@ The installer installs for the current user only, without administrator rights, 
 The installed app looks for a new release at start-up and every 6 hours, and downloads it in the background. When it is ready, a **"Frissítés elérhető"** (update available) popup asks what to do, once the list is closed:
 
 - **"Frissítés most"** (update now): installs the update silently and starts the new version; the settings and the Claude Code integration stay. Requests still waiting are left to the prompts in VS Code.
-- **"Most ne"** (not now, also Enter and closing the popup): nothing happens. The update stays in the tray menu as **"Frissítés elérhető (<version>), telepítés"** (update available, install) at the top, where a click installs it the same way, and the popup comes back at the next start (while the checks are on).
-- **"Verzió kihagyása"** (skip this version): this version is never offered or downloaded again, not even after a restart. The next newer release is offered as usual.
+- **"Most ne"** (not now, also Enter and closing the popup): nothing happens. The update stays in the tray menu as **"Frissítés elérhető (<version>), telepítés"** (update available, install) at the top, where a click installs it the same way, and the popup comes back at the next start (while the checks are on) or on **"Frissítés keresése most"** (below).
+- **"Verzió kihagyása"** (skip this version): the automatic checks never offer or download this version again, not even after a restart. The next newer release is offered as usual. Only **"Frissítés keresése most"** still offers it.
 
-Nothing is installed without one of those two clicks. Turn the checks off with **"Frissítések keresése"** (check for updates) in the tray or the settings window. The first start after an update that adds a new setting shows the **"Első beállítás"** window once, for that setting.
+Nothing is installed without one of those two clicks. Turn the checks off with **"Frissítések keresése"** (check for updates) in the tray or the settings window.
+
+**"Frissítés keresése most"** (check for an update now) in the tray menu checks on request, even with the checks off. While it runs, the item reads **"Frissítés keresése…"** and cannot be clicked. When an update is already downloaded, it opens the popup again instead. Otherwise it ends in one of these, once the list is closed:
+
+- a newer release, even a skipped one: it is downloaded, and the popup above asks what to do. Skipping it again keeps it skipped;
+- nothing newer: a box says **"A legfrissebb verzió fut (<version>)."** (the latest version is running);
+- the check or the download fails: a box says **"Nem sikerült ellenőrizni a frissítést. Részletek a naplóban."** (could not check for an update, details in the log).
+
+If an automatic check is running at the click, the item waits for its result instead of starting a second check. The first start after an update that adds a new setting shows the **"Első beállítás"** window once, for that setting.
 
 ## First start
 
@@ -65,13 +73,14 @@ To undo it, open the same window and click **"Eltávolítás"** (remove). It rem
 
 ### The tray
 
-The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). When a session has finished its turn (the ✓ in the list) and you have not opened it since, the icon turns green, or, while something waits, gets a green ring around the waiting colour. Opening that session from the list (Enter, or a double click) clears its mark; so does its next turn. When a request the app can still decide has waited longer than 540 seconds, the icon flashes, about once a second, between its normal image and a red dot with a white exclamation mark: the app lets go of the request at 590 seconds (see [Deciding a request](#deciding-a-request)). The flashing stops when no such request is left. The tooltip says how many sessions wait, adds **"választásra vár"** (waits for a choice) for a burgundy icon, and **"N végzett"** (N finished) for the finished sessions not opened yet. Clicking the icon opens the list. The right-click menu:
+The tray icon is a grey dot while nothing waits. It turns orange when a session waits for a yes or a no, and burgundy when a request waits for a choice: a question to answer or a plan to review (burgundy wins when both wait). When a session has finished its turn and you have not opened it since (the green ✓ in the list), the icon turns green, or, while something waits, gets a green ring around the waiting colour. Opening that session from the list (Enter, or a double click) clears its mark and turns its ✓ blue, even when the app finds no window to bring to the front (a session in a standalone terminal, for example); its next turn clears the mark too. The green lasts exactly as long as a green ✓ is in the list. The app keeps the finishes, and which of them you have seen, in memory only: after it restarts, no session shows a ✓ until it finishes its next turn. When a request the app can still decide has waited longer than 540 seconds, the icon flashes, about once a second, between its normal image and a red dot with a white exclamation mark: the app lets go of the request at 590 seconds (see [Deciding a request](#deciding-a-request)). The flashing stops when no such request is left. The tooltip says how many sessions wait, adds **"választásra vár"** (waits for a choice) for a burgundy icon, and **"N végzett"** (N finished) for the finished sessions not opened yet. Clicking the icon opens the list. The right-click menu:
 
-- **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded and not skipped; see [Updating](#updating).
+- **"Frissítés elérhető (<version>), telepítés"** (update available, install): at the top, once a new release is downloaded and not skipped, or once **"Frissítés keresése most"** downloaded a skipped one and you did not skip it again; see [Updating](#updating).
 - **"Megnyitás"** (open): opens the list.
 - **"Gyorsbillentyű: Shift+Alt+Space"** (hotkey): the hotkey in effect, or what is wrong with it if it could not be registered.
 - **"Beállítások…"** (settings): the settings window, with the integration section.
 - **"Napló megnyitása"** (open the log): opens the log file in your default text editor. The app writes its diagnostic lines, and any uncaught error, to `%APPDATA%\@claudeswitcher\desktop\logs\claudeswitcher.log`. At 1 MiB the file moves to `claudeswitcher.old.log` (replacing the previous one) and a new one starts. The first line of a run names the version. Send the file in when reporting a problem.
+- **"Frissítés keresése most"** (check for an update now): the installed app only; looks for a new release now, or shows the popup of the one already downloaded. See [Updating](#updating).
 - The quick toggles: **"Induljon el bejelentkezéskor"** (start at login), **"Elrejtés az utolsó döntés után"** (hide the list after the last decision), **"Ugrás a pontos Claude-tabra"** (jump to the exact Claude tab), **"Értesítés engedélykérésnél"** (notify on a permission request), **"Értesítés, ha egy session végzett"** (notify when a session finished), **"Frissítések keresése"** (check for updates, see [Updating](#updating)). All are on by default except the notification for a finished session; see [Notifications](#notifications).
 - **"Kilépés"** (quit).
 
@@ -95,9 +104,14 @@ The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"
 | ● (orange) | "Válaszra vár": waiting for you, with a yes or a no |
 | ● (burgundy) | "Választásra vár": waiting for a choice, a question or a plan |
 | ◐ | "Dolgozik": working |
-| ✓ | "Épp végzett": just finished |
+| ✓ (green) | "Épp végzett": just finished, and you have not opened it since |
+| ✓ (blue) | "Végzett, már megnyitottad": finished, and you have opened it since |
 | ○ | "Tétlen": idle |
 | ◆ | the app let go of the request; decide it in VS Code |
+
+The rows are grouped by their marker, in this order: orange ●, burgundy ●, ◆, green ✓, ◐, blue ✓, ○. In the two ● groups the longest waiting row comes first (a request the app holds is let go after 590 seconds): a row with such a request counts from the oldest one's arrival, any other from when its wait began. When the list opens it selects the longest waiting row of the two groups; if no row waits, it keeps the selected row, or selects the top one. The ◐ rows go by name, so they do not swap places while they work. In the other groups the most recently active row comes first (its last transcript event, its finish or its wait, whichever is latest); rows with the same time go by name.
+
+The status bar at the bottom shows, on the left, where the selected session comes from (the source label described under [Deciding a request](#deciding-a-request)) and its folder, shortened in the middle when it is long (the full path is in its tooltip); on the right, **"ellenőrizve"** (checked) says how long ago the app last scanned the sessions.
 
 Keys: the arrows move the selection, **Enter** jumps to the selected session (so does a double click), **Esc** hides the list.
 

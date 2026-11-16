@@ -3,34 +3,38 @@ import type { SessionStatus as Status } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
 import { hasRemoteControl, releasedMessage, statusMarker } from './session-marker.js'
 
-const session = (status: Status, stoppedAt?: number): { status: Status; stoppedAt?: number | undefined } => ({
+const SESSION_ID = '6f1c2a3e-0000-4000-8000-000000000031'
+const session = (status: Status, stoppedAt?: number): { sessionId: string; status: Status; stoppedAt?: number | undefined } => ({
+  sessionId: SESSION_ID,
   status,
   stoppedAt,
 })
+/** Nothing seen, unless a test says otherwise. */
+const NONE_SEEN = new Map<string, number>()
 
 describe('statusMarker', () => {
   it('shows a held decision as waiting for a reply', () => {
-    expect(statusMarker(session('waiting'), [{ released: false, kind: 'tool' as const }]).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'tool' as const }], NONE_SEEN).tone).toBe('waiting')
   })
 
   it('shows a Notification wait (no held decision) as waiting too', () => {
-    expect(statusMarker(session('waiting'), []).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [], NONE_SEEN).tone).toBe('waiting')
   })
 
   it('shows a released decision differently: only VS Code or the phone can answer it now', () => {
-    expect(statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }]).tone).toBe('released')
+    expect(statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }], NONE_SEEN).tone).toBe('released')
   })
 
   it('prefers a still-held decision over a released one of the same session', () => {
     // While there is a request the app can decide, that is the more important sign.
-    expect(statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }, { released: false, kind: 'tool' as const }]).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }, { released: false, kind: 'tool' as const }], NONE_SEEN).tone).toBe('waiting')
   })
 
   it('shows a held question or plan in the choice tone, a held command or edit in the yes/no tone', () => {
-    expect(statusMarker(session('waiting'), [{ released: false, kind: 'question' }]).tone).toBe('choice')
-    expect(statusMarker(session('waiting'), [{ released: false, kind: 'plan' }]).tone).toBe('choice')
-    expect(statusMarker(session('waiting'), [{ released: false, kind: 'tool' }]).tone).toBe('waiting')
-    expect(statusMarker(session('waiting'), [{ released: false, kind: 'edit' }]).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'question' }], NONE_SEEN).tone).toBe('choice')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'plan' }], NONE_SEEN).tone).toBe('choice')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'tool' }], NONE_SEEN).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: false, kind: 'edit' }], NONE_SEEN).tone).toBe('waiting')
   })
 
   it('shows a row with one choice request among yes/no ones in the choice tone', () => {
@@ -38,7 +42,7 @@ describe('statusMarker', () => {
       { released: false, kind: 'tool' as const },
       { released: false, kind: 'question' as const },
     ]
-    expect(statusMarker(session('waiting'), decisions).tone).toBe('choice')
+    expect(statusMarker(session('waiting'), decisions, NONE_SEEN).tone).toBe('choice')
   })
 
   it('ignores a released choice request: the held yes/no one decides the tone', () => {
@@ -46,41 +50,59 @@ describe('statusMarker', () => {
       { released: true, kind: 'plan' as const },
       { released: false, kind: 'edit' as const },
     ]
-    expect(statusMarker(session('waiting'), decisions).tone).toBe('waiting')
-    expect(statusMarker(session('waiting'), [{ released: true, kind: 'plan' as const }]).tone).toBe('released')
+    expect(statusMarker(session('waiting'), decisions, NONE_SEEN).tone).toBe('waiting')
+    expect(statusMarker(session('waiting'), [{ released: true, kind: 'plan' as const }], NONE_SEEN).tone).toBe('released')
   })
 
   it('gives the choice dot its own Hungarian tooltip', () => {
-    const choice = statusMarker(session('waiting'), [{ released: false, kind: 'question' }])
-    const yesNo = statusMarker(session('waiting'), [{ released: false, kind: 'tool' }])
+    const choice = statusMarker(session('waiting'), [{ released: false, kind: 'question' }], NONE_SEEN)
+    const yesNo = statusMarker(session('waiting'), [{ released: false, kind: 'tool' }], NONE_SEEN)
     expect(choice.title.trim()).not.toBe('')
     expect(choice.title).not.toBe(yesNo.title)
   })
 
   it('shows a running session as working', () => {
-    expect(statusMarker(session('working'), []).tone).toBe('working')
+    expect(statusMarker(session('working'), [], NONE_SEEN).tone).toBe('working')
   })
 
-  it('shows a session that stopped and has not moved since as done', () => {
-    expect(statusMarker(session('idle', 5_000), []).tone).toBe('done')
+  it('shows a session that stopped and has not moved since as done: a green ✓ while unseen', () => {
+    const marker = statusMarker(session('idle', 5_000), [], NONE_SEEN)
+    expect(marker.tone).toBe('done')
+    expect(marker.glyph).toBe('✓')
+    expect(marker.title).toBe('Épp végzett')
+  })
+
+  it('shows a seen finish as a blue ✓ with its own tooltip', () => {
+    const marker = statusMarker(session('idle', 5_000), [], new Map([[SESSION_ID, 5_000]]))
+    expect(marker.tone).toBe('seen')
+    expect(marker.glyph).toBe('✓')
+    expect(marker.title).toBe('Végzett, már megnyitottad')
+  })
+
+  it('shows a new stoppedAt after a seen one as green again', () => {
+    expect(statusMarker(session('idle', 9_000), [], new Map([[SESSION_ID, 5_000]])).tone).toBe('done')
+  })
+
+  it('ignores the seen finish of another session', () => {
+    expect(statusMarker(session('idle', 5_000), [], new Map([['6f1c2a3e-0000-4000-8000-000000000032', 5_000]])).tone).toBe('done')
   })
 
   it('does not call a running or waiting session done, even with a stale stoppedAt', () => {
-    expect(statusMarker(session('working', 5_000), []).tone).toBe('working')
-    expect(statusMarker(session('waiting', 5_000), []).tone).toBe('waiting')
+    expect(statusMarker(session('working', 5_000), [], NONE_SEEN).tone).toBe('working')
+    expect(statusMarker(session('waiting', 5_000), [], NONE_SEEN).tone).toBe('waiting')
   })
 
   it('shows a plain idle session as idle', () => {
-    expect(statusMarker(session('idle'), []).tone).toBe('idle')
+    expect(statusMarker(session('idle'), [], NONE_SEEN).tone).toBe('idle')
   })
 
   it('gives every state its own glyph and a Hungarian tooltip', () => {
     const markers = [
-      statusMarker(session('waiting'), []),
-      statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }]),
-      statusMarker(session('working'), []),
-      statusMarker(session('idle', 1), []),
-      statusMarker(session('idle'), []),
+      statusMarker(session('waiting'), [], NONE_SEEN),
+      statusMarker(session('waiting'), [{ released: true, kind: 'tool' as const }], NONE_SEEN),
+      statusMarker(session('working'), [], NONE_SEEN),
+      statusMarker(session('idle', 1), [], NONE_SEEN),
+      statusMarker(session('idle'), [], NONE_SEEN),
     ]
     // A color-blind user must tell them apart too: the glyph's shape differs, not just its color.
     expect(new Set(markers.map((m) => m.glyph)).size).toBe(markers.length)
@@ -124,14 +146,14 @@ describe('statusMarker released tooltip', () => {
   const released = [{ released: true, kind: 'tool' as const }]
 
   it('mentions the phone only for a session with Remote Control', () => {
-    const plain = statusMarker({ status: 'waiting' }, released)
-    const remote = statusMarker({ status: 'waiting', bridgeSessionId: 'session_01Uj' }, released)
+    const plain = statusMarker({ sessionId: SESSION_ID, status: 'waiting' }, released, NONE_SEEN)
+    const remote = statusMarker({ sessionId: SESSION_ID, status: 'waiting', bridgeSessionId: 'session_01Uj' }, released, NONE_SEEN)
     expect(plain.title).not.toContain('telefon')
     expect(plain.title).toContain('VSCode')
     expect(remote.title).toContain('telefonon')
   })
 
   it('keeps the release time in the tooltip', () => {
-    expect(statusMarker({ status: 'waiting' }, released).title).toContain(`${String(PERMISSION_RELEASE_AFTER_MS / 1000)} mp`)
+    expect(statusMarker({ sessionId: SESSION_ID, status: 'waiting' }, released, NONE_SEEN).title).toContain(`${String(PERMISSION_RELEASE_AFTER_MS / 1000)} mp`)
   })
 })

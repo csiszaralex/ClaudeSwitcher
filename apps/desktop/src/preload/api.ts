@@ -16,6 +16,11 @@ export interface ClaudeSwitcherApi {
   connection: () => Promise<DaemonConnection>
   /** The daemon's state; the renderer reads it with `sanitizeState`. */
   state: () => Promise<unknown>
+  /**
+   * The finishes the user has seen, as `[sessionId, stoppedAt]` pairs; the renderer reads them with
+   * `readSeenFinishes`.
+   */
+  finishesSeen: () => Promise<unknown>
   focusSession: (sessionId: string) => Promise<boolean>
   hide: () => Promise<void>
   /** The main process gives the reply as a `DecideResult`; the renderer reads it with a check. */

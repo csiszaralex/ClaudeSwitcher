@@ -4,14 +4,16 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, subagentLabel, subagentTooltip, summarize } from './format.js'
+import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
-import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
+import { activeDecision, buildRows, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
-import { hasRemoteControl, statusMarker } from './session-marker.js'
+import { hasRemoteControl } from './session-marker.js'
+import { SourceLabel } from './SourceLabel.js'
 import type { OverlayState } from './useDaemonState.js'
+import type { SeenFinishes } from '../shared/session-finished.js'
 import './styles.css'
 
 /**
@@ -38,8 +40,9 @@ function JumpNotice({ text, sessionId }: { text: string; sessionId: string }): J
 /**
  * @param overlay The daemon's live state. It comes from outside (`main.tsx` `Root`) and is not read
  * here: so the connection lives on after a render error, and the next state can restore the UI.
+ * @param seenFinishes The finishes the user has seen (`useSeenFinishes`), for the ✓ marker's color.
  */
-export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
+export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFinishes: SeenFinishes }): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
   // A session id, not an index: when the list reorders, the selection moves with the session.
   // See the selection.ts documentation.
@@ -47,14 +50,17 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
   const [now, setNow] = useState(Date.now())
 
   // The rows: the sessions, plus a row of its own for each pending request whose session the
-  // snapshot does not know yet (rows.ts). All selection and stepping works on this list.
-  const rows = buildRows(sessions, decisions)
+  // snapshot does not know yet, in the list's order (rows.ts). All selection and stepping works on
+  // this list.
+  const rows = buildRows(sessions, decisions, seenFinishes)
   const ids = rows.map((row) => row.sessionId)
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedRowView = selected === -1 ? undefined : rows[selected]
 
   // The panel shows the oldest request the app can still decide; the status marker needs all of them.
   const decision = selectedRowView === undefined ? undefined : activeDecision(selectedRowView.decisions)
+  // The status bar's left part: where the selected session comes from, and its folder.
+  const selectedFolder = selectedRowView === undefined ? undefined : rowFolder(selectedRowView)
 
   // The latest state for the async handlers (show, the step after a decision). A closure from
   // render time can go stale before the decision's reply or the show: the step has to be computed
@@ -184,8 +190,7 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
         )}
         {rows.map((row, index) => {
           const pending = activeDecision(row.decisions)
-          // The row of a session the snapshot does not know yet: the pending request holds it, so it is waiting.
-          const marker = statusMarker(row.session ?? { status: row.status }, row.decisions)
+          const marker = row.marker
           const badge = pendingBadge(row.decisions)
           // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
           const source = requestSource(row.session?.entrypoint)
@@ -284,16 +289,33 @@ export function App({ overlay }: { overlay: OverlayState }): JSX.Element {
 
       <div className="status-bar">
         {/*
-          The time of the heartbeat. It is the only sign that the list is ALIVE and just has no
-          change. The daemon does not resend an identical snapshot, so on an idle machine a still
-          list and a stopped poll would otherwise look exactly the same.
+          The selected session's source (as the panel shows it, shared/request-source.ts) and its
+          folder, shortened in the middle, the full path in the tooltip. It truncates on a narrow
+          window; the right part never does.
         */}
-        <span className="muted">
-          {checkedAt === undefined
-            ? 'ellenőrizve: még nem'
-            : `ellenőrizve: ${formatDuration(now - checkedAt)}`}
+        {selectedRowView !== undefined && (
+          <span className="status-session">
+            <SourceLabel source={requestSource(selectedRowView.session?.entrypoint)} />
+            {selectedFolder !== undefined && (
+              <span className="status-folder" title={selectedFolder}>
+                {shortenPath(selectedFolder)}
+              </span>
+            )}
+          </span>
+        )}
+        <span className="status-checks">
+          {/*
+            The time of the heartbeat. It is the only sign that the list is ALIVE and just has no
+            change. The daemon does not resend an identical snapshot, so on an idle machine a still
+            list and a stopped poll would otherwise look exactly the same.
+          */}
+          <span className="muted">
+            {checkedAt === undefined
+              ? 'ellenőrizve: még nem'
+              : `ellenőrizve: ${formatDuration(now - checkedAt)}`}
+          </span>
+          {!connected && <span className="muted">kapcsolat megszakadt, újracsatlakozás…</span>}
         </span>
-        {!connected && <span className="muted">kapcsolat megszakadt, újracsatlakozás…</span>}
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 import { PERMISSION_RELEASE_AFTER_MS, type DecisionKind, type SessionStatus } from '@claudeswitcher/core'
 import { isChoiceKind } from '../shared/request-kind.js'
-import { hasFinished } from '../shared/session-finished.js'
+import { finishState, type SeenFinishes } from '../shared/session-finished.js'
 
 /**
  * When the tray starts to flash for a held request nobody has decided: 50 s before the release
@@ -28,24 +28,10 @@ export interface TrayDecision {
 export interface TrayInput {
   sessions: readonly TraySession[]
   decisions: readonly TrayDecision[]
-  /** The finishes the user has seen (`acknowledgeFinish`): session id to the `stoppedAt` seen. */
-  acknowledged: ReadonlyMap<string, number>
+  /** The finishes the user has seen (`shared/session-finished.ts` `acknowledgeFinish`). */
+  acknowledged: SeenFinishes
   /** The current time (ms, `Date.now()`), for the age of the held requests. */
   now: number
-}
-
-/**
- * Records that the user has seen a session's finish: opening the session from the list (the jump)
- * clears its done mark on the tray. Per session and `stoppedAt`: the next finish of the session has
- * a new `stoppedAt`, so it shows again. A new turn clears the mark anyway, since `stoppedAt` goes.
- * A `stoppedAt` that disappears while a subagent runs comes back with the same value, which stays
- * acknowledged, so entries are never pruned (one number per session id, in memory only).
- */
-export function acknowledgeFinish(
-  acknowledged: Map<string, number>,
-  session: { sessionId: string; stoppedAt?: number | undefined },
-): void {
-  if (session.stoppedAt !== undefined) acknowledged.set(session.sessionId, session.stoppedAt)
 }
 
 /**
@@ -58,7 +44,7 @@ export interface TrayState {
   /** The sessions whose status is `waiting`: the number the tooltip gives. */
   waitingCount: number
   wait: TrayWait
-  /** The sessions that finished (`hasFinished`) and whose finish the user has not seen yet. */
+  /** The sessions whose finish the user has not seen yet (`finishState` `unseen`): the list's green ✓ rows. */
   finishedCount: number
   /**
    * A request the app can still decide has been held longer than `PERMISSION_WARN_AFTER_MS`: the
@@ -79,9 +65,7 @@ export function trayState(input: TrayInput): TrayState {
     : waitingCount > 0 || held.length > 0
       ? 'yes-no'
       : 'none'
-  const finishedCount = input.sessions.filter(
-    (session) => hasFinished(session) && input.acknowledged.get(session.sessionId) !== session.stoppedAt,
-  ).length
+  const finishedCount = input.sessions.filter((session) => finishState(session, input.acknowledged) === 'unseen').length
   const flash = held.some((decision) => input.now - decision.createdAt > PERMISSION_WARN_AFTER_MS)
   return { waitingCount, wait, finishedCount, flash }
 }

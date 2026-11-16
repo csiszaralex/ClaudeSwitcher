@@ -3,13 +3,13 @@ import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core'
 import {
   IDLE_TRAY_STATE,
   PERMISSION_WARN_AFTER_MS,
-  acknowledgeFinish,
   trayState,
   trayTooltip,
   type TrayDecision,
   type TrayInput,
   type TraySession,
 } from './tray-state.js'
+import { acknowledgeFinish } from '../shared/session-finished.js'
 
 const idle: TraySession = { sessionId: '6f1c2a3e-0000-4000-8000-000000000001', status: 'idle' }
 const waiting: TraySession = { sessionId: '6f1c2a3e-0000-4000-8000-000000000002', status: 'waiting' }
@@ -84,10 +84,11 @@ describe('trayState: finished sessions', () => {
     expect(trayState(input([finished(9_000)], [], acknowledged)).finishedCount).toBe(1)
   })
 
-  it('acknowledges nothing for a session without a stoppedAt', () => {
+  it('counts only the unseen finish among a seen and an unseen one: the green ✓ rows of the list', () => {
+    const other: TraySession = { ...finished(7_000), sessionId: '6f1c2a3e-0000-4000-8000-000000000004' }
     const acknowledged = new Map<string, number>()
-    acknowledgeFinish(acknowledged, idle)
-    expect(acknowledged.size).toBe(0)
+    acknowledgeFinish(acknowledged, finished(5_000))
+    expect(trayState(input([finished(5_000), other], [], acknowledged)).finishedCount).toBe(1)
   })
 })
 

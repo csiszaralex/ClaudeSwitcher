@@ -16,6 +16,7 @@ import { createAutostart, type LoginItems } from './autostart.js'
 import { loadConfig, saveSettings, saveSkippedVersion } from './config.js'
 import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
 import { errorMessage } from '../shared/error-message.js'
+import { acknowledgeFinish } from '../shared/session-finished.js'
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
 import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
@@ -56,12 +57,13 @@ import { stopWithin } from './shutdown.js'
 import { loadOrCreateToken } from './token.js'
 import { createToaster } from './toast.js'
 import { createTray } from './tray.js'
-import { acknowledgeFinish, trayState } from './tray-state.js'
+import { trayState } from './tray-state.js'
 import {
   CONSOLE_UPDATER_LOG,
   createUpdateController,
   updateChoice,
   updateLabel,
+  updateNotice,
   updatePrompt,
   type UpdateController,
 } from './updater.js'
@@ -396,7 +398,8 @@ async function startApp(): Promise<void> {
   await running.refresh()
 
   // The finishes the user has seen by jumping to the session (`acknowledgeFinish`); the tray tick
-  // reads them. In memory only, as the daemon's `stoppedAt` itself (`SessionStore`).
+  // and the overlay (`OVERLAY_CHANNELS.finishesSeen`) read them. In memory only, as the daemon's
+  // `stoppedAt` itself (`SessionStore`).
   const finishesSeen = new Map<string, number>()
 
   // Every handler first checks the sender (`handleFrom`). Where the reply has a failure shape, a
@@ -406,6 +409,9 @@ async function startApp(): Promise<void> {
   })
   handleFrom(RENDERER, OVERLAY_CHANNELS.state, () => {
     return running.state()
+  })
+  handleFrom(RENDERER, OVERLAY_CHANNELS.finishesSeen, () => {
+    return [...finishesSeen]
   })
   handleFrom(
     RENDERER,
@@ -435,8 +441,12 @@ async function startApp(): Promise<void> {
       // fallback handles it.
       const outcome = await focusSessionWindow(view)
       overlay.hide()
-      // The user has opened the session: its finish is seen, and the tray's done mark goes.
-      if (outcome !== 'failed') acknowledgeFinish(finishesSeen, view)
+      // The user has opened the session from the overlay: its finish is seen whatever the outcome
+      // (a session with no VS Code window to bring forward, such as a CLI in a standalone terminal,
+      // fails every time and would otherwise stay green). The tray's done mark goes and the list's
+      // ✓ turns blue (`finishState`). Recorded only after `overlay.hide()`: the overlay reads the
+      // map on `shown` (`useSeenFinishes`), so its next pull has this finish.
+      acknowledgeFinish(finishesSeen, view)
       // The exact tab only AFTER the window, and only if every condition of `tabFocusUri` holds.
       // The decisions are read AFTER the focus: a file-write request may have arrived during the
       // wait. Not awaited: the renderer gets the result of the window focus, as before.
@@ -527,10 +537,14 @@ async function startApp(): Promise<void> {
     onUpdate: () => {
       if (!quitSequence.isQuitting()) updates?.install()
     },
+    // The item is shown only with `updates` (`onManualCheck`), that is in the installed app.
+    onCheckUpdate: () => {
+      if (!quitSequence.isQuitting()) updates?.checkNow()
+    },
   })
 
   // The installed app only: a repo build has no `app-update.yml` and no updater at all, so no
-  // check and no tray line.
+  // check, no tray line and no manual check item.
   const updates: UpdateController | undefined = app.isPackaged
     ? createUpdateController({
         updater: (requireRuntime('electron-updater') as typeof import('electron-updater')).autoUpdater,
@@ -542,6 +556,10 @@ async function startApp(): Promise<void> {
         // No parent window: the overlay is hidden by then, and the setup window may be closed.
         prompt: (version) =>
           dialog.showMessageBox(updatePrompt(version, app.getVersion())).then(({ response }) => updateChoice(response)),
+        notify: (notice) => dialog.showMessageBox(updateNotice(notice, app.getVersion())),
+        onManualCheck: (state) => {
+          tray.setUpdateCheck(state)
+        },
         overlayVisible: overlay.isVisible,
         onOverlayHidden: overlay.onHidden,
         skippedVersion: stored.skippedVersion,
