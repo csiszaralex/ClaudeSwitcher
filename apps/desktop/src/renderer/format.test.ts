@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, subagentLabel, subagentTooltip, summarize, toolLabel } from './format.js'
+import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize, toolLabel } from './format.js'
+
+describe('shortenPath', () => {
+  it('keeps the first two and the last two segments of a long Windows path', () => {
+    expect(shortenPath('P:\\proj\\alpha\\apps\\beta')).toBe('P:\\proj\\…\\apps\\beta')
+    expect(shortenPath('P:\\proj\\alpha\\gamma\\apps\\beta')).toBe('P:\\proj\\…\\apps\\beta')
+  })
+
+  it('keeps a path of up to four segments as it is', () => {
+    for (const path of ['P:\\proj\\alpha\\beta', 'P:\\proj', 'beta', '', '/home/u/proj']) expect(shortenPath(path)).toBe(path)
+  })
+
+  it('shortens a POSIX path with its own separator and keeps the root', () => {
+    expect(shortenPath('/home/u/proj/apps/beta')).toBe('/home/u/…/apps/beta')
+  })
+
+  it('keeps a UNC prefix', () => {
+    expect(shortenPath('\\\\server\\share\\proj\\apps\\beta')).toBe('\\\\server\\share\\…\\apps\\beta')
+  })
+
+  it('splits on both separators and joins with the first one in the path', () => {
+    expect(shortenPath('P:\\proj/alpha\\apps/beta')).toBe('P:\\proj\\…\\apps\\beta')
+  })
+
+  it('ignores a trailing separator when counting', () => {
+    expect(shortenPath('P:\\proj\\alpha\\beta\\')).toBe('P:\\proj\\alpha\\beta\\')
+    expect(shortenPath('P:\\proj\\alpha\\apps\\beta\\')).toBe('P:\\proj\\…\\apps\\beta')
+  })
+})
 
 describe('formatDuration', () => {
   it('renders seconds under a minute', () => {

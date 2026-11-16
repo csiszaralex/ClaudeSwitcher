@@ -1,15 +1,21 @@
 import { CLI_ENTRYPOINT, HEADLESS_ENTRYPOINT, VSCODE_ENTRYPOINT } from './entrypoint.js'
 
-/** Where a permission request comes from, as the row and the decision panel show it. */
+/**
+ * Where a session, and so each of its permission requests, comes from, as the row, the decision
+ * panel and the status bar show it.
+ */
 export interface RequestSource {
   /** The label text. */
   label: string
   /**
-   * True for a run the user did not start interactively: the row and the panel emphasise it, so such a
-   * request is not allowed by habit. Nothing is blocked.
+   * True for a run the user did not start interactively: the row (when it has a request), the panel
+   * and the status bar emphasise it, so such a request is not allowed by habit. Nothing is blocked.
    */
   standsOut: boolean
-  /** A Hungarian tooltip explaining the label. */
+  /**
+   * A Hungarian tooltip explaining the label. It speaks of the session, not of a request: the status
+   * bar shows the label for a session without a request too.
+   */
   title: string
 }
 
@@ -34,14 +40,14 @@ export function requestSource(entrypoint: string | undefined): RequestSource {
     return {
       label: UNKNOWN_LABEL,
       standsOut: true,
-      title: 'A kérés forrása ismeretlen: a session nincs a nyilvántartásban, vagy nem írja, honnan indult.',
+      title: 'A session forrása ismeretlen: nincs a nyilvántartásban, vagy nem írja, honnan indult.',
     }
   }
   const standsOut = !INTERACTIVE_ENTRYPOINTS.has(entrypoint)
   return {
     label: KNOWN_LABELS.get(entrypoint) ?? entrypoint,
     standsOut,
-    title: standsOut ? 'Nem interaktívan indított futás kérése.' : 'Ebből a környezetből indított session kérése.',
+    title: standsOut ? 'Nem interaktívan indított session.' : 'Ebből a környezetből indított session.',
   }
 }
 

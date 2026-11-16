@@ -111,6 +111,8 @@ The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"
 
 The rows are grouped by their marker, in this order: orange ●, burgundy ●, ◆, green ✓, ◐, blue ✓, ○. In the two ● groups the longest waiting row comes first (a request the app holds is let go after 590 seconds): a row with such a request counts from the oldest one's arrival, any other from when its wait began. When the list opens it selects the longest waiting row of the two groups; if no row waits, it keeps the selected row, or selects the top one. The ◐ rows go by name, so they do not swap places while they work. In the other groups the most recently active row comes first (its last transcript event, its finish or its wait, whichever is latest); rows with the same time go by name.
 
+The status bar at the bottom shows, on the left, where the selected session comes from (the source label described under [Deciding a request](#deciding-a-request)) and its folder, shortened in the middle when it is long (the full path is in its tooltip); on the right, **"ellenőrizve"** (checked) says how long ago the app last scanned the sessions.
+
 Keys: the arrows move the selection, **Enter** jumps to the selected session (so does a double click), **Esc** hides the list.
 
 ### Deciding a request

@@ -22,6 +22,12 @@ describe('requestSource', () => {
     expect(requestSource(undefined)).toMatchObject({ label: 'ismeretlen', standsOut: true })
   })
 
+  it('explains the label in terms of the session, so it reads right without a request too', () => {
+    expect(requestSource('claude-vscode').title).toBe('Ebből a környezetből indított session.')
+    expect(requestSource('sdk-cli').title).toBe('Nem interaktívan indított session.')
+    expect(requestSource(undefined).title).toBe('A session forrása ismeretlen: nincs a nyilvántartásban, vagy nem írja, honnan indult.')
+  })
+
   it('does not treat a prototype key as a known label', () => {
     expect(requestSource('constructor').label).toBe('constructor')
   })

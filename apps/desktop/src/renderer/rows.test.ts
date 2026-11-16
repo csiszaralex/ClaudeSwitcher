@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DecisionKind, SessionStatus as Status } from '@claudeswitcher/core'
-import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
+import { activeDecision, buildRows, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, selectOnShow } from './selection.js'
 
 const session = (
@@ -287,6 +287,22 @@ describe('selection over merged rows', () => {
     const rows = buildRows(sessions, decisions, NONE_SEEN)
     expect(rows.map((r) => r.sessionId)).toEqual(['r2', 'r1'])
     expect(selectOnShow(rows, decisions, undefined)).toBe('r1')
+  })
+})
+
+describe('rowFolder', () => {
+  it('is the session\'s cwd', () => {
+    expect(rowFolder({ session: { cwd: 'P:\\proj\\alpha' }, decisions: [{ cwd: 'P:\\proj\\beta' }] })).toBe('P:\\proj\\alpha')
+  })
+
+  it('is the oldest request\'s cwd for a row without a session', () => {
+    expect(rowFolder({ decisions: [{ cwd: 'P:\\proj\\beta' }, { cwd: 'P:\\proj\\gamma' }] })).toBe('P:\\proj\\beta')
+  })
+
+  it('is undefined when the app knows no folder', () => {
+    expect(rowFolder({ session: { cwd: '' }, decisions: [] })).toBeUndefined()
+    expect(rowFolder({ decisions: [{ cwd: '' }] })).toBeUndefined()
+    expect(rowFolder({ decisions: [] })).toBeUndefined()
   })
 })
 

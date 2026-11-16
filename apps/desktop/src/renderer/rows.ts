@@ -58,6 +58,15 @@ export function waitsOutsideApp(row: { status: SessionStatus; decisions: readonl
 }
 
 /**
+ * The row's folder, for the status bar: its session's `cwd`, or for a row without a session (only
+ * its pending requests) the oldest request's `cwd`. `undefined` when the app knows none.
+ */
+export function rowFolder(row: { session?: { cwd: string } | undefined; decisions: readonly { cwd: string }[] }): string | undefined {
+  const folder = row.session?.cwd ?? row.decisions[0]?.cwd
+  return folder === undefined || folder === '' ? undefined : folder
+}
+
+/**
  * The row's "N waiting" badge when more than one of its requests can be decided in the app. A released
  * request does not count: only VS Code can decide it now, and the status marker shows it anyway.
  */

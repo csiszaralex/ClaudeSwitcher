@@ -4,13 +4,14 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, subagentLabel, subagentTooltip, summarize } from './format.js'
+import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
-import { activeDecision, buildRows, pendingBadge, waitsOutsideApp } from './rows.js'
+import { activeDecision, buildRows, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl } from './session-marker.js'
+import { SourceLabel } from './SourceLabel.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
 import './styles.css'
@@ -58,6 +59,8 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
 
   // The panel shows the oldest request the app can still decide; the status marker needs all of them.
   const decision = selectedRowView === undefined ? undefined : activeDecision(selectedRowView.decisions)
+  // The status bar's left part: where the selected session comes from, and its folder.
+  const selectedFolder = selectedRowView === undefined ? undefined : rowFolder(selectedRowView)
 
   // The latest state for the async handlers (show, the step after a decision). A closure from
   // render time can go stale before the decision's reply or the show: the step has to be computed
@@ -286,16 +289,33 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
 
       <div className="status-bar">
         {/*
-          The time of the heartbeat. It is the only sign that the list is ALIVE and just has no
-          change. The daemon does not resend an identical snapshot, so on an idle machine a still
-          list and a stopped poll would otherwise look exactly the same.
+          The selected session's source (as the panel shows it, shared/request-source.ts) and its
+          folder, shortened in the middle, the full path in the tooltip. It truncates on a narrow
+          window; the right part never does.
         */}
-        <span className="muted">
-          {checkedAt === undefined
-            ? 'ellenőrizve: még nem'
-            : `ellenőrizve: ${formatDuration(now - checkedAt)}`}
+        {selectedRowView !== undefined && (
+          <span className="status-session">
+            <SourceLabel source={requestSource(selectedRowView.session?.entrypoint)} />
+            {selectedFolder !== undefined && (
+              <span className="status-folder" title={selectedFolder}>
+                {shortenPath(selectedFolder)}
+              </span>
+            )}
+          </span>
+        )}
+        <span className="status-checks">
+          {/*
+            The time of the heartbeat. It is the only sign that the list is ALIVE and just has no
+            change. The daemon does not resend an identical snapshot, so on an idle machine a still
+            list and a stopped poll would otherwise look exactly the same.
+          */}
+          <span className="muted">
+            {checkedAt === undefined
+              ? 'ellenőrizve: még nem'
+              : `ellenőrizve: ${formatDuration(now - checkedAt)}`}
+          </span>
+          {!connected && <span className="muted">kapcsolat megszakadt, újracsatlakozás…</span>}
         </span>
-        {!connected && <span className="muted">kapcsolat megszakadt, újracsatlakozás…</span>}
       </div>
     </div>
   )

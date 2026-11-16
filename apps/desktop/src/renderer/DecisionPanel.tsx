@@ -19,6 +19,7 @@ import { armUntil, isArmed, shortcutAllowed, type KeyHistory } from './key-guard
 import { PlanPanel } from './PlanPanel.js'
 import { QuestionForm } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
+import { SourceLabel } from './SourceLabel.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
 import { requestFacts, type RequestSource } from '../shared/request-source.js'
 import { releasedMessage } from './session-marker.js'
@@ -332,9 +333,7 @@ export function DecisionPanel({
       </header>
       <DecisionContent decision={decision} summary={summary} />
       <p className="decision-source">
-        <span className={source.standsOut ? 'source-label stands-out' : 'source-label'} title={source.title}>
-          {source.label}
-        </span>
+        <SourceLabel source={source} />
         {facts !== undefined && <span className="muted" title={facts}>{facts}</span>}
       </p>
       <div className={fill ? 'decision-actions fill' : 'decision-actions'}>

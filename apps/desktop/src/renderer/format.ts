@@ -93,3 +93,22 @@ export function summarize(view: {
 
   return clip(raw)
 }
+
+/** How many segments a path may have before `shortenPath` cuts its middle out. */
+const PATH_SEGMENTS_KEPT = 4
+
+/**
+ * A long path, shortened for one line: the first two and the last two segments with `…` between,
+ * e.g. `P:\08_Apps\…\apps\cs-spike`. Only a path with more than four segments is shortened. Both `\`
+ * and `/` separate segments, the path's first separator joins the shortened one, and its leading
+ * separators (a POSIX root, a UNC prefix) stay.
+ */
+export function shortenPath(path: string): string {
+  const segments = path.split(/[\\/]/).filter((segment) => segment !== '')
+  if (segments.length <= PATH_SEGMENTS_KEPT) return path
+  // There is a separator: a path without one has a single segment and returned above.
+  const separator = /[\\/]/.exec(path)?.[0] ?? '\\'
+  const lead = /^[\\/]*/.exec(path)?.[0] ?? ''
+  const kept = PATH_SEGMENTS_KEPT / 2
+  return lead + [...segments.slice(0, kept), '…', ...segments.slice(-kept)].join(separator)
+}
