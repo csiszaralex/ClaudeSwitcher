@@ -33,7 +33,11 @@ const { IDLE_TRAY_STATE } = await import('./tray-state.js')
 
 const noop = (): void => {}
 
-function newTray(onOpenLog: () => void = noop, onCheckUpdate: () => void = noop): ReturnType<typeof createTray> {
+function newTray(
+  onOpenLog: () => void = noop,
+  onCheckUpdate: () => void = noop,
+  onInstallUpdate: () => void = noop,
+): ReturnType<typeof createTray> {
   return createTray({
     settings: { values: DEFAULT_SETTINGS, confirmed: new Set(), installed: true },
     hotkey: { requested: 'Control+Shift+F9', status: 'registered' },
@@ -43,7 +47,7 @@ function newTray(onOpenLog: () => void = noop, onCheckUpdate: () => void = noop)
     onOpenLog,
     onQuit: noop,
     onNotice: noop,
-    onUpdate: noop,
+    onInstallUpdate,
     onCheckUpdate,
   })
 }
@@ -69,32 +73,49 @@ describe('createTray menu', () => {
     expect(onOpenLog).toHaveBeenCalledOnce()
   })
 
-  it('has no update check item until one is set (a repo build has none)', () => {
+  it('has no update item until one is set (a repo build has none)', () => {
     newTray()
-    const names = labels(built.templates.at(-1) ?? [])
-    expect(names).not.toContain('Frissítés keresése most')
-    expect(names).not.toContain('Frissítés keresése…')
+    // No update item in any state: none of its labels starts like this (the `checkForUpdates`
+    // toggle reads "Frissítések keresése").
+    const updateLabels = labels(built.templates.at(-1) ?? []).filter((label) => label?.startsWith('Frissítés ') === true)
+    expect(updateLabels).toEqual([])
   })
 
-  it('shows the update check item after "Napló megnyitása": idle calls onCheckUpdate, busy is disabled', () => {
+  it('shows the one update item after "Napló megnyitása": check calls onCheckUpdate, busy is disabled, install calls onInstallUpdate', () => {
     const onCheckUpdate = vi.fn()
-    const tray = newTray(noop, onCheckUpdate)
-    tray.setUpdateCheck('idle')
+    const onInstallUpdate = vi.fn()
+    const tray = newTray(noop, onCheckUpdate, onInstallUpdate)
+    const click = (item: MenuItemConstructorOptions | undefined): void => {
+      ;(item?.click as (() => void) | undefined)?.()
+    }
+    tray.setUpdateItem({ kind: 'check' })
     let template = built.templates.at(-1) ?? []
     const at = labels(template).indexOf('Napló megnyitása') + 1
-    const idle = template[at]
-    expect(idle?.label).toBe('Frissítés keresése most')
-    expect(idle?.enabled).toBe(true)
-    ;(idle?.click as (() => void) | undefined)?.()
+    const check = template[at]
+    expect(check?.label).toBe('Frissítés keresése most')
+    expect(check?.enabled).toBe(true)
+    click(check)
     expect(onCheckUpdate).toHaveBeenCalledOnce()
 
-    tray.setUpdateCheck('busy')
+    tray.setUpdateItem({ kind: 'busy' })
     template = built.templates.at(-1) ?? []
     expect(template[at]?.label).toBe('Frissítés keresése…')
     expect(template[at]?.enabled).toBe(false)
 
-    tray.setUpdateCheck('hidden')
-    expect(labels(built.templates.at(-1) ?? [])).not.toContain('Frissítés keresése…')
+    tray.setUpdateItem({ kind: 'install', version: '0.2.0' })
+    template = built.templates.at(-1) ?? []
+    const installItem = template[at]
+    expect(installItem?.label).toBe('Frissítés a 0.2.0 verzióra')
+    expect(installItem?.enabled).toBe(true)
+    click(installItem)
+    expect(onInstallUpdate).toHaveBeenCalledOnce()
+    expect(onCheckUpdate).toHaveBeenCalledOnce()
+    // One item: no line at the top of the menu, and no separate check item.
+    expect(template[0]?.label).toBe('Megnyitás')
+    expect(labels(template).filter((label) => label?.startsWith('Frissítés ') === true)).toEqual(['Frissítés a 0.2.0 verzióra'])
+
+    tray.setUpdateItem(undefined)
+    expect(labels(built.templates.at(-1) ?? [])).not.toContain('Frissítés a 0.2.0 verzióra')
   })
 })
 
