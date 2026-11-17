@@ -221,9 +221,11 @@ async function focusByPid(pid: number): Promise<boolean> {
 export const PSEUDO_CONSOLE_CLASS = 'PseudoConsoleWindow'
 
 /**
- * The class of a classic console host window (conhost without Windows Terminal). Never seen as a
- * session's console on the measuring machine. It counts only when visible, because the hidden ones
- * belong to background console programs: on the measuring machine every one was such (7 of 7).
+ * The class of a classic console host window (conhost without Windows Terminal). Not seen as a
+ * session's console in the read-only measurement; in the owner's live test (2026-11-17) a session in
+ * `conhost.exe pwsh` came forward, but which path found its window was not recorded (`docs/design.md`
+ * "Mapping to terminal windows"). It counts only when visible, because the hidden ones belong to
+ * background console programs: in the measurement every one was such (7 of 7).
  */
 export const CLASSIC_CONSOLE_CLASS = 'ConsoleWindowClass'
 
