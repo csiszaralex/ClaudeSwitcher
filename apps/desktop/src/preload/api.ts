@@ -27,6 +27,8 @@ export interface ClaudeSwitcherApi {
   decide: (id: string, decision: UserDecision) => Promise<unknown>
   /** The main process gives `{ hideAfterLastDecision }`; the renderer reads it with a check (`readOverlaySettings`). */
   settings: () => Promise<unknown>
+  /** The main process gives this app's version as a string; the renderer reads it with a check (`readAppVersion`). */
+  appVersion: () => Promise<unknown>
   /**
    * Subscribes to the overlay's appearance; the returned function unsubscribes. The renderer gets
    * only its own callback, not the `IpcRendererEvent`: through that `ipcRenderer` would be reachable.

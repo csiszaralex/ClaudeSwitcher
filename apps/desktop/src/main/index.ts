@@ -464,6 +464,9 @@ async function startApp(): Promise<void> {
     return { hideAfterLastDecision: settings.snapshot().values.hideAfterLastDecision }
   })
 
+  // The status bar's version: the installed app's release, a repo build its `package.json` version.
+  handleFrom(RENDERER, OVERLAY_CHANNELS.appVersion, () => app.getVersion())
+
   // A startup summary on the main process's stdout. It makes the startup check automatable: no
   // typing into the DevTools console is needed to see that the daemon started and really found the
   // running sessions.

@@ -101,7 +101,7 @@ body {
 /* Left: the selected session's source and folder; it gives way on a narrow window, the folder truncated. */
 .status-session { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
 .status-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); }
-/* Right: the check time and the reconnect note, never wrapped; on its own it still sits on the right. */
+/* Right: the app version with the check time, and the reconnect note, never wrapped; on its own it still sits on the right. */
 .status-checks { flex: none; display: flex; gap: 16px; margin-left: auto; white-space: nowrap; }
 
 .muted { color: var(--text-faint); }
