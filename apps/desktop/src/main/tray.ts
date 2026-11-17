@@ -4,20 +4,18 @@ import { hotkeyLabel, type HotkeyRegistration } from '../shared/hotkey-status.js
 import type { SettingsSnapshot } from './settings-service.js'
 import { trayIconPng, trayLook, type TrayLook } from './tray-icon.js'
 import { IDLE_TRAY_STATE, trayTooltip, type TrayState } from './tray-state.js'
-import { manualCheckLabel, type ManualCheckState } from './updater.js'
-
-/** The manual update check's menu item: `hidden` without an updater (a repo build). */
-type UpdateCheckItem = ManualCheckState | 'hidden'
+import { updateItemLabel, type UpdateItem } from './updater.js'
 
 export interface TrayHandle {
   /** Shows the state (`trayState`) on the icon and in the tooltip; cheap to call on every tick. */
   setState(state: TrayState): void
   /** A warning line in the menu (an outdated integration); clicking it calls `onNotice`. `undefined` removes it. */
   setNotice(text: string | undefined): void
-  /** The update line at the top of the menu (`updateLabel`); clicking it calls `onUpdate`. `undefined` removes it. */
-  setUpdate(text: string | undefined): void
-  /** The manual update check's item (`manualCheckLabel`); clicking it calls `onCheckUpdate`. Hidden at first. */
-  setUpdateCheck(state: UpdateCheckItem): void
+  /**
+   * The update item (`updateItemLabel`): its `check` click calls `onCheckUpdate`, its `install` click
+   * `onInstallUpdate`, `busy` is disabled. Hidden at first; `undefined` (no updater, a repo build) hides it.
+   */
+  setUpdateItem(item: UpdateItem | undefined): void
   /** Shows the current settings; the setup window can change them while the tray is open. */
   setSettings(snapshot: SettingsSnapshot): void
   /** Shows the hotkey that now holds, after a live switch. */
@@ -68,9 +66,9 @@ export function createTray(options: {
   onQuit: () => void
   /** The notice line (an outdated integration) was clicked: the setup window handles the integration. */
   onNotice: () => void
-  /** The update line was clicked: install the downloaded update. */
-  onUpdate: () => void
-  /** The manual update check's item was clicked. */
+  /** The update item's `install` was clicked: install the downloaded update. */
+  onInstallUpdate: () => void
+  /** The update item's `check` was clicked: check for an update now. */
   onCheckUpdate: () => void
 }): TrayHandle {
   // One image per look, made once: the tick asks for the same few images again and again.
@@ -92,13 +90,12 @@ export function createTray(options: {
 
   const tray = new Tray(imageOf(trayLook(IDLE_TRAY_STATE, false)))
   tray.setToolTip(shownTooltip)
-  // The menu is rebuilt on every change (update, update check, notice, settings, hotkey), so its state lives here:
+  // The menu is rebuilt on every change (update item, notice, settings, hotkey), so its state lives here:
   // otherwise a rebuilt menu would show the startup state, not what holds now.
   let settings = options.settings
   let hotkey = options.hotkey
   let notice: string | undefined
-  let update: string | undefined
-  let updateCheck: UpdateCheckItem = 'hidden'
+  let updateItem: UpdateItem | undefined
   let destroyed = false
 
   const toggleItem = (setting: SettingDefinition & { key: BooleanSettingKey }): MenuItemConstructorOptions => {
@@ -120,19 +117,23 @@ export function createTray(options: {
   const noticeItems = (): MenuItemConstructorOptions[] =>
     notice === undefined ? [] : [{ label: notice, click: options.onNotice }, { type: 'separator' }]
 
-  // At the top, where it is seen first: installing waits for this click.
-  const updateItems = (): MenuItemConstructorOptions[] =>
-    update === undefined ? [] : [{ label: update, click: options.onUpdate }, { type: 'separator' }]
-
-  // Disabled while its check runs: a second click would only wait for the same outcome.
-  const updateCheckItems = (): MenuItemConstructorOptions[] =>
-    updateCheck === 'hidden'
-      ? []
-      : [{ label: manualCheckLabel(updateCheck), enabled: updateCheck === 'idle', click: options.onCheckUpdate }]
+  // The click follows the item the label shows. Disabled while its check runs: a second click
+  // would only wait for the same outcome. Installing waits for the `install` click.
+  const updateItems = (): MenuItemConstructorOptions[] => {
+    if (updateItem === undefined) return []
+    const label = updateItemLabel(updateItem)
+    switch (updateItem.kind) {
+      case 'check':
+        return [{ label, enabled: true, click: options.onCheckUpdate }]
+      case 'busy':
+        return [{ label, enabled: false }]
+      case 'install':
+        return [{ label, enabled: true, click: options.onInstallUpdate }]
+    }
+  }
 
   const buildMenu = (): Menu =>
     Menu.buildFromTemplate([
-      ...updateItems(),
       { label: 'Megnyitás', click: options.onOpen },
       // The hotkey state is visible here, not only in the log. If registering fails (measured
       // live) or the value is mistyped, the user would otherwise just press it and see nothing
@@ -140,7 +141,7 @@ export function createTray(options: {
       { label: hotkeyLabel(hotkey), enabled: false },
       { label: 'Beállítások…', click: options.onSettings },
       { label: 'Napló megnyitása', click: options.onOpenLog },
-      ...updateCheckItems(),
+      ...updateItems(),
       { type: 'separator' },
       ...TOGGLES.map(toggleItem),
       { type: 'separator' },
@@ -176,14 +177,10 @@ export function createTray(options: {
       notice = text
       rebuild()
     },
-    setUpdate(text) {
-      if (destroyed || text === update) return
-      update = text
-      rebuild()
-    },
-    setUpdateCheck(state) {
-      if (destroyed || state === updateCheck) return
-      updateCheck = state
+    setUpdateItem(item) {
+      // The controller sends only changes (`showItem` in updater.ts), so every call rebuilds.
+      if (destroyed) return
+      updateItem = item
       rebuild()
     },
     setSettings(snapshot) {

@@ -62,7 +62,6 @@ import {
   CONSOLE_UPDATER_LOG,
   createUpdateController,
   updateChoice,
-  updateLabel,
   updateNotice,
   updatePrompt,
   type UpdateController,
@@ -465,6 +464,9 @@ async function startApp(): Promise<void> {
     return { hideAfterLastDecision: settings.snapshot().values.hideAfterLastDecision }
   })
 
+  // The status bar's version: the installed app's release, a repo build its `package.json` version.
+  handleFrom(RENDERER, OVERLAY_CHANNELS.appVersion, () => app.getVersion())
+
   // A startup summary on the main process's stdout. It makes the startup check automatable: no
   // typing into the DevTools console is needed to see that the daemon started and really found the
   // running sessions.
@@ -533,32 +535,28 @@ async function startApp(): Promise<void> {
     onNotice: () => {
       if (!quitSequence.isQuitting()) setupWindow.open({ showAll: true })
     },
-    // `updates` is defined below; the line appears only while a downloaded update is on offer.
-    onUpdate: () => {
+    // `updates` is defined below. The update item is shown only with it (`onItem`), that is in the
+    // installed app, and offers the install only while a downloaded update is on offer.
+    onInstallUpdate: () => {
       if (!quitSequence.isQuitting()) updates?.install()
     },
-    // The item is shown only with `updates` (`onManualCheck`), that is in the installed app.
     onCheckUpdate: () => {
       if (!quitSequence.isQuitting()) updates?.checkNow()
     },
   })
 
   // The installed app only: a repo build has no `app-update.yml` and no updater at all, so no
-  // check, no tray line and no manual check item.
+  // check and no update item.
   const updates: UpdateController | undefined = app.isPackaged
     ? createUpdateController({
         updater: (requireRuntime('electron-updater') as typeof import('electron-updater')).autoUpdater,
         enabled: settings.snapshot().values.checkForUpdates,
-        onOffer: (version) => {
-          if (version !== undefined) console.log(`[claudeswitcher] update ${version} downloaded`)
-          tray.setUpdate(version === undefined ? undefined : updateLabel(version))
-        },
         // No parent window: the overlay is hidden by then, and the setup window may be closed.
         prompt: (version) =>
           dialog.showMessageBox(updatePrompt(version, app.getVersion())).then(({ response }) => updateChoice(response)),
         notify: (notice) => dialog.showMessageBox(updateNotice(notice, app.getVersion())),
-        onManualCheck: (state) => {
-          tray.setUpdateCheck(state)
+        onItem: (item) => {
+          tray.setUpdateItem(item)
         },
         overlayVisible: overlay.isVisible,
         onOverlayHidden: overlay.onHidden,

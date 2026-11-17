@@ -12,6 +12,7 @@ import { requestSource, type SessionHost } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
+import { useAppVersion, withAppVersion } from './useAppVersion.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
 import './styles.css'
@@ -49,6 +50,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // See the selection.ts documentation.
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [now, setNow] = useState(Date.now())
+  const appVersion = useAppVersion()
 
   // The rows: the sessions, plus a row of its own for each pending request whose session the
   // snapshot does not know yet, in the list's order (rows.ts). All selection and stepping works on
@@ -311,14 +313,16 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         )}
         <span className="status-checks">
           {/*
-            The time of the heartbeat. It is the only sign that the list is ALIVE and just has no
-            change. The daemon does not resend an identical snapshot, so on an idle machine a still
-            list and a stopped poll would otherwise look exactly the same.
+            The app's version, then the time of the heartbeat. The heartbeat is the only sign that
+            the list is ALIVE and just has no change. The daemon does not resend an identical
+            snapshot, so on an idle machine a still list and a stopped poll would otherwise look
+            exactly the same.
           */}
           <span className="muted">
-            {checkedAt === undefined
-              ? 'ellenőrizve: még nem'
-              : `ellenőrizve: ${formatDuration(now - checkedAt)}`}
+            {withAppVersion(
+              appVersion,
+              checkedAt === undefined ? 'ellenőrizve: még nem' : `ellenőrizve: ${formatDuration(now - checkedAt)}`,
+            )}
           </span>
           {!connected && <span className="muted">kapcsolat megszakadt, újracsatlakozás…</span>}
         </span>

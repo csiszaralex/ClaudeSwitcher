@@ -15,6 +15,7 @@ const api: ClaudeSwitcherApi = {
   hide: () => ipcRenderer.invoke(OVERLAY_CHANNELS.hide),
   decide: (id, decision) => ipcRenderer.invoke(OVERLAY_CHANNELS.decide, id, decision),
   settings: () => ipcRenderer.invoke(OVERLAY_CHANNELS.settings),
+  appVersion: () => ipcRenderer.invoke(OVERLAY_CHANNELS.appVersion),
   onShown: (callback) => {
     const listener = (_event: unknown, preferred: unknown): void => {
       callback(typeof preferred === 'string' ? preferred : undefined)

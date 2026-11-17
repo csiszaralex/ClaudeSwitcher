@@ -136,8 +136,10 @@ The rule (`focus-window.ts` `ancestorChain`, `findTerminalWindow`): from the ses
 its ancestors, the first one that owns a `PseudoConsoleWindow` gives that window's owner. If that
 pseudo console has no owner, the result is no window: a farther ancestor's console shows another
 terminal. A classic console host without Windows Terminal would own a visible `ConsoleWindowClass`
-window itself; that window counts then (not seen on this machine, where the `ConsoleWindowClass`
-windows are hidden ones of background console programs, and a hidden one does not count). The jump
+window itself; that window counts then (not seen in the read-only measurement, where the
+`ConsoleWindowClass` windows were hidden ones of background console programs, and a hidden one
+does not count; in the owner's live test on 2026-11-17 a session in `conhost.exe pwsh` came
+forward, which path found it was not recorded). The jump
 uses this first for every session whose `entrypoint` is known and is not `claude-vscode`
 (`focusWith`), instead of the lock's pid: by the cwd pairing above that pid may be a VS Code window
 the session does not run in. Only when the console search finds nothing and the lock's pid is in
@@ -166,6 +168,12 @@ the terminal started (in the measurements above the owner of the pseudo console)
 no window, never a wrong one. Which process owns the pseudo console of a Git Bash tab was not
 measured. The native `claude.exe` measured above, started from pwsh or cmd, has its shell as its
 direct parent.
+
+Observed in the owner's live test on 2026-11-17 (ClaudeSwitcher 0.7.0): a session started with the
+native `claude.exe` in a Git Bash tab of Windows Terminal did not come forward. Its parent chain and
+the windows of its processes were not recorded, so which step failed (the chain, the console search
+or bringing the window forward) is not known. Git Bash in VS Code's integrated terminal was not
+tested.
 
 ### 3.3 Transcript
 

@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   UPDATE_CHECK_INTERVAL_MS,
   createUpdateController,
-  manualCheckLabel,
   updateChoice,
-  updateLabel,
+  updateItemLabel,
   updateNotice,
   updatePrompt,
-  type ManualCheckState,
+  versionArticle,
   type UpdateChoice,
+  type UpdateItem,
   type UpdateNotice,
   type Updater,
   type UpdaterLog,
@@ -71,6 +71,11 @@ function fakeUpdater() {
   return { updater, checks, downloads, installs, listeners }
 }
 
+/** The update item's states, as the controller sends them. */
+const CHECK: UpdateItem = { kind: 'check' }
+const BUSY: UpdateItem = { kind: 'busy' }
+const install = (version: string): UpdateItem => ({ kind: 'install', version })
+
 /** A fake `every`: the test fires the interval by hand. */
 function fakeEvery() {
   const timers: { fn: () => void; ms: number; stopped: boolean }[] = []
@@ -120,21 +125,18 @@ function setup(
   const timers = fakeEvery()
   const log = fakeLog()
   const { overlay, listeners: hiddenListeners } = fakeOverlay(options.overlayVisible ?? false)
-  /** Every `onOffer` call; the last one is what the tray shows. */
-  const offers: (string | undefined)[] = []
+  /** Every item sent to the tray; the last one is what it shows. */
+  const items: UpdateItem[] = []
+  /** Set `next` and the next `onItem` call throws (once), as a failing tray would. */
+  const itemFails = { next: false }
   /** Every popup shown, with the answer the test gives. */
   const prompts: { version: string; answer: Deferred }[] = []
   const saved: string[] = []
   /** Every box shown, with the close the test gives. */
   const notices: { notice: UpdateNotice; closed: Deferred }[] = []
-  /** Every state of the manual check's tray item. */
-  const manualStates: ManualCheckState[] = []
   const controller = createUpdateController({
     updater: fake.updater,
     enabled,
-    onOffer: (version) => {
-      offers.push(version)
-    },
     prompt: (version) => {
       const answer = deferred()
       prompts.push({ version, answer })
@@ -146,8 +148,12 @@ function setup(
       notices.push({ notice, closed })
       return closed.promise
     },
-    onManualCheck: (state) => {
-      manualStates.push(state)
+    onItem: (item) => {
+      if (itemFails.next) {
+        itemFails.next = false
+        throw new Error('no menu')
+      }
+      items.push(item)
     },
     overlayVisible: () => overlay.visible,
     onOverlayHidden: (listener) => {
@@ -161,12 +167,29 @@ function setup(
     log,
     every: timers.every,
   })
-  return { ...fake, ...timers, log, offers, prompts, saved, notices, manualStates, overlay, controller }
+  return { ...fake, ...timers, log, items, itemFails, prompts, saved, notices, overlay, controller }
 }
 
-describe('updateLabel', () => {
-  it('names the version on the tray line', () => {
-    expect(updateLabel('0.2.0')).toBe('Frissítés elérhető (0.2.0), telepítés')
+describe('updateItemLabel', () => {
+  it('labels the check, the running check, and the install that names the version', () => {
+    expect(updateItemLabel(CHECK)).toBe('Frissítés keresése most')
+    expect(updateItemLabel(BUSY)).toBe('Frissítés keresése…')
+    expect(updateItemLabel(install('0.2.0'))).toBe('Frissítés a 0.2.0 verzióra')
+    expect(updateItemLabel(install('1.0.0'))).toBe('Frissítés az 1.0.0 verzióra')
+  })
+})
+
+describe('versionArticle', () => {
+  it('gives "az" when the major version read in Hungarian starts with a vowel, else "a"', () => {
+    const article = (major: number): string => versionArticle(`${String(major)}.2.3`)
+    // "egy", "öt", "ötven…", "ötszáz…", "ezer…", "ötezer", "egymillió".
+    for (const major of [1, 5, 50, 59, 500, 599, 1000, 1999, 5000, 1000000]) expect(article(major), String(major)).toBe('az')
+    // "nulla", "kettő", "tíz", "tizenegy", "tizenöt", "hatvan", "száz", "hatszáz", "kétezer", "tízezer".
+    for (const major of [0, 2, 10, 11, 15, 60, 100, 600, 2000, 10000]) expect(article(major), String(major)).toBe('a')
+  })
+
+  it('gives "a" for a version without a leading number', () => {
+    expect(versionArticle('next')).toBe('a')
   })
 })
 
@@ -282,14 +305,14 @@ describe('createUpdateController', () => {
     expect(log.errors).toEqual([new Error('GitHub down')])
   })
 
-  it('offers a downloaded update in the tray, then starts no further check', async () => {
-    const { checks, downloads, running, listeners, offers } = setup(true)
+  it('offers a downloaded update in the tray item, then starts no further check', async () => {
+    const { checks, downloads, running, listeners, items } = setup(true)
     checks[0]?.resolve(found('0.2.0'))
     await settle()
     listeners.downloaded?.({ version: '0.2.0' })
     downloads[0]?.resolve([])
     await settle()
-    expect(offers).toEqual(['0.2.0'])
+    expect(items).toEqual([CHECK, install('0.2.0')])
 
     running()[0]?.fn()
     expect(checks).toHaveLength(1)
@@ -305,8 +328,8 @@ describe('createUpdateController', () => {
     expect(installs).toEqual([[true, true]])
   })
 
-  it('after stop: no check, no timer, no tray update and no install', () => {
-    const { controller, checks, running, listeners, offers, installs } = setup(true)
+  it('after stop: no check, no timer, no item change and no install', () => {
+    const { controller, checks, running, listeners, items, installs } = setup(true)
     controller.stop()
     expect(running()).toHaveLength(0)
 
@@ -316,7 +339,7 @@ describe('createUpdateController', () => {
     expect(running()).toHaveLength(0)
 
     listeners.downloaded?.({ version: '0.2.0' })
-    expect(offers).toEqual([])
+    expect(items).toEqual([CHECK])
     controller.install()
     expect(installs).toEqual([])
   })
@@ -342,7 +365,7 @@ describe('the update popup', () => {
     expect(prompts).toHaveLength(1)
   })
 
-  it('"Frissítés most" installs exactly like the tray line', async () => {
+  it('"Frissítés most" installs exactly like the install item', async () => {
     const { listeners, prompts, installs } = setup(false)
     listeners.downloaded?.({ version: '0.2.0' })
     prompts[0]?.answer.resolve('install')
@@ -350,12 +373,12 @@ describe('the update popup', () => {
     expect(installs).toEqual([[true, true]])
   })
 
-  it('"Most ne" closes it and keeps the tray line and the install', async () => {
-    const { controller, listeners, prompts, offers, installs, saved } = setup(false)
+  it('"Most ne" closes it and keeps the install item and the install', async () => {
+    const { controller, listeners, prompts, items, installs, saved } = setup(false)
     listeners.downloaded?.({ version: '0.2.0' })
     prompts[0]?.answer.resolve('later')
     await settle()
-    expect(offers).toEqual(['0.2.0'])
+    expect(items).toEqual([CHECK, install('0.2.0')])
     expect(installs).toEqual([])
     expect(saved).toEqual([])
 
@@ -363,8 +386,8 @@ describe('the update popup', () => {
     expect(installs).toEqual([[true, true]])
   })
 
-  it('"Verzió kihagyása" persists the version, removes the tray line and the install, and lets the checks go on', async () => {
-    const { controller, checks, downloads, running, listeners, prompts, offers, installs, saved } = setup(true)
+  it('"Verzió kihagyása" persists the version, turns the item back to the check, and lets the checks go on', async () => {
+    const { controller, checks, downloads, running, listeners, prompts, items, installs, saved } = setup(true)
     checks[0]?.resolve(found('0.2.0'))
     await settle()
     listeners.downloaded?.({ version: '0.2.0' })
@@ -373,7 +396,7 @@ describe('the update popup', () => {
     prompts[0]?.answer.resolve('skip')
     await settle()
     expect(saved).toEqual(['0.2.0'])
-    expect(offers).toEqual(['0.2.0', undefined])
+    expect(items).toEqual([CHECK, install('0.2.0'), CHECK])
     controller.install()
     expect(installs).toEqual([])
 
@@ -390,12 +413,12 @@ describe('the update popup', () => {
     await settle()
     expect(downloads).toHaveLength(2)
     listeners.downloaded?.({ version: '0.3.0' })
-    expect(offers).toEqual(['0.2.0', undefined, '0.3.0'])
+    expect(items).toEqual([CHECK, install('0.2.0'), CHECK, install('0.3.0')])
     expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0', '0.3.0'])
   })
 
   it('never downloads or offers a version skipped in an earlier run', async () => {
-    const { checks, downloads, listeners, prompts, offers, log } = setup(true, { skippedVersion: '0.2.0' })
+    const { checks, downloads, listeners, prompts, items, log } = setup(true, { skippedVersion: '0.2.0' })
     checks[0]?.resolve(found('0.2.0'))
     await settle()
     expect(downloads).toHaveLength(0)
@@ -403,14 +426,14 @@ describe('the update popup', () => {
 
     // Even a download reported anyway shows nothing.
     listeners.downloaded?.({ version: '0.2.0' })
-    expect(offers).toEqual([])
+    expect(items).toEqual([CHECK])
     expect(prompts).toHaveLength(0)
   })
 
   it('waits while the overlay is visible and shows once it hides', () => {
-    const { listeners, prompts, offers, overlay } = setup(false, { overlayVisible: true })
+    const { listeners, prompts, items, overlay } = setup(false, { overlayVisible: true })
     listeners.downloaded?.({ version: '0.2.0' })
-    expect(offers).toEqual(['0.2.0'])
+    expect(items).toEqual([CHECK, install('0.2.0')])
     expect(prompts).toHaveLength(0)
 
     overlay.hide()
@@ -463,12 +486,7 @@ describe('the update popup', () => {
   })
 })
 
-describe('manualCheckLabel and updateNotice', () => {
-  it('labels the tray item idle and busy', () => {
-    expect(manualCheckLabel('idle')).toBe('Frissítés keresése most')
-    expect(manualCheckLabel('busy')).toBe('Frissítés keresése…')
-  })
-
+describe('updateNotice', () => {
   it('names the running version in the "latest" box, and points to the log in the "failed" one', () => {
     expect(updateNotice('latest', '0.1.0')).toEqual({
       type: 'info',
@@ -484,12 +502,12 @@ describe('manualCheckLabel and updateNotice', () => {
 })
 
 describe('the manual check', () => {
-  it('shows the tray item idle from the start', () => {
-    const { manualStates } = setup(false)
-    expect(manualStates).toEqual(['idle'])
+  it('shows the check item from the start', () => {
+    const { items } = setup(false)
+    expect(items).toEqual([CHECK])
   })
 
-  it('opens the popup of the update on offer again, without a check, but never a second one while it is open', async () => {
+  it('from a menu shown before the download landed, opens its popup again, without a check, but never a second one while it is open', async () => {
     const { controller, checks, listeners, prompts, installs } = setup(false)
     listeners.downloaded?.({ version: '0.2.0' })
     controller.checkNow()
@@ -508,22 +526,23 @@ describe('the manual check', () => {
   })
 
   it('checks with the setting off, shows the item busy meanwhile, and offers the download in the popup', async () => {
-    const { controller, checks, downloads, listeners, prompts, offers, notices, manualStates } = setup(false)
+    const { controller, checks, downloads, listeners, prompts, items, notices } = setup(false)
     controller.checkNow()
     expect(checks).toHaveLength(1)
-    expect(manualStates).toEqual(['idle', 'busy'])
+    expect(items).toEqual([CHECK, BUSY])
 
     checks[0]?.resolve(found('0.2.0'))
     await settle()
     expect(downloads).toHaveLength(1)
-    expect(manualStates).toEqual(['idle', 'busy'])
+    expect(items).toEqual([CHECK, BUSY])
 
+    // The item stays busy until the download is done, then offers the install.
     listeners.downloaded?.({ version: '0.2.0' })
+    expect(items).toEqual([CHECK, BUSY])
     downloads[0]?.resolve([])
     await settle()
-    expect(offers).toEqual(['0.2.0'])
     expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
-    expect(manualStates).toEqual(['idle', 'busy', 'idle'])
+    expect(items).toEqual([CHECK, BUSY, install('0.2.0')])
     expect(notices).toEqual([])
   })
 
@@ -543,7 +562,7 @@ describe('the manual check', () => {
   })
 
   it('offers a skipped version, which stays skipped for the automatic checks', async () => {
-    const { controller, checks, downloads, listeners, prompts, offers, saved, running } = setup(false, {
+    const { controller, checks, downloads, listeners, prompts, items, saved, running } = setup(false, {
       skippedVersion: '0.2.0',
     })
     controller.checkNow()
@@ -553,13 +572,13 @@ describe('the manual check', () => {
     listeners.downloaded?.({ version: '0.2.0' })
     downloads[0]?.resolve([])
     await settle()
-    expect(offers).toEqual(['0.2.0'])
+    expect(items).toEqual([CHECK, BUSY, install('0.2.0')])
     expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
 
-    // "Verzió kihagyása" again: the tray line goes, the version stays skipped, nothing new is saved.
+    // "Verzió kihagyása" again: the item is the check again, the version stays skipped, nothing new is saved.
     prompts[0]?.answer.resolve('skip')
     await settle()
-    expect(offers).toEqual(['0.2.0', undefined])
+    expect(items).toEqual([CHECK, BUSY, install('0.2.0'), CHECK])
     expect(saved).toEqual([])
 
     // The automatic checks still leave it.
@@ -568,12 +587,12 @@ describe('the manual check', () => {
     await settle()
     expect(downloads).toHaveLength(1)
     listeners.downloaded?.({ version: '0.2.0' })
-    expect(offers).toEqual(['0.2.0', undefined])
+    expect(items).toEqual([CHECK, BUSY, install('0.2.0'), CHECK])
     expect(running()).toHaveLength(1)
   })
 
-  it('"Most ne" on a manually offered skipped version keeps its tray line and the install', async () => {
-    const { controller, checks, downloads, listeners, prompts, offers, installs } = setup(false, {
+  it('"Most ne" on a manually offered skipped version keeps its install item and the install', async () => {
+    const { controller, checks, downloads, listeners, prompts, items, installs } = setup(false, {
       skippedVersion: '0.2.0',
     })
     controller.checkNow()
@@ -584,17 +603,17 @@ describe('the manual check', () => {
     await settle()
     prompts[0]?.answer.resolve('later')
     await settle()
-    expect(offers).toEqual(['0.2.0'])
+    expect(items).toEqual([CHECK, BUSY, install('0.2.0')])
     controller.install()
     expect(installs).toEqual([[true, true]])
   })
 
   it('answers "latest" when nothing is newer, after the overlay hides', async () => {
-    const { controller, checks, notices, manualStates, overlay } = setup(false, { overlayVisible: true })
+    const { controller, checks, notices, items, overlay } = setup(false, { overlayVisible: true })
     controller.checkNow()
     checks[0]?.resolve(upToDate)
     await settle()
-    expect(manualStates).toEqual(['idle', 'busy', 'idle'])
+    expect(items).toEqual([CHECK, BUSY, CHECK])
     expect(notices).toEqual([])
 
     overlay.hide()
@@ -620,17 +639,17 @@ describe('the manual check', () => {
     expect(log.errors).toEqual([new Error('offline'), new Error('bad latest.yml')])
   })
 
-  it('logs a box that throws instead of rejecting, and is idle again for the next click', async () => {
-    const { controller, checks, log, manualStates } = setup(false, { notifyThrows: true })
+  it('logs a box that throws instead of rejecting, and offers the check again for the next click', async () => {
+    const { controller, checks, log, items } = setup(false, { notifyThrows: true })
     controller.checkNow()
     checks[0]?.resolve(upToDate)
     await settle()
     expect(log.errors).toEqual([new Error('no dialog')])
-    expect(manualStates.at(-1)).toBe('idle')
+    expect(items.at(-1)).toEqual(CHECK)
 
     controller.checkNow()
     expect(checks).toHaveLength(2)
-    expect(manualStates.at(-1)).toBe('busy')
+    expect(items.at(-1)).toEqual(BUSY)
   })
 
   it('still shows the next dialog after a box threw synchronously', async () => {
@@ -659,24 +678,71 @@ describe('the manual check', () => {
   })
 
   it('ignores a click while its check runs', () => {
-    const { controller, checks, manualStates } = setup(false)
+    const { controller, checks, items } = setup(false)
     controller.checkNow()
     controller.checkNow()
     expect(checks).toHaveLength(1)
-    expect(manualStates).toEqual(['idle', 'busy'])
+    expect(items).toEqual([CHECK, BUSY])
   })
 
   it('joins an automatic check that runs, instead of starting a second one', async () => {
-    const { controller, checks, notices, manualStates } = setup(true)
+    const { controller, checks, notices, items } = setup(true)
     controller.checkNow()
     expect(checks).toHaveLength(1)
-    expect(manualStates).toEqual(['idle', 'busy'])
+    expect(items).toEqual([CHECK, BUSY])
 
     checks[0]?.resolve(upToDate)
     await settle()
     expect(checks).toHaveLength(1)
     expect(notices.map((shown) => shown.notice)).toEqual(['latest'])
-    expect(manualStates).toEqual(['idle', 'busy', 'idle'])
+    expect(items).toEqual([CHECK, BUSY, CHECK])
+  })
+
+  it('joins an automatic check that downloads: check, busy, install, one popup, no second check', async () => {
+    const { controller, checks, downloads, listeners, prompts, items, notices } = setup(true)
+    controller.checkNow()
+    expect(items).toEqual([CHECK, BUSY])
+
+    checks[0]?.resolve(found('0.2.0'))
+    await settle()
+    expect(downloads).toHaveLength(1)
+    listeners.downloaded?.({ version: '0.2.0' })
+    downloads[0]?.resolve([])
+    await settle()
+    expect(checks).toHaveLength(1)
+    expect(items).toEqual([CHECK, BUSY, install('0.2.0')])
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
+    expect(notices).toEqual([])
+  })
+
+  it('logs a throwing onItem and still checks on the next click', async () => {
+    const { controller, checks, notices, items, itemFails, log } = setup(false)
+    itemFails.next = true
+    controller.checkNow()
+    expect(log.errors).toEqual([new Error('no menu')])
+    checks[0]?.resolve(upToDate)
+    await settle()
+    expect(notices.map((shown) => shown.notice)).toEqual(['latest'])
+    notices[0]?.closed.resolve()
+    await settle()
+
+    controller.checkNow()
+    expect(checks).toHaveLength(2)
+    expect(items.at(-1)).toEqual(BUSY)
+  })
+
+  it('still shows the popup when sending the install item throws, and sends that item on the next call', () => {
+    const { listeners, prompts, items, itemFails, log } = setup(false)
+    itemFails.next = true
+    listeners.downloaded?.({ version: '0.2.0' })
+    expect(log.errors).toEqual([new Error('no menu')])
+    expect(items).toEqual([CHECK])
+    expect(prompts.map((prompt) => prompt.version)).toEqual(['0.2.0'])
+
+    // The failed item counts as not shown: the next report of the download sends it.
+    listeners.downloaded?.({ version: '0.2.0' })
+    expect(items).toEqual([CHECK, install('0.2.0')])
+    expect(prompts).toHaveLength(1)
   })
 
   it('downloads the skipped version a joined automatic check left', async () => {
@@ -701,7 +767,7 @@ describe('the manual check', () => {
   })
 
   it('shows nothing after stop', async () => {
-    const { controller, checks, notices, prompts, manualStates } = setup(false)
+    const { controller, checks, notices, prompts, items } = setup(false)
     controller.checkNow()
     controller.stop()
     checks[0]?.resolve(upToDate)
@@ -710,7 +776,7 @@ describe('the manual check', () => {
     expect(checks).toHaveLength(1)
     expect(notices).toEqual([])
     expect(prompts).toEqual([])
-    expect(manualStates).toEqual(['idle', 'busy'])
+    expect(items).toEqual([CHECK, BUSY])
   })
 
   it('shows no waiting box after stop', async () => {

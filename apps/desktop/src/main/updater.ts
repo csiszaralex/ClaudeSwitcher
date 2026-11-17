@@ -2,29 +2,53 @@
  * The in-app update of the installed app, on top of electron-updater's `autoUpdater` (created only
  * when `app.isPackaged`, in `index.ts`; a repo build has no updater at all). It checks at start-up
  * and every `UPDATE_CHECK_INTERVAL_MS` while the `checkForUpdates` setting is on, downloads a new
- * release in the background unless the user skipped that version, and offers it in the tray
- * (`updateLabel`) and once per run in a popup (`updatePrompt`). It installs only on the user's
- * choice, never on its own: the user may be deciding a request. The tray item
- * `manualCheckLabel('idle')` checks on the user's request (`checkNow`), whatever the setting.
+ * release in the background unless the user skipped that version, and offers it in the tray's
+ * update item (`UpdateItem`) and once per run in a popup (`updatePrompt`). It installs only on the
+ * user's choice, never on its own: the user may be deciding a request. Without a download on offer
+ * the same item checks on the user's request (`checkNow`), whatever the setting.
  */
 
 /** How often the installed app looks for a new release while `checkForUpdates` is on. */
 export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
-/** The tray line of a downloaded update; clicking it installs the update. */
-export function updateLabel(version: string): string {
-  return `Frissítés elérhető (${version}), telepítés`
-}
-
-/** The manual check's tray item: `idle` offers it, `busy` while its check (or download) runs. */
-export type ManualCheckState = 'idle' | 'busy'
+/**
+ * The tray's one update item: `check` offers a manual check (`checkNow`), `busy` while that check
+ * (or its download) runs, `install` a downloaded update on offer, which its click installs
+ * (`install`). The controller alone decides it (`onItem`), so the label and the click agree.
+ */
+export type UpdateItem =
+  | { readonly kind: 'check' }
+  | { readonly kind: 'busy' }
+  | { readonly kind: 'install'; readonly version: string }
 
 /**
- * The label of the manual check's tray item. Not "Frissítések keresése": that is the label of the
+ * The Hungarian definite article before `version` read aloud: "az" when the spoken number starts
+ * with a vowel, else "a". The major version decides. Hungarian reads a number in groups of three
+ * digits, so its first word comes from the leading group: a leading group of exactly 1 is "egy"
+ * (1, "egymillió") or "ezer" (1000..1999), and one that starts with 5 is "öt", "ötven…" or
+ * "ötszáz…"; every other first word ("nulla", "kettő", "tíz", "tizen…", "száz", …) starts with a
+ * consonant. A version without a leading number gets "a".
+ */
+export function versionArticle(version: string): 'a' | 'az' {
+  const major = /^\d+/.exec(version)?.[0].replace(/^0+(?=\d)/, '')
+  if (major === undefined) return 'a'
+  const leadingGroup = major.slice(0, ((major.length - 1) % 3) + 1)
+  return leadingGroup === '1' || leadingGroup.startsWith('5') ? 'az' : 'a'
+}
+
+/**
+ * The label of the tray's update item. Not "Frissítések keresése": that is the label of the
  * `checkForUpdates` toggle in the same menu.
  */
-export function manualCheckLabel(state: ManualCheckState): string {
-  return state === 'idle' ? 'Frissítés keresése most' : 'Frissítés keresése…'
+export function updateItemLabel(item: UpdateItem): string {
+  switch (item.kind) {
+    case 'check':
+      return 'Frissítés keresése most'
+    case 'busy':
+      return 'Frissítés keresése…'
+    case 'install':
+      return `Frissítés ${versionArticle(item.version)} ${item.version} verzióra`
+  }
 }
 
 /** The answer to a manual check that has nothing to offer: `latest` (nothing newer) or `failed`. */
@@ -126,15 +150,15 @@ export interface Updater {
 export interface UpdateController {
   /** The `checkForUpdates` setting changed: off stops the checks, on checks now and restarts them. */
   readonly setEnabled: (enabled: boolean) => void
-  /** The tray line (or "Frissítés most" in the popup): quits and installs the downloaded update. */
+  /** The update item's `install` (or "Frissítés most" in the popup): quits and installs the downloaded update. */
   readonly install: () => void
   /**
-   * The tray item `manualCheckLabel('idle')`: with a downloaded update on offer, its popup again;
-   * otherwise a check now, whatever the setting, that offers a skipped version too. It ends in the
-   * popup or in an `UpdateNotice` box.
+   * The update item's `check`: a check now, whatever the setting, that offers a skipped version
+   * too. It ends in the popup or in an `UpdateNotice` box. A click on a menu shown before a
+   * download landed opens that download's popup again instead.
    */
   readonly checkNow: () => void
-  /** The quit cleanup: no check, no download, no tray update, no popup, no box and no install after this. */
+  /** The quit cleanup: no check, no download, no item change, no popup, no box and no install after this. */
   readonly stop: () => void
 }
 
@@ -148,17 +172,12 @@ export function createUpdateController(deps: {
   updater: Updater
   /** The `checkForUpdates` setting at start-up. */
   enabled: boolean
-  /**
-   * The update on offer changed: a downloaded version shows `updateLabel(version)` in the tray,
-   * `undefined` (the user skipped it) removes the line.
-   */
-  onOffer: (version: string | undefined) => void
   /** Shows the update popup (`updatePrompt`) and resolves with the user's choice. */
   prompt: (version: string) => Promise<UpdateChoice>
   /** Shows the box of a manual check (`updateNotice`); resolves once it is closed. */
   notify: (notice: UpdateNotice) => Promise<unknown>
-  /** The manual check's tray item changed (`manualCheckLabel`); called with `idle` at creation. */
-  onManualCheck: (state: ManualCheckState) => void
+  /** The tray's update item changed (`updateItemLabel`); called with `check` at creation, then on each change. */
+  onItem: (item: UpdateItem) => void
   /**
    * Whether the overlay is visible. The overlay hides on blur, so a popup or box taking the focus
    * would close it while the user decides a request: they wait until the overlay is hidden.
@@ -189,7 +208,7 @@ export function createUpdateController(deps: {
   /** The check (and its download) running now: one at a time, automatic or manual. */
   let running: Promise<CheckOutcome> | undefined
   /**
-   * The downloaded version on offer (the tray line, `install`). A skipped version is on offer only
+   * The downloaded version on offer (the `install` item, `install`). A skipped version is on offer only
    * after a manual check downloaded it.
    */
   let downloaded: string | undefined
@@ -207,6 +226,30 @@ export function createUpdateController(deps: {
   let openPrompt: string | undefined
   let dialogOpen = false
   let manualBusy = false
+  /** The item the tray shows (`JSON.stringify` of it), so an unchanged one is not sent again. */
+  let shownItem: string | undefined
+
+  /**
+   * Sends the item the state gives, if it changed: a running manual check first, then a download on
+   * offer. Never throws: a throwing `onItem` is logged and `shownItem` stays as it was, so the next
+   * call sends the item again.
+   */
+  function showItem(): void {
+    const item: UpdateItem = manualBusy
+      ? { kind: 'busy' }
+      : downloaded !== undefined
+        ? { kind: 'install', version: downloaded }
+        : { kind: 'check' }
+    const key = JSON.stringify(item)
+    if (key === shownItem) return
+    try {
+      deps.onItem(item)
+    } catch (error: unknown) {
+      log.error(error)
+      return
+    }
+    shownItem = key
+  }
 
   // Installing only on the user's choice: a normal quit must not install (`addQuitHandler` in
   // electron-updater's BaseUpdater installs on quit only while `autoInstallOnAppQuit` is on).
@@ -217,7 +260,8 @@ export function createUpdateController(deps: {
   updater.on('update-downloaded', (info) => {
     if (stopped || (info.version === skipped && info.version !== offeringSkipped)) return
     downloaded = info.version
-    deps.onOffer(info.version)
+    log.info(`update ${info.version} downloaded`)
+    showItem()
     if (prompted.has(info.version)) return
     prompted.add(info.version)
     pendingPrompt = info.version
@@ -257,9 +301,12 @@ export function createUpdateController(deps: {
             install()
             break
           case 'later':
-            // The tray line stays. The popup comes back on the manual check's tray item (`checkNow`),
-            // or after the next start's check: electron-updater reports the cached download again
-            // (`DownloadedUpdateHelper.validateDownloadedPath`).
+            // The `install` item stays for this run. After a restart, the start-up check (only
+            // while `checkForUpdates` is on) offers the version again, item and popup:
+            // electron-updater reports the cached download again
+            // (`DownloadedUpdateHelper.validateDownloadedPath`). A skipped version that a manual
+            // check offered is the exception: the start-up check leaves it (`checkAndDownload`),
+            // so only a manual check offers it again.
             break
           case 'skip':
             skip(version)
@@ -293,7 +340,7 @@ export function createUpdateController(deps: {
   }
 
   /**
-   * Skips `version`: its tray line goes, and the automatic checks never download or offer it again
+   * Skips `version`: its `install` item goes, and the automatic checks never download or offer it again
    * (a manual check still does). Skipping the skipped version again saves nothing.
    */
   function skip(version: string): void {
@@ -306,7 +353,7 @@ export function createUpdateController(deps: {
     }
     if (downloaded === version) {
       downloaded = undefined
-      deps.onOffer(undefined)
+      showItem()
     }
   }
 
@@ -400,12 +447,12 @@ export function createUpdateController(deps: {
       return
     }
     manualBusy = true
-    deps.onManualCheck('busy')
+    showItem()
     void manualOutcome()
       .then((outcome) => {
         manualBusy = false
         if (stopped) return
-        deps.onManualCheck('idle')
+        showItem()
         switch (outcome) {
           case 'downloaded':
             // `update-downloaded` queued the popup already, unless this run showed it before.
@@ -425,16 +472,10 @@ export function createUpdateController(deps: {
         }
       })
       .catch((error: unknown) => {
-        // A throwing `onManualCheck` (`showPrompt` and `showNotice` catch their own dialog's throw):
-        // logged, and the item is idle again, so the next click checks again.
+        // `showItem` catches a throwing `onItem`, and `showPrompt` and `showNotice` their own
+        // dialog's throw; what is left (a throwing `overlayVisible`) comes after `manualBusy` was
+        // cleared and the item sent, so the next click checks again. Logged only.
         log.error(error)
-        manualBusy = false
-        if (stopped) return
-        try {
-          deps.onManualCheck('idle')
-        } catch (resetError: unknown) {
-          log.error(resetError)
-        }
       })
   }
 
@@ -469,7 +510,7 @@ export function createUpdateController(deps: {
     updater.quitAndInstall(true, true)
   }
 
-  deps.onManualCheck('idle')
+  showItem()
   let enabled = deps.enabled
   if (enabled) start()
 

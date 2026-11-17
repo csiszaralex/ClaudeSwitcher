@@ -18,6 +18,8 @@ export const OVERLAY_CHANNELS = {
   focusSession: 'session:focus',
   hide: 'overlay:hide',
   settings: 'settings:get',
+  /** This app's version (main `app.getVersion()`); the renderer reads it with a check (`readAppVersion`). */
+  appVersion: 'app:version',
   /**
    * Pushed by the main process when the overlay window is shown. The optional argument is the
    * session id to select (a clicked notification); the renderer reads it with a check.
