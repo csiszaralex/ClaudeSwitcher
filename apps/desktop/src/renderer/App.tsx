@@ -12,6 +12,7 @@ import { requestSource, type RequestSource, type SessionHost } from '../shared/r
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
+import { usageLimitStatusText } from './usage-limit.js'
 import { useAppVersion, withAppVersion } from './useAppVersion.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
@@ -89,6 +90,8 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // and its folder. The source also names the host in the panel's and the notices' texts.
   const selectedSource = requestSource(selectedRowView?.session?.entrypoint)
   const selectedFolder = selectedRowView === undefined ? undefined : rowFolder(selectedRowView)
+  // The account's usage limit for the status bar, on the overlay's one-second clock (`now`).
+  const limitNote = usageLimitStatusText(sessions, now)
 
   // The latest state for the async handlers (show, the step after a decision). A closure from
   // render time can go stale before the decision's reply or the show: the step has to be computed
@@ -267,7 +270,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
                 {pending !== undefined
                   ? pendingRowText(pending)
                   : row.session !== undefined
-                    ? summarize(row.session)
+                    ? summarize(row.session, now)
                     : ''}
               </span>
               <span className="age">
@@ -345,11 +348,17 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         )}
         <span className="status-checks">
           {/*
-            The app's version, then the time of the heartbeat. The heartbeat is the only sign that
+            The account's usage limit while one runs (`usageLimitStatusText`), the app's version,
+            then the time of the heartbeat. The heartbeat is the only sign that
             the list is ALIVE and just has no change. The daemon does not resend an identical
             snapshot, so on an idle machine a still list and a stopped poll would otherwise look
             exactly the same.
           */}
+          {limitNote !== undefined && (
+            <span className="status-limit" title="Egy munkamenet elérte a használati limitet">
+              {limitNote}
+            </span>
+          )}
           <span className="muted">
             {withAppVersion(
               appVersion,

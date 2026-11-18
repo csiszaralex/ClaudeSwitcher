@@ -1,6 +1,7 @@
 import type { SessionActivity, SessionStatus, SubagentView } from '@claudeswitcher/core'
 import { isCommandTool } from '@claudeswitcher/core/browser'
 import { clip } from '../shared/row-text.js'
+import { sessionUsageLimit, usageLimitRowText } from './usage-limit.js'
 
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
@@ -64,16 +65,20 @@ export function subagentLabel(
 /**
  * The row's summary. Order: a waiting session's notification; the active subagent's work (the
  * latest one, and `+N` if more run), because the main session then only runs the `Agent` tool, or
- * nothing after the Stop; the main session's running tool; finally the last assistant text.
+ * nothing after the Stop; the main session's running tool; the usage limit that ended the turn
+ * (`sessionUsageLimit`, its text by `now`, the overlay's clock); finally the last assistant text.
  * A pending decision is stronger still: App shows it instead of this.
  */
-export function summarize(view: {
-  status: SessionStatus
-  // It can be missing at runtime (see below), so the type says so too.
-  activity?: SessionActivity | undefined
-  notificationText?: string | undefined
-  subagents?: readonly SubagentView[] | undefined
-}): string {
+export function summarize(
+  view: {
+    status: SessionStatus
+    // It can be missing at runtime (see below), so the type says so too.
+    activity?: SessionActivity | undefined
+    notificationText?: string | undefined
+    subagents?: readonly SubagentView[] | undefined
+  },
+  now: number,
+): string {
   // By its type `activity` is required, but at runtime the daemon's message can be anything. A
   // missing field would throw a render error here that takes down the WHOLE overlay, so this
   // guards here too, not only in the ErrorBoundary.
@@ -85,10 +90,12 @@ export function summarize(view: {
     return clip(`↳ ${more}${subagentWork(latest)}`)
   }
 
+  const limit = sessionUsageLimit(view)
   const raw =
     waitingText !== undefined ? waitingText
     : view.status === 'working' && view.activity?.runningTool !== undefined
       ? toolLabel(view.activity.runningTool, view.activity.toolDetail)
+    : limit !== undefined ? usageLimitRowText(limit, now)
     : view.activity?.lastAssistantText ?? '—'
 
   return clip(raw)

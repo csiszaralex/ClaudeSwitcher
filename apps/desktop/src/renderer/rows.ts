@@ -22,7 +22,7 @@ interface SessionLike {
   waitingSince?: number | undefined
   stoppedAt?: number | undefined
   bridgeSessionId?: unknown
-  activity?: { lastEventAt?: number | undefined } | undefined
+  activity?: { lastEventAt?: number | undefined; usageLimit?: unknown } | undefined
 }
 
 /** A row of the list: a known session, or a pending request whose session is not seen yet. */
@@ -99,7 +99,10 @@ const TONE_RANK: Readonly<Record<MarkerTone, number>> = {
   done: 3,
   working: 4,
   seen: 5,
-  idle: 6,
+  // A session the usage limit stopped: nothing to do in it until the reset, so below every finish,
+  // but above the plainly idle ones, because its text tells when it can go on.
+  limit: 6,
+  idle: 7,
 }
 
 /** The groups that wait for an answer in the app: in them the longest waiting row comes first. */
