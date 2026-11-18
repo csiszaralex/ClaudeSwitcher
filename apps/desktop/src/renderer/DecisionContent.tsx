@@ -1,6 +1,7 @@
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useMemo, type JSX } from 'react'
 import { LINE_MARK, panelContent } from './edit-preview.js'
+import { gitExplanation } from './git-explain.js'
 import type { SummaryView } from './summary-view.js'
 import type { SessionHost } from '../shared/request-source.js'
 import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
@@ -17,13 +18,14 @@ interface Props {
 }
 
 /**
- * The scrolling middle of the decision panel: warning, description, command, preview and details.
- * `null` when it has none of them.
+ * The scrolling middle of the decision panel: warning, description, the git lines of a Bash
+ * command (git-explain.ts), command, preview and details. `null` when it has none of them.
  */
 export function DecisionContent({ decision, summary, host }: Props): JSX.Element | null {
   // App re-renders every second (for its clocks); formatting a big script or comparing a file line
   // by line must not run on every tick.
   const { preview, details } = useMemo(() => panelContent(decision), [decision])
+  const gitLines = useMemo(() => gitExplanation(decision), [decision])
   const limitNote = (
     <p className="muted">
       Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik. A teljes
@@ -36,7 +38,14 @@ export function DecisionContent({ decision, summary, host }: Props): JSX.Element
   // Nothing to show, e.g. a question or a plan whose own view shows the content (summary-view.ts
   // `showsSummary`): no scrolling area at all, so its `min-height` (styles.css `.decision-scroll`)
   // leaves no empty band.
-  if (!sandboxOff && decision.description === undefined && summary === undefined && preview === undefined && !hasDetails) {
+  if (
+    !sandboxOff &&
+    decision.description === undefined &&
+    gitLines.length === 0 &&
+    summary === undefined &&
+    preview === undefined &&
+    !hasDetails
+  ) {
     return null
   }
 
@@ -47,6 +56,13 @@ export function DecisionContent({ decision, summary, host }: Props): JSX.Element
       )}
       {/* The description above the command: below a long command it would not show without scrolling. */}
       {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
+      {/* What each git call does, between Claude's own words and the command they explain. */}
+      {gitLines.map((line, index) => (
+        <p key={index} className={line.level === 'danger' ? 'decision-warning' : 'git-explain'}>
+          {line.level === 'danger' && 'Veszélyes: '}
+          <code className="git-call">{line.call}</code> · {line.text}
+        </p>
+      ))}
       {summary !== undefined && (
         <pre className="decision-summary">
           {summary.segments.map((segment, index) =>

@@ -62,6 +62,22 @@ describe('DecisionPanel layout', () => {
     expect(render(bashDecision({ description: undefined }))).not.toContain('decision-description')
   })
 
+  it('puts the git lines between the description and the command, a dangerous one as a warning', () => {
+    const command = 'git add -A && git push --force'
+    const html = render(bashDecision({ toolInput: { command, description: 'Pushes' }, summary: command, description: 'Pushes' }))
+    const description = html.indexOf('decision-description')
+    const normalLine = html.indexOf('<p class="git-explain"><code class="git-call">git add</code> · ')
+    const dangerLine = html.indexOf('<p class="decision-warning">Veszélyes: <code class="git-call">git push --force</code> · ')
+    expect(description).toBeGreaterThan(-1)
+    expect(normalLine).toBeGreaterThan(description)
+    expect(dangerLine).toBeGreaterThan(normalLine)
+    expect(html.indexOf('decision-summary')).toBeGreaterThan(dangerLine)
+  })
+
+  it('shows no git line for a command without git', () => {
+    expect(render(bashDecision())).not.toContain('git-call')
+  })
+
   it('shows the line count of a multi-line command in the header', () => {
     expect(render(bashDecision({ summary: 'node a.js\nnode b.js' }))).toContain('decision-lines')
   })

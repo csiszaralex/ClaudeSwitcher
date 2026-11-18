@@ -160,6 +160,10 @@ body {
 }
 /* It stands above the command (DecisionContent): the gap below it comes from the command's top margin. */
 .decision-description { margin: 8px 0 0; color: var(--text-soft); }
+/* A git call's plain line (git-explain.ts), quiet like the description; a dangerous one is a
+   `.decision-warning`. */
+.git-explain { margin: 8px 0 0; color: var(--text-dim); }
+.git-call { font: 12px Consolas, "Cascadia Mono", monospace; }
 .decision-details { margin: 0 0 6px; }
 .decision-details summary { color: var(--text-dim); cursor: pointer; }
 .decision-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

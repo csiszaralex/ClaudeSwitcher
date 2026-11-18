@@ -14,7 +14,7 @@ export function isEditTool(toolName: string): toolName is EditTool {
   return EDIT_TOOL_SET.has(toolName)
 }
 
-/** Claude Code's bash tool. */
+/** Claude Code's bash tool: the panel explains the git calls of its `command` (desktop `git-explain.ts`). */
 export const BASH_TOOL = 'Bash'
 
 /** Tools that run a command: their detail is the command itself (and its description). */

@@ -456,7 +456,7 @@ PermissionRequest ─→ PendingDecision, the HTTP response suspended
 
 | `tool_name` | The overlay shows | Buttons | Answer to the hook |
 |---|---|---|---|
-| Bash, PowerShell, WebFetch, MCP, … | the tool, the input, who asks (session or subagent) | Allow · Deny (with a reason) · Project level · Machine level | `allow` / `deny`+`message` / `allow`+`updatedPermissions` |
+| Bash, PowerShell, WebFetch, MCP, … | the tool, the input, who asks (session or subagent); for a Bash command that runs git, one line per git call saying what it does, the dangerous ones marked | Allow · Deny (with a reason) · Project level · Machine level | `allow` / `deny`+`message` / `allow`+`updatedPermissions` |
 | Write, Edit | the file, a diff summary | Allow · Deny · For this session automatically | `allow` / `deny` / `allow`+`setMode acceptEdits session` |
 | AskUserQuestion | the questions and the options | option choice (several for multi-select), free text → Answer | `allow`+`updatedInput.answers` (key: the question's text, value: the option label; several labels joined with `", "`; free text verbatim) |
 | ExitPlanMode | the plan's text | Reject with feedback · **"Jóváhagyás a VS Code-ban"** (approve in VS Code: jumps there; for a terminal session "a terminálban") | `deny`+`message`; it cannot be approved from the hook (§10) |

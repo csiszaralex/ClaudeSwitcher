@@ -157,6 +157,7 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 - `main/tray-icon.ts`: the tray icon, drawn at runtime (`trayLook`, `trayIconPixels`, `trayIconPng`, 16x16), the flash frame, and the one home of its colours (`TRAY_COLORS`). `main/tray.ts` alternates the flash frame with the normal icon on each tick. The colours the list shows too equal its CSS variables in `renderer/styles.css`, and the idle icon equals `resources/tray.png`, the source of the app icon (`scripts/make-icon.mjs`); `tray-icon.test.ts` checks both.
 - `main/focus-window.ts`: the jump to a session's window (`focusSessionWindow`): which way each session goes (`focusWith`, `FocusOutcome`), the VS Code paths (`findMainWindow`, the `code` CLI), the terminal path (`ancestorChain`, `findTerminalWindow`, the console window classes `PSEUDO_CONSOLE_CLASS` and `CLASSIC_CONSOLE_CLASS`, `MAX_ANCESTORS`) and when the tab URI may be sent (`tabFocusUri`). The terminal path reads the process tree from `main/process-probe.ts` `takeProcessTree`, the same Toolhelp32 list the native probe uses.
 - `shared/entrypoint.ts`: the registry `entrypoint` values the app knows (`VSCODE_ENTRYPOINT`, `CLI_ENTRYPOINT`, `HEADLESS_ENTRYPOINT`); `main/focus-window.ts` and `shared/request-source.ts` use them.
+- `renderer/git-explain.ts`: the plain Hungarian line of each git call in a Bash request's command, which `DecisionContent` shows (`gitExplanation`): how the command is split into calls and words the way bash would (quotes, substitutions, here-documents and redirections), which subcommands and flags it knows, their texts, and which of them are dangerous (`GitLevel`; the level of the hedged `git checkout <name>` line is `CHECKOUT_NAME_LEVEL`). Pure; a call it cannot classify with confidence gets no line.
 - `shared/overlay-channels.ts`, `shared/setup-channels.ts`: the IPC channel names and reply types of the two windows.
 
 ## Claude Code coupling points
@@ -177,7 +178,7 @@ The app reads several undocumented Claude Code internals. If Claude Code changes
 | The hook configuration in `settings.json` | desktop `main/claude-integration.ts`; the list of hooks in core `hook-contract.ts` |
 | Notification types and their roughly 6 s delay after the permission request | daemon `session-store.ts` `WAITING_TYPES`, `LATE_PROMPT_WINDOW_MS` |
 | The tab URI (`vscode://anthropic.claude-code/open?session=`) and `entrypoint === 'claude-vscode'` | desktop `main/focus-window.ts` `tabFocusUri`; the entrypoint constant is `shared/entrypoint.ts` `VSCODE_ENTRYPOINT` |
-| Tool names and `tool_input` fields | core `tool-names.ts`, `decision.ts`, `tool-detail.ts`; renderer `edit-preview.ts`, `tool-details.ts` |
+| Tool names and `tool_input` fields | core `tool-names.ts`, `decision.ts`, `tool-detail.ts`; renderer `edit-preview.ts`, `tool-details.ts`, `git-explain.ts` (Bash's `command`) |
 
 ## Environment notes
 
