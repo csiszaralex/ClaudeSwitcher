@@ -42,8 +42,10 @@ function displayName(record: LiveSession['record']): string {
  * arrives the moment something happens.
  *
  * A session is waiting when it has a Notification wait, a pending decision, OR the registry shows
- * `status: 'waiting'`. When all of them are gone, the time is recorded: the non-waiting sessions
- * are sorted by it.
+ * `status: 'waiting'`.
+ *
+ * The order of `views()` is only by session id, so the snapshot is deterministic. The list's order
+ * is the renderer's (`rows.ts` `buildRows`).
  *
  * The registry source is for an app restart: a PermissionRequest that went to the old daemon and
  * the one-off Notification are not repeated, only the registry knows about the wait. Display only:
@@ -57,8 +59,6 @@ export class SessionStore {
   readonly #waiting = new Map<string, WaitState>()
   /** Per session, the start of the oldest pending (or released but still open) decision. */
   #pending: ReadonlyMap<string, number> = new Map()
-  /** When the session's wait last ended. For sorting only. */
-  readonly #waitEndedAt = new Map<string, number>()
   /** When the app last decided one of the session's requests, for the late Notification. */
   readonly #resolvedAt = new Map<string, number>()
   /** The time of the last Stop, until the session moves again, for the "just finished" mark. */
@@ -89,12 +89,6 @@ export class SessionStore {
         console.error('[store] listener failed', error)
       }
     }
-  }
-
-  #isWaiting(sessionId: string): boolean {
-    return (
-      this.#waiting.has(sessionId) || this.#pending.has(sessionId) || this.#registryWaitSince(sessionId) !== undefined
-    )
   }
 
   /**
@@ -129,19 +123,6 @@ export class SessionStore {
   }
 
   /**
-   * Runs the change and records the end of the wait for the sessions that were waiting before it
-   * and are not after it. In one place, so no path (decision, PostToolUse, Stop, non-waiting
-   * Notification) forgets it.
-   */
-  #tracking(sessionIds: Iterable<string>, now: number, change: () => void): void {
-    const before = [...sessionIds].filter((id) => this.#isWaiting(id))
-    change()
-    for (const id of before) {
-      if (!this.#isWaiting(id)) this.#waitEndedAt.set(id, now)
-    }
-  }
-
-  /**
    * @param subagents The active subagents per session, the most recently written first (from the
    * scanner). A missing entry means the session has no active subagent.
    */
@@ -152,10 +133,7 @@ export class SessionStore {
     subagents: ReadonlyMap<string, readonly SubagentView[]> = new Map(),
   ): void {
     const ids = new Set(sessions.map((s) => s.record.sessionId))
-    // The registry's `waiting` comes and goes with the snapshot, so a wait can end here too.
-    this.#tracking(new Set([...this.#sessions.keys(), ...ids]), now, () => {
-      this.#sessions = new Map(sessions.map((s) => [s.record.sessionId, s]))
-    })
+    this.#sessions = new Map(sessions.map((s) => [s.record.sessionId, s]))
     this.#activities = activities
     this.#subagents = subagents
 
@@ -186,7 +164,7 @@ export class SessionStore {
       this.#waiting.delete(id)
     }
     // The same clean-up for the timestamps, so a vanished session does not leak.
-    for (const stamps of [this.#waitEndedAt, this.#stoppedAt, this.#clearedAt]) {
+    for (const stamps of [this.#stoppedAt, this.#clearedAt]) {
       for (const [id, at] of [...stamps]) {
         if (!ids.has(id) && now - at >= UNMATCHED_WAIT_GRACE_MS) stamps.delete(id)
       }
@@ -208,26 +186,21 @@ export class SessionStore {
     const resolvedAt = this.#resolvedAt.get(event.sessionId)
     const late =
       event.type === 'permission_prompt' && resolvedAt !== undefined && now - resolvedAt < LATE_PROMPT_WINDOW_MS
-    this.#tracking([event.sessionId], now, () => {
-      // The late prompt of a request already decided, see LATE_PROMPT_WINDOW_MS.
-      if (late) return
+    // The late prompt of a request already decided, see LATE_PROMPT_WINDOW_MS.
+    if (!late) {
       if (WAITING_TYPES.has(event.type)) {
         this.#waiting.set(event.sessionId, { since: now, text: event.text })
         this.#stoppedAt.delete(event.sessionId)
       } else {
         this.#clearWait(event.sessionId, now)
       }
-    })
+    }
     this.#emit()
   }
 
   applyLifecycle(event: LifecycleEvent, now: number = Date.now()): void {
-    this.#tracking([event.sessionId], now, () => {
-      if (event.kind === 'end') {
-        this.#sessions.delete(event.sessionId)
-      }
-      this.#clearWait(event.sessionId, now)
-    })
+    if (event.kind === 'end') this.#sessions.delete(event.sessionId)
+    this.#clearWait(event.sessionId, now)
     if (event.kind === 'stop') this.#stoppedAt.set(event.sessionId, now)
     // An ended session is not "just finished": if the registry still shows it for one more round, it must not come back so.
     if (event.kind === 'end') this.#stoppedAt.delete(event.sessionId)
@@ -249,9 +222,7 @@ export class SessionStore {
    * released, keeps the session waiting through `#pending`.
    */
   applyToolFinished(sessionId: string, now: number = Date.now()): void {
-    this.#tracking([sessionId], now, () => {
-      this.#clearWait(sessionId, now)
-    })
+    this.#clearWait(sessionId, now)
     this.#emit()
   }
 
@@ -277,21 +248,16 @@ export class SessionStore {
     resolvedByApp?: string,
     abortedByClient?: string,
   ): void {
-    const affected = new Set(this.#pending.keys())
-    if (resolvedByApp !== undefined) affected.add(resolvedByApp)
-    if (abortedByClient !== undefined) affected.add(abortedByClient)
     // A newly pending decision is a new PermissionRequest: the session moved again after the Stop.
     for (const id of pendingSince.keys()) {
       if (!this.#pending.has(id)) this.#stoppedAt.delete(id)
     }
-    this.#tracking(affected, now, () => {
-      this.#pending = new Map(pendingSince)
-      if (resolvedByApp !== undefined) {
-        this.#clearWait(resolvedByApp, now)
-        this.#resolvedAt.set(resolvedByApp, now)
-      }
-      if (abortedByClient !== undefined) this.#clearWait(abortedByClient, now)
-    })
+    this.#pending = new Map(pendingSince)
+    if (resolvedByApp !== undefined) {
+      this.#clearWait(resolvedByApp, now)
+      this.#resolvedAt.set(resolvedByApp, now)
+    }
+    if (abortedByClient !== undefined) this.#clearWait(abortedByClient, now)
     this.#emit()
   }
 
@@ -334,21 +300,8 @@ export class SessionStore {
       })
     }
 
-    // Waiting sessions first, the longest waiting on top. Then the non-waiting ones: the one whose
-    // wait ended most recently first (a user request: a just-decided session should not drop into
-    // the middle by name); last the ones that never waited during the daemon's life, by name.
-    return views.sort((a, b) => {
-      if (a.status === 'waiting' && b.status !== 'waiting') return -1
-      if (b.status === 'waiting' && a.status !== 'waiting') return 1
-      if (a.status === 'waiting' && b.status === 'waiting') {
-        return (a.waitingSince ?? 0) - (b.waitingSince ?? 0)
-      }
-      const endedA = this.#waitEndedAt.get(a.sessionId)
-      const endedB = this.#waitEndedAt.get(b.sessionId)
-      if (endedA !== undefined && endedB === undefined) return -1
-      if (endedB !== undefined && endedA === undefined) return 1
-      if (endedA !== undefined && endedB !== undefined && endedA !== endedB) return endedB - endedA
-      return a.name.localeCompare(b.name)
-    })
+    // By id only, so an unchanged state serialises identically (the daemon's identical-snapshot
+    // filter) whatever order the registry lists the sessions in.
+    return views.sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0))
   }
 }
