@@ -100,6 +100,8 @@ CI (`.github/workflows/verify.yml`) runs the same `pnpm verify` on a Windows run
 
 For a change that should only touch comments (a translation, for example), `pnpm check:comment-only -- <base>` (`scripts/check-comment-only-diff.mjs`) compares the token streams of every changed source file and fails on any change outside comments, test titles and the strings listed in an optional `--allow` file. The usage is at the top of the script.
 
+To find out which process shows a window that flashes up (a console during a test run, for example), `scripts/measure/window-watch.ps1` logs every top-level window shown, with its class, title, process, parent process and command line, read only. The usage is at the top of the script; the log goes to `%TEMP%` by default.
+
 ### Code
 
 - **No synchronous child processes** (`execSync`, `execFileSync`, `spawnSync`) outside tests. They stop the Electron main thread, and with it the daemon and every session's hooks. ESLint enforces this.
