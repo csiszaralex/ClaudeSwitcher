@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DecisionKind, SessionStatus as Status } from '@claudeswitcher/core'
-import { activeDecision, buildRows, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
+import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, selectOnShow } from './selection.js'
 
 const session = (
@@ -230,6 +230,21 @@ describe('buildRows order', () => {
     ]
     expect(ids(buildRows(sessions, [], NONE_SEEN))).toEqual(['s1', 's2', 's3'])
     expect(ids(buildRows([...sessions].reverse(), [], NONE_SEEN))).toEqual(['s1', 's2', 's3'])
+  })
+})
+
+describe('panelRequest', () => {
+  it('gives the selected row and its active request, the one the panel shows', () => {
+    const [row] = buildRows([session('a', 'waiting', 4)], [decision('old', 'a', 1, true), decision('live', 'a', 2)], NONE_SEEN)
+    const panel = panelRequest(row)
+    expect(panel?.row.sessionId).toBe('a')
+    expect(panel?.decision.id).toBe('live')
+  })
+
+  it('is undefined without a selected row or without a request: then the status bar names the source', () => {
+    const [row] = buildRows([session('i', 'idle')], [], NONE_SEEN)
+    expect(panelRequest(row)).toBeUndefined()
+    expect(panelRequest(undefined)).toBeUndefined()
   })
 })
 

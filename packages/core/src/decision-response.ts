@@ -16,16 +16,22 @@ export interface HookDecisionBody {
 
 export type DecisionResult = { ok: true; body: HookDecisionBody } | { ok: false; reason: string }
 
+/*
+ * The refusal texts go back to the app only (`DecisionResult`), never to Claude Code, and they do not
+ * name where the session's own prompt is: the core does not know the session's source. The app
+ * names it in its own texts and its jump button (the desktop's `sessionHost`).
+ */
+
 /** Three independent measurements showed that Claude Code ignores a plan approval given by the hook. */
-export const PLAN_APPROVAL_UNSUPPORTED =
-  'Tervet a hookból nem lehet jóváhagyni (Claude Code korlát). Hagyd jóvá a VSCode-ban.'
+export const PLAN_APPROVAL_UNSUPPORTED = 'Tervet a hookból nem lehet jóváhagyni (Claude Code-korlát).'
 
 /**
  * For an unreadable request (`PermissionRequestInfo.readable`) the panel sees only the tool name,
- * so an allow would go out blind. The panel shows this same text in place of the buttons.
+ * so an allow would go out blind. The panel shows this text in place of the buttons, followed by
+ * where else the request can be decided.
  */
 export const UNREADABLE_REQUEST =
-  'A kérés tartalma nem olvasható (ismeretlen formátum), ezért itt nem engedélyezhető. Tilthatod, vagy dönts a VSCode-ban.'
+  'A kérés tartalma nem olvasható (ismeretlen formátum), ezért itt nem engedélyezhető.'
 
 function accept(decision: Record<string, unknown>): DecisionResult {
   return { ok: true, body: { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } } }
@@ -84,19 +90,19 @@ export function buildHookResponse(request: PermissionRequestInfo, decision: User
       if (request.kind !== 'question') return refuse('Válasz csak kérdésre adható.')
       // An empty list means the questions could not be read (a changed `tool_input` shape). The
       // per-question check would then refuse nothing, and an `allow` without answers would go out:
-      // exactly what the design forbids. From here only VS Code or a deny leads on.
+      // exactly what the design forbids. From here only the session's own prompt or a deny leads on.
       if (request.questions.length === 0) {
-        return refuse('A kérdéseket nem sikerült kiolvasni. Válaszolj a VSCode-ban.')
+        return refuse('A kérdéseket nem sikerült kiolvasni.')
       }
       // The answer keys are exactly the question texts: a foreign key would be an answer the user
       // did not give to a question shown here.
       const texts = new Set(request.questions.map((question) => question.question))
       for (const key of Object.keys(decision.answers)) {
-        if (!texts.has(key)) return refuse(`Nincs ilyen kérdés: „${key}"`)
+        if (!texts.has(key)) return refuse(`Nincs ilyen kérdés: „${key}”`)
       }
       for (const question of request.questions) {
         if ((decision.answers[question.question] ?? '').trim() === '') {
-          return refuse(`Hiányzik a válasz: „${question.question}"`)
+          return refuse(`Hiányzik a válasz: „${question.question}”`)
         }
       }
       return accept({ behavior: 'allow', updatedInput: { ...request.toolInput, answers: decision.answers } })

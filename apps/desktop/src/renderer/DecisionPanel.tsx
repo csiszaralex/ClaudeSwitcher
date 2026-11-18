@@ -1,5 +1,4 @@
 import type { UserDecision } from '@claudeswitcher/core'
-import { UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
 import { errorMessage } from '../shared/error-message.js'
@@ -22,8 +21,8 @@ import { RuleEditor } from './RuleEditor.js'
 import { SourceLabel } from './SourceLabel.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
 import { requestFacts, type RequestSource } from '../shared/request-source.js'
-import { releasedMessage } from './session-marker.js'
-import { summaryView } from './summary-view.js'
+import { releasedMessage, unreadableMessage } from './session-marker.js'
+import { showsSummary, summaryView } from './summary-view.js'
 
 function isRuleAction(action: DecisionAction): boolean {
   return action === 'rule-project' || action === 'rule-machine'
@@ -207,7 +206,7 @@ export function DecisionPanel({
             }}
           />
           <button type="submit" disabled={busy}>
-            Tilt
+            {DENY_BUTTON.label}
           </button>
           <button
             type="button"
@@ -246,7 +245,7 @@ export function DecisionPanel({
     if (!decision.readable) {
       return (
         <div className="decision-row">
-          <span className="muted">{UNREADABLE_REQUEST}</span>
+          <span className="muted">{unreadableMessage(source.host)}</span>
           {actionButton(DENY_BUTTON)}
           <JumpButton host={source.host} onJump={onJump} />
         </div>
@@ -277,9 +276,10 @@ export function DecisionPanel({
         if (isUnreadableQuestion(decision)) {
           return (
             <div className="decision-row">
-              <span className="muted">A kérdés formátuma ismeretlen, itt nem válaszolható.</span>
+              <span className="muted">A kérdés formátuma ismeretlen, itt nem válaszolható meg.</span>
+              {/* No key letter: a question has no shortcuts (`ACTION_BUTTONS.question`). */}
               <button type="button" disabled={busy} onClick={() => { setMode('deny') }}>
-                Tilt…
+                {DENY_BUTTON.label}
               </button>
               <JumpButton host={source.host} onJump={onJump} />
             </div>
@@ -310,8 +310,9 @@ export function DecisionPanel({
   }
 
   // Memoised on the request, so the App's re-render every second (for its clocks) does not format
-  // it again. The header shows its line count, `DecisionContent` its text.
-  const summary = useMemo(() => summaryView(decision.summary), [decision])
+  // it again. The header shows its line count, `DecisionContent` its text; neither shows while the
+  // question form or the plan panel below shows the content itself (`showsSummary`).
+  const summary = useMemo(() => (showsSummary(decision) ? summaryView(decision.summary) : undefined), [decision])
 
   // For a question and a plan the action area itself is long (questions, plan text): there its
   // inside scrolls, and the submit buttons stay at the bottom.
@@ -326,7 +327,7 @@ export function DecisionPanel({
       <header className="decision-head">
         <span className="decision-kind">{KIND_LABEL[decision.kind]}</span>
         <span className="decision-tool">{decision.toolName}</span>
-        {summary.lines > 1 && <span className="decision-lines">{summary.lines.toLocaleString('hu-HU')} sor</span>}
+        {summary !== undefined && summary.lines > 1 && <span className="decision-lines">{summary.lines.toLocaleString('hu-HU')} sor</span>}
         {agentLabel !== undefined && (
           <span className="decision-agent" title={agentLabel}>
             {agentLabel}

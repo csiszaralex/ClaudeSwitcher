@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionStatus as Status } from '@claudeswitcher/core'
-import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
+import { PERMISSION_RELEASE_AFTER_MS, UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import { sessionHost } from '../shared/request-source.js'
-import { hasRemoteControl, outsideAppMessage, releasedMessage, statusMarker } from './session-marker.js'
+import { hasRemoteControl, outsideAppMessage, releasedMessage, statusMarker, unreadableMessage } from './session-marker.js'
 
 const SESSION_ID = '6f1c2a3e-0000-4000-8000-000000000031'
 const session = (status: Status, stoppedAt?: number): { sessionId: string; status: Status; stoppedAt?: number | undefined } => ({
@@ -132,8 +132,8 @@ const ENTRYPOINTS = ['claude-vscode', 'cli', 'sdk-cli', 'sdk-future', undefined]
 
 describe('releasedMessage', () => {
   it("names the session's own host, and the phone only with Remote Control", () => {
-    expect(releasedMessage(false, sessionHost('claude-vscode'))).toBe('A VSCode-ban még dönthetsz.')
-    expect(releasedMessage(true, sessionHost('claude-vscode'))).toBe('A VSCode-ban vagy a telefonon még dönthetsz.')
+    expect(releasedMessage(false, sessionHost('claude-vscode'))).toBe('A VS Code-ban még dönthetsz.')
+    expect(releasedMessage(true, sessionHost('claude-vscode'))).toBe('A VS Code-ban vagy a telefonon még dönthetsz.')
     expect(releasedMessage(false, sessionHost('cli'))).toBe('A terminálban még dönthetsz.')
     expect(releasedMessage(true, sessionHost('sdk-cli'))).toBe('A terminálban vagy a telefonon még dönthetsz.')
     expect(releasedMessage(false, sessionHost(undefined))).toBe('A sessionben még dönthetsz.')
@@ -150,7 +150,7 @@ describe('releasedMessage', () => {
 describe('outsideAppMessage', () => {
   it("names the session's own host at the start of the sentence", () => {
     const reason = 'Az appból ezt nem lehet eldönteni (az app újraindult, vagy a kérés nem hozzá érkezett).'
-    expect(outsideAppMessage(sessionHost('claude-vscode'))).toBe(`A VSCode-ban vár jóváhagyásra. ${reason}`)
+    expect(outsideAppMessage(sessionHost('claude-vscode'))).toBe(`A VS Code-ban vár jóváhagyásra. ${reason}`)
     expect(outsideAppMessage(sessionHost('cli'))).toBe(`A terminálban vár jóváhagyásra. ${reason}`)
     expect(outsideAppMessage(sessionHost('sdk-cli'))).toBe(`A terminálban vár jóváhagyásra. ${reason}`)
     expect(outsideAppMessage(sessionHost(undefined))).toBe(`A sessionben vár jóváhagyásra. ${reason}`)
@@ -158,6 +158,22 @@ describe('outsideAppMessage', () => {
 
   it('has no dash inside a sentence', () => {
     for (const entrypoint of ENTRYPOINTS) expect(outsideAppMessage(sessionHost(entrypoint))).not.toMatch(/[–—]/)
+  })
+})
+
+describe('unreadableMessage', () => {
+  it("follows the core's text with the way out at the session's own host, named once", () => {
+    const at = (entrypoint: string | undefined): string => unreadableMessage(sessionHost(entrypoint))
+    expect(at('claude-vscode')).toBe(`${UNREADABLE_REQUEST} Tilthatod, vagy dönts a VS Code-ban.`)
+    expect(at('cli')).toBe(`${UNREADABLE_REQUEST} Tilthatod, vagy dönts a terminálban.`)
+    expect(at('sdk-cli')).toBe(`${UNREADABLE_REQUEST} Tilthatod, vagy dönts a terminálban.`)
+    expect(at(undefined)).toBe(`${UNREADABLE_REQUEST} Tilthatod, vagy dönts a sessionben.`)
+    expect(at('sdk-future')).toBe(`${UNREADABLE_REQUEST} Tilthatod, vagy dönts a sessionben.`)
+    expect(at('cli')).not.toContain('VS Code')
+  })
+
+  it('has no dash inside a sentence', () => {
+    for (const entrypoint of ENTRYPOINTS) expect(unreadableMessage(sessionHost(entrypoint))).not.toMatch(/[–—]/)
   })
 })
 
@@ -174,7 +190,7 @@ describe('statusMarker released tooltip', () => {
   it("names the session's own host, from its entrypoint", () => {
     const at = (entrypoint: string | undefined): string =>
       statusMarker({ sessionId: SESSION_ID, status: 'waiting', entrypoint }, released, NONE_SEEN).title
-    expect(at('claude-vscode')).toContain('A VSCode-ban még dönthetsz.')
+    expect(at('claude-vscode')).toContain('A VS Code-ban még dönthetsz.')
     expect(at('cli')).toContain('A terminálban még dönthetsz.')
     expect(at(undefined)).toContain('A sessionben még dönthetsz.')
   })

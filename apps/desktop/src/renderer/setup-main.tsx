@@ -8,7 +8,7 @@ const container = document.getElementById('root')
 if (container === null) throw new Error('The #root element is missing from setup.html')
 
 function setupFailed(message: string): JSX.Element {
-  return <div className="empty">A beállítások ablak hibába futott: {message}</div>
+  return <div className="empty">A beállítások ablaka hibába futott: {message}</div>
 }
 
 createRoot(container).render(

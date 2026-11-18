@@ -175,9 +175,10 @@ describe('DecisionBroker', () => {
     await flush()
     expect(held.done).toBe(true)
     expect(held.value).toBeUndefined()
-    // The native prompt stayed, so the row does too, but from now on only VS Code can decide.
+    // The native prompt stayed, so the row does too, but from now on only the session's own prompt
+    // can decide. The refusal names no host: the app does, by the session's source.
     expect(broker.views()[0]?.released).toBe(true)
-    expect(broker.decide(view!.id, { type: 'allow' }).ok).toBe(false)
+    expect(broker.decide(view!.id, { type: 'allow' })).toEqual({ ok: false, reason: 'Az app már elengedte ezt a kérést.' })
 
     broker.sessionStopped(view!.sessionId)
     expect(broker.views()).toEqual([])

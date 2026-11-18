@@ -31,7 +31,7 @@ describe('shortenPath', () => {
 
 describe('formatDuration', () => {
   it('renders seconds under a minute', () => {
-    expect(formatDuration(45_000)).toBe('45mp')
+    expect(formatDuration(45_000)).toBe('45 mp')
   })
 
   it('renders minutes and seconds', () => {
@@ -43,7 +43,7 @@ describe('formatDuration', () => {
   })
 
   it('clamps a negative duration to zero', () => {
-    expect(formatDuration(-5)).toBe('0mp')
+    expect(formatDuration(-5)).toBe('0 mp')
   })
 })
 
@@ -94,7 +94,7 @@ describe('toolLabel', () => {
   })
 
   it('quotes the subject of any other tool', () => {
-    expect(toolLabel('Grep', 'createPanel')).toBe('Grep „createPanel"')
+    expect(toolLabel('Grep', 'createPanel')).toBe('Grep „createPanel”')
   })
 })
 
@@ -108,16 +108,16 @@ describe('summarize: the tool detail and the subagents', () => {
 
   it('shows the work of an active subagent instead of the main session', () => {
     const line = summarize({ status: 'working', activity: { runningTool: 'Agent' }, subagents: [searching] })
-    expect(line).toBe('↳ Final-review fix wave · Grep „createPanel"')
+    expect(line).toBe('↳ Final-review fix wave · Grep „createPanel”')
   })
 
   it('shows the most recent subagent and a count of the others', () => {
     const line = summarize({ status: 'idle', activity: {}, subagents: [searching, reading] })
-    expect(line).toBe('↳ +1 · Final-review fix wave · Grep „createPanel"')
+    expect(line).toBe('↳ +1 · Final-review fix wave · Grep „createPanel”')
   })
 
   it('falls back to the agent type, then to a generic name, and shows a subagent between tools', () => {
-    expect(summarize({ status: 'idle', activity: {}, subagents: [reading] })).toBe('↳ Explore · Read „x.ts"')
+    expect(summarize({ status: 'idle', activity: {}, subagents: [reading] })).toBe('↳ Explore · Read „x.ts”')
     expect(summarize({ status: 'idle', activity: {}, subagents: [{ agentId: 'a3', updatedAt: 1 }] })).toBe('↳ subagent')
   })
 

@@ -58,7 +58,7 @@ If an automatic check is running at the click, the item waits for its result ins
 
 On the first start the **"Első beállítás"** (first setup) window opens. It shows the settings you have not confirmed yet; **"Mentés"** (save) confirms everything the window shows.
 
-The window's **"Claude Code integráció"** (Claude Code integration) section is what connects the app to Claude Code. Click **"Telepítés"** (install). This changes your Claude Code user settings, `~/.claude/settings.json` (or `settings.json` under `CLAUDE_CONFIG_DIR`, if you set that variable):
+The window's **"Claude Code-integráció"** (Claude Code integration) section is what connects the app to Claude Code. Click **"Telepítés"** (install). This changes your Claude Code user settings, `~/.claude/settings.json` (or `settings.json` under `CLAUDE_CONFIG_DIR`, if you set that variable):
 
 - it adds one HTTP hook for each Claude Code event the app listens to. Each hook posts to the app on `http://127.0.0.1:47821/hooks/...` with an `Authorization: Bearer $CLAUDESWITCHER_TOKEN` header;
 - it sets `env.CLAUDESWITCHER_TOKEN`, the app's own token.
@@ -110,7 +110,7 @@ The default hotkey is **Shift+Alt+Space**; change it in the settings window (**"
 
 The rows are grouped by their marker, in this order: orange ●, burgundy ●, ◆, green ✓, ◐, blue ✓, ○. In the two ● groups the longest waiting row comes first (a request the app holds is let go after 590 seconds): a row with such a request counts from the oldest one's arrival, any other from when its wait began. When the list opens it selects the longest waiting row of the two groups; if no row waits, it keeps the selected row, or selects the top one. The ◐ rows go by name, so they do not swap places while they work. In the other groups the most recently active row comes first (its last transcript event, its finish or its wait, whichever is latest); rows with the same time go by name.
 
-The status bar at the bottom shows, on the left, where the selected session comes from (the source label described under [Deciding a request](#deciding-a-request)) and its folder, shortened in the middle when it is long (the full path is in its tooltip); on the right, the app's version (a build from the repo shows `0.0.0`) and **"ellenőrizve"** (checked), how long ago the app last scanned the sessions, for example `0.7.0 · ellenőrizve: 2mp`.
+The status bar at the bottom shows, on the left, where the selected session comes from (the source label described under [Deciding a request](#deciding-a-request)) and its folder, shortened in the middle when it is long (the full path is in its tooltip). While a decision panel is open, the left part stays empty: the panel names the source and the request's folder itself, and so does the notice that stands in for a panel that cannot be shown. On the right, the app's version (a build from the repo shows `0.0.0`) and **"ellenőrizve"** (checked), how long ago the app last scanned the sessions, for example `0.7.0 · ellenőrizve: 2 mp`.
 
 Keys: the arrows move the selection, **Enter** jumps to the selected session (so does a double click), **Esc** hides the list.
 
@@ -120,12 +120,12 @@ The jump brings the session's window to the front. For a VS Code extension sessi
 
 Selecting a waiting session opens its request. What you can do depends on the request:
 
-- **A tool call** (a command, a web fetch, an MCP tool): **"Engedélyez"** (allow, key A), **"Tilt…"** (deny, key D, with an optional reason sent to the session), **"Projekt-szabály…"** (project rule, key P) and **"Gépszintű szabály…"** (machine-wide rule, key G). The rule buttons show Claude Code's suggested rule, which you can edit before allowing; Claude Code then writes it to the project's `.claude/settings.local.json` or to `~/.claude/settings.json`.
-- **A file edit:** **"Engedélyez"** (A), **"Tilt…"** (D), and **"Erre a sessionre automatikusan"** (S): accept this session's further edits automatically.
-- **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer).
-- **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there.
+- **A tool call** (a command, a web fetch, an MCP tool): **"Engedélyezés"** (allow, key A), **"Tiltás"** (deny, key D, with an optional reason sent to the session), **"Projektszabály"** (project rule, key P) and **"Gépszintű szabály"** (machine-wide rule, key G). The rule buttons show Claude Code's suggested rule, which you can edit before allowing; Claude Code then writes it to the project's `.claude/settings.local.json` or to `~/.claude/settings.json`.
+- **A file edit:** **"Engedélyezés"** (A), **"Tiltás"** (D), and **"Erre a sessionre automatikusan"** (S): accept this session's further edits automatically.
+- **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer). Each question shows once, above its options. Once the app has released the request, the panel shows the first question above the jump button.
+- **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VS Code-ban →"** (approve in VS Code) jumps there. The plan's text shows once, in full; once the app has released the request, only its first line shows.
 
-Where the app cannot decide (a released request, a plan's approval, a request it does not hold), the texts and the **"Ugrás a VSCode-ba"** (jump to VS Code) button name where the session's own prompt is, by its source: VS Code for an extension session, the terminal for a CLI session and a `claude -p` run (**"Ugrás a terminálhoz"**, **"Jóváhagyás a terminálban →"**, **"A terminálban még dönthetsz."**), and the session itself when the source is unknown or another value (**"Ugrás a sessionhöz"**, **"A sessionben még dönthetsz."**).
+Where the app cannot decide (a released request, a plan's approval, an unreadable request, a request it does not hold), the texts and the **"Ugrás a VS Code-ba"** (jump to VS Code) button name where the session's own prompt is, by its source: VS Code for an extension session, the terminal for a CLI session and a `claude -p` run (**"Ugrás a terminálhoz"**, **"Jóváhagyás a terminálban →"**, **"A terminálban még dönthetsz."**), and the session itself when the source is unknown or another value (**"Ugrás a sessionhöz"**, **"A sessionben még dönthetsz."**).
 
 Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
 
@@ -135,7 +135,7 @@ The app holds a request for at most 590 seconds, just under the 600-second timeo
 
 ## Uninstall
 
-1. Open the settings window from the tray (**"Beállítások…"**) and click **"Eltávolítás"** in the **"Claude Code integráció"** section. The window shows **"Nincs telepítve"** (not installed) once the hooks are gone from `settings.json`.
+1. Open the settings window from the tray (**"Beállítások…"**) and click **"Eltávolítás"** in the **"Claude Code-integráció"** section. The window shows **"Nincs telepítve"** (not installed) once the hooks are gone from `settings.json`.
 2. Uninstall ClaudeSwitcher in Windows Settings, under Apps.
 
 The uninstaller also removes the integration on its own, and turns off start at login. If it cannot remove the integration, it says so and goes on; then remove the ClaudeSwitcher entries from `settings.json` by hand. It removes the program files, the shortcuts and the remembered shortcut choices.

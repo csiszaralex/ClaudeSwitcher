@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { broadRules, editorRows, RULE_EDITOR_MAX_ROWS, RULE_EDITOR_MIN_ROWS, ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
+import { broadRules, editorRows, RULE_EDITOR_MAX_ROWS, RULE_EDITOR_MIN_ROWS, ruleEditorSeed, suggestionTooltip, unparsableLineText } from './rule-editor.js'
 
 describe('editorRows', () => {
   it('grows with the line count between the minimum and the cap', () => {
@@ -51,6 +51,14 @@ describe('ruleEditorSeed', () => {
         { toolName: 'Bash', ruleContent: 'ls *' },
       ]),
     ).toEqual({ text: 'Bash(ls *)', multiline: 2 })
+  })
+})
+
+describe('unparsableLineText', () => {
+  it('names the line with the article its number takes, and quotes it the Hungarian way', () => {
+    expect(unparsableLineText(1, 'Bash(')).toBe('Az 1. sor nem szabály: „Bash(”')
+    expect(unparsableLineText(2, 'Bash(')).toBe('A 2. sor nem szabály: „Bash(”')
+    expect(unparsableLineText(5, 'x')).toBe('Az 5. sor nem szabály: „x”')
   })
 })
 

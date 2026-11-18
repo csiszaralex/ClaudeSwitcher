@@ -212,7 +212,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
         </button>
       ) : undefined}
       <section className="setup-section">
-        <h2>Claude Code integráció</h2>
+        <h2>Claude Code-integráció</h2>
         <div className="setup-row">
           <span className="setup-label">{integrationLabel(state.integration)}</span>
           {integrationActions(state.integration).map((action) => (

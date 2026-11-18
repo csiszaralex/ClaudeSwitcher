@@ -124,14 +124,14 @@
       ${If} ${Silent}
         Abort
       ${EndIf}
-      !insertmacro MUI_HEADER_TEXT "Parancsikonok" "Válaszd ki, hol legyen ClaudeSwitcher parancsikon."
+      !insertmacro MUI_HEADER_TEXT "Parancsikonok" "Válaszd ki, hol legyen ClaudeSwitcher-parancsikon."
       nsDialogs::Create 1018
       Pop $0
       ${If} $0 == error
         Abort
       ${EndIf}
 
-      ${NSD_CreateCheckbox} 0 0 100% 12u "Start menü parancsikon"
+      ${NSD_CreateCheckbox} 0 0 100% 12u "Parancsikon a Start menüben"
       Pop $csStartMenuCheckbox
       ${If} $csStartMenuShortcut == 1
         ${NSD_Check} $csStartMenuCheckbox
@@ -215,7 +215,7 @@
     Push $0
     !insertmacro csRunHelper "--uninstall" ${CS_EXIT_INTEGRATION_FAILED}
     ${If} $0 == ${CS_EXIT_INTEGRATION_FAILED}
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Nem sikerült eltávolítani a Claude Code integrációt a settings.json fájlból. Az eltávolítás folytatódik, a ClaudeSwitcher bejegyzéseit kézzel kell törölni." /SD IDOK
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Nem sikerült eltávolítani a Claude Code-integrációt a settings.json fájlból. Az eltávolítás folytatódik, a ClaudeSwitcher bejegyzéseit kézzel kell törölni." /SD IDOK
     ${EndIf}
     Pop $0
 

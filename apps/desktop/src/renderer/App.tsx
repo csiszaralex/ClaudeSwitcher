@@ -6,9 +6,9 @@ import { JumpButton } from './JumpButton.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
-import { activeDecision, buildRows, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
+import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
-import { requestSource, type SessionHost } from '../shared/request-source.js'
+import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
@@ -19,11 +19,33 @@ import './styles.css'
 
 /**
  * Stands in for the panel when the app cannot decide: one line of explanation and the jump to the
- * session's host, so the row is not a dead end.
+ * session's host, so the row is not a dead end. With `origin` it also shows the source line the
+ * panel would have (its `decision-source`), for a stand-in while the status bar leaves the source
+ * out (App's `panel`).
  */
-function JumpNotice({ text, host, sessionId }: { text: string; host: SessionHost; sessionId: string }): JSX.Element {
+function JumpNotice({
+  text,
+  host,
+  sessionId,
+  origin,
+}: {
+  text: string
+  host: SessionHost
+  sessionId: string
+  origin?: { source: RequestSource; folder: string | undefined } | undefined
+}): JSX.Element {
   return (
     <section className="decision">
+      {origin !== undefined && (
+        <p className="decision-source">
+          <SourceLabel source={origin.source} />
+          {origin.folder !== undefined && (
+            <span className="muted" title={origin.folder}>
+              {origin.folder}
+            </span>
+          )}
+        </p>
+      )}
       <div className="decision-actions">
         <div className="decision-row">
           <span className="muted">{text}</span>
@@ -60,10 +82,11 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedRowView = selected === -1 ? undefined : rows[selected]
 
-  // The panel shows the oldest request the app can still decide; the status marker needs all of them.
-  const decision = selectedRowView === undefined ? undefined : activeDecision(selectedRowView.decisions)
-  // The status bar's left part: where the selected session comes from, and its folder. The source
-  // also names the host in the panel's and the notices' texts.
+  // The panel shows the oldest request the app can still decide (rows.ts `panelRequest`); the
+  // status marker needs all of them. Computed once: it decides both the panel and the status bar.
+  const panel = panelRequest(selectedRowView)
+  // The status bar's left part, when no panel names them: where the selected session comes from,
+  // and its folder. The source also names the host in the panel's and the notices' texts.
   const selectedSource = requestSource(selectedRowView?.session?.entrypoint)
   const selectedFolder = selectedRowView === undefined ? undefined : rowFolder(selectedRowView)
 
@@ -171,7 +194,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
       // With the decision panel open, Tab moves between the buttons there, not a jump.
-      if (event.key === 'Enter' || (event.key === 'Tab' && decision === undefined)) {
+      if (event.key === 'Enter' || (event.key === 'Tab' && panel === undefined)) {
         event.preventDefault()
         const id = ids[resolveSelectedIndex(ids, selectedId)]
         if (id !== undefined) void window.claudeswitcher.focusSession(id)
@@ -255,37 +278,44 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         })}
       </ul>
 
-      {decision !== undefined && selectedRowView !== undefined && (
+      {panel !== undefined && (
         // A boundary of its own, keyed by the request id: a faulty request takes down only its own
         // panel, the list and the other requests keep working. Another request gets a new boundary.
         <ErrorBoundary
-          key={decision.id}
+          key={panel.decision.id}
           label="decision panel"
           fallback={() => (
-            <JumpNotice text="A kérés nem jeleníthető meg" host={selectedSource.host} sessionId={selectedRowView.sessionId} />
+            // The status bar leaves the source out while `panel` is defined, so the stand-in names
+            // it. The folder is the row's (`rowFolder`): the request that failed to render is not read.
+            <JumpNotice
+              text="A kérés nem jeleníthető meg."
+              host={selectedSource.host}
+              sessionId={panel.row.sessionId}
+              origin={{ source: selectedSource, folder: selectedFolder }}
+            />
           )}
         >
           <DecisionPanel
-            decision={decision}
+            decision={panel.decision}
             source={selectedSource}
-            agentLabel={subagentLabel(decision, selectedRowView.session?.subagents)}
-            remoteControl={selectedRowView.session !== undefined && hasRemoteControl(selectedRowView.session)}
+            agentLabel={subagentLabel(panel.decision, panel.row.session?.subagents)}
+            remoteControl={panel.row.session !== undefined && hasRemoteControl(panel.row.session)}
             keyHistory={keyHistory}
             onDecided={() => {
-              afterDecision(decision).catch((error: unknown) => {
+              afterDecision(panel.decision).catch((error: unknown) => {
                 console.error('[overlay] could not move on after the decision', error)
               })
             }}
             onJump={() => {
               // By the session id. For an unknown session the main process finds no window and does
               // not jump. The native prompt is still there, in VS Code or in the terminal.
-              void window.claudeswitcher.focusSession(selectedRowView.sessionId)
+              void window.claudeswitcher.focusSession(panel.row.sessionId)
             }}
           />
         </ErrorBoundary>
       )}
 
-      {decision === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
+      {panel === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
         // No held request, so nothing to decide, but the row must not be a dead end: the native
         // prompt is there, in VS Code or in the terminal.
         <JumpNotice
@@ -298,10 +328,12 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
       <div className="status-bar">
         {/*
           The selected session's source (as the panel shows it, shared/request-source.ts) and its
-          folder, shortened in the middle, the full path in the tooltip. It truncates on a narrow
-          window; the right part never does.
+          folder, shortened in the middle, the full path in the tooltip. Not while a decision panel
+          shows (`panel`): its source line names the source and the request's working folder, and
+          the panel's error stand-in (`JumpNotice` with `origin`) the source and this folder. It
+          truncates on a narrow window; the right part never does.
         */}
-        {selectedRowView !== undefined && (
+        {selectedRowView !== undefined && panel === undefined && (
           <span className="status-session">
             <SourceLabel source={selectedSource} />
             {selectedFolder !== undefined && (

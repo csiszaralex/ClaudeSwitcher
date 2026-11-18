@@ -15,8 +15,28 @@ export interface ActionButton {
   needsArming: boolean
 }
 
-/** Deny is never armed-gated, and it is also the only button an unreadable request keeps. */
-export const DENY_BUTTON: ActionButton = { action: 'deny', key: 'd', label: 'Tilt…', needsArming: false }
+/**
+ * Deny is never armed-gated, and it is also the only button an unreadable request keeps. Its label
+ * also names the deny form's submit button and an unreadable question's deny button.
+ */
+export const DENY_BUTTON: ActionButton = { action: 'deny', key: 'd', label: 'Tiltás', needsArming: false }
+
+/** Allow: in the button row of a command and of a file edit. */
+const ALLOW_BUTTON: ActionButton = { action: 'allow', key: 'a', label: 'Engedélyezés', needsArming: true }
+
+/** The two rule buttons. Their labels also name the rule editor each one opens (`RuleEditor`). */
+export const PROJECT_RULE_BUTTON: ActionButton = {
+  action: 'rule-project',
+  key: 'p',
+  label: 'Projektszabály',
+  needsArming: true,
+}
+export const MACHINE_RULE_BUTTON: ActionButton = {
+  action: 'rule-machine',
+  key: 'g',
+  label: 'Gépszintű szabály',
+  needsArming: true,
+}
 
 /**
  * The button row per kind, in display order; the keyboard shortcuts are the same table. A question
@@ -24,14 +44,9 @@ export const DENY_BUTTON: ActionButton = { action: 'deny', key: 'd', label: 'Til
  * hook cannot approve it, rejecting it needs feedback, and a mistyped letter must not reject a plan.
  */
 export const ACTION_BUTTONS: Readonly<Record<DecisionKind, readonly ActionButton[]>> = {
-  tool: [
-    { action: 'allow', key: 'a', label: 'Engedélyez', needsArming: true },
-    DENY_BUTTON,
-    { action: 'rule-project', key: 'p', label: 'Projekt-szabály…', needsArming: true },
-    { action: 'rule-machine', key: 'g', label: 'Gépszintű szabály…', needsArming: true },
-  ],
+  tool: [ALLOW_BUTTON, DENY_BUTTON, PROJECT_RULE_BUTTON, MACHINE_RULE_BUTTON],
   edit: [
-    { action: 'allow', key: 'a', label: 'Engedélyez', needsArming: true },
+    ALLOW_BUTTON,
     DENY_BUTTON,
     { action: 'session-edits', key: 's', label: 'Erre a sessionre automatikusan', needsArming: true },
   ],

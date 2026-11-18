@@ -2,7 +2,7 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { ACTION_BUTTONS, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
+import { ACTION_BUTTONS, DENY_BUTTON, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
 import { DecisionPanel } from './DecisionPanel.js'
 import { requestSource, sessionHost } from '../shared/request-source.js'
 import { RuleEditor } from './RuleEditor.js'
@@ -60,6 +60,90 @@ describe('DecisionPanel layout', () => {
 
   it('shows no description paragraph when the tool gives none', () => {
     expect(render(bashDecision({ description: undefined }))).not.toContain('decision-description')
+  })
+
+  it('shows the line count of a multi-line command in the header', () => {
+    expect(render(bashDecision({ summary: 'node a.js\nnode b.js' }))).toContain('decision-lines')
+  })
+})
+
+describe('question request', () => {
+  const question = (text: string, header: string) => ({
+    question: text,
+    header,
+    multiSelect: false,
+    options: [{ label: 'Alpha' }, { label: 'Beta' }],
+  })
+
+  it('shows each question once, in its form, without the summary block or its line count', () => {
+    const first = 'Which build\nshould run first?'
+    const html = render(
+      bashDecision({
+        kind: 'question',
+        toolName: 'AskUserQuestion',
+        toolInput: {},
+        summary: first,
+        description: undefined,
+        questions: [question(first, 'Build'), question('Which target?', 'Target')],
+      }),
+    )
+    expect(html).not.toContain('decision-summary')
+    expect(html).not.toContain('decision-lines')
+    expect(html.split(first)).toHaveLength(2)
+    expect(html).toContain('Which target?')
+    // Nothing else goes into the scrolling area, so it is left out instead of showing an empty band.
+    expect(html).not.toContain('decision-scroll')
+  })
+
+  it('shows the question in the summary block once the app released it: only the jump row is below', () => {
+    const html = render(
+      bashDecision({
+        kind: 'question',
+        toolName: 'AskUserQuestion',
+        toolInput: {},
+        summary: 'Which one?',
+        description: undefined,
+        questions: [question('Which one?', 'Pick')],
+        released: true,
+      }),
+    )
+    expect(html).toContain('<pre class="decision-summary">Which one?</pre>')
+    expect(html).toContain('Az app elengedte.')
+  })
+
+  it('offers the deny button by its full label when the questions cannot be read', () => {
+    const html = render(
+      bashDecision({ kind: 'question', toolName: 'AskUserQuestion', toolInput: {}, summary: 'AskUserQuestion', questions: [] }),
+    )
+    expect(html).toContain('itt nem válaszolható meg.')
+    expect(html).toContain(`>${DENY_BUTTON.label}</button>`)
+  })
+})
+
+describe('plan request', () => {
+  const planText = '# Rename the build step\n\nThen run it.'
+  const plan = (released: boolean) =>
+    bashDecision({
+      kind: 'plan',
+      toolName: 'ExitPlanMode',
+      toolInput: { plan: planText },
+      plan: planText,
+      summary: 'Rename the build step',
+      description: undefined,
+      released,
+    })
+
+  it('shows the plan once, in the plan panel, without the summary block or an empty scrolling area', () => {
+    const html = render(plan(false))
+    expect(html).not.toContain('decision-summary')
+    expect(html).not.toContain('decision-scroll')
+    expect(html.split('Rename the build step')).toHaveLength(2)
+  })
+
+  it('shows the plan title in the summary block once the app released it', () => {
+    const html = render(plan(true))
+    expect(html).toContain('<pre class="decision-summary">Rename the build step</pre>')
+    expect(html).not.toContain('class="plan"')
   })
 })
 
@@ -129,9 +213,9 @@ describe("the session's host in the texts", () => {
 
   it('keeps the VS Code wording for an extension session', () => {
     const released = render(bashDecision({ released: true }), 0, 'claude-vscode')
-    expect(released).toContain('A VSCode-ban még dönthetsz.')
-    expect(released).toContain('Ugrás a VSCode-ba')
-    expect(render(plan, 0, 'claude-vscode')).toContain('Jóváhagyás a VSCode-ban →')
+    expect(released).toContain('A VS Code-ban még dönthetsz.')
+    expect(released).toContain('Ugrás a VS Code-ba')
+    expect(render(plan, 0, 'claude-vscode')).toContain('Jóváhagyás a VS Code-ban →')
   })
 
   it('names the terminal for a CLI session and a claude -p run', () => {
@@ -139,7 +223,7 @@ describe("the session's host in the texts", () => {
       const released = render(bashDecision({ released: true }), 0, entrypoint)
       expect(released).toContain('A terminálban még dönthetsz.')
       expect(released).toContain('Ugrás a terminálhoz')
-      expect(released).not.toContain('VSCode')
+      expect(released).not.toContain('VS Code')
       expect(render(plan, 0, entrypoint)).toContain('Jóváhagyás a terminálban →')
     }
   })
@@ -156,8 +240,17 @@ describe("the session's host in the texts", () => {
   it('names the host where a long command is cut and on an unreadable request', () => {
     const long = render(bashDecision({ summary: 'x'.repeat(50_000) }), 0, 'cli')
     expect(long).toContain('A teljes')
-    expect(long).toContain('a terminálban.')
+    expect(long).toContain('a terminálban látható.')
     expect(render(bashDecision({ readable: false }), 0, 'cli')).toContain('Ugrás a terminálhoz')
+  })
+
+  it("names only the session's host on an unreadable request, never VS Code for a terminal session", () => {
+    const cli = render(bashDecision({ readable: false }), 0, 'cli')
+    expect(cli).toContain('Tilthatod, vagy dönts a terminálban.')
+    expect(cli).not.toContain('VS Code')
+    const unknown = render(bashDecision({ readable: false }), 0, undefined)
+    expect(unknown).toContain('Tilthatod, vagy dönts a sessionben.')
+    expect(unknown).not.toContain('VS Code')
   })
 
   it('names the host in the rule editor when a multi-line suggestion was left out', () => {

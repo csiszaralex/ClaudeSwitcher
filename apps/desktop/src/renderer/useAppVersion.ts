@@ -8,7 +8,7 @@ export function readAppVersion(raw: unknown): string | undefined {
   return typeof raw === 'string' && raw !== '' ? raw : undefined
 }
 
-/** The status bar's check time, after the version when there is one: `0.7.0 · ellenőrizve: 2mp`. */
+/** The status bar's check time, after the version when there is one: `0.7.0 · ellenőrizve: 2 mp`. */
 export function withAppVersion(version: string | undefined, text: string): string {
   return version === undefined ? text : `${version} · ${text}`
 }

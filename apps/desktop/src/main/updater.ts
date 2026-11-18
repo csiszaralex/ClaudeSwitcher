@@ -1,3 +1,5 @@
+import { numberArticle } from '../shared/hungarian-text.js'
+
 /**
  * The in-app update of the installed app, on top of electron-updater's `autoUpdater` (created only
  * when `app.isPackaged`, in `index.ts`; a repo build has no updater at all). It checks at start-up
@@ -22,21 +24,6 @@ export type UpdateItem =
   | { readonly kind: 'install'; readonly version: string }
 
 /**
- * The Hungarian definite article before `version` read aloud: "az" when the spoken number starts
- * with a vowel, else "a". The major version decides. Hungarian reads a number in groups of three
- * digits, so its first word comes from the leading group: a leading group of exactly 1 is "egy"
- * (1, "egymillió") or "ezer" (1000..1999), and one that starts with 5 is "öt", "ötven…" or
- * "ötszáz…"; every other first word ("nulla", "kettő", "tíz", "tizen…", "száz", …) starts with a
- * consonant. A version without a leading number gets "a".
- */
-export function versionArticle(version: string): 'a' | 'az' {
-  const major = /^\d+/.exec(version)?.[0].replace(/^0+(?=\d)/, '')
-  if (major === undefined) return 'a'
-  const leadingGroup = major.slice(0, ((major.length - 1) % 3) + 1)
-  return leadingGroup === '1' || leadingGroup.startsWith('5') ? 'az' : 'a'
-}
-
-/**
  * The label of the tray's update item. Not "Frissítések keresése": that is the label of the
  * `checkForUpdates` toggle in the same menu.
  */
@@ -47,7 +34,7 @@ export function updateItemLabel(item: UpdateItem): string {
     case 'busy':
       return 'Frissítés keresése…'
     case 'install':
-      return `Frissítés ${versionArticle(item.version)} ${item.version} verzióra`
+      return `Frissítés ${numberArticle(item.version)} ${item.version} verzióra`
   }
 }
 
@@ -100,7 +87,9 @@ export function updatePrompt(newVersion: string, currentVersion: string): Update
     type: 'info',
     title: 'Frissítés elérhető',
     message: `Elérhető a ClaudeSwitcher ${newVersion} (most: ${currentVersion}).`,
-    detail: 'A frissítés bezárja és újraindítja az appot. A függő engedélykérések a VS Code-ban megmaradnak.',
+    // The pending requests may belong to sessions with different hosts, so the text names none
+    // (shared/request-source.ts `sessionHost` gives one session's host).
+    detail: 'A frissítés bezárja és újraindítja az appot. A függő engedélykérések a sessionökben megmaradnak.',
     buttons: PROMPT_BUTTONS.map((button) => button.label),
     defaultId: safe,
     cancelId: safe,

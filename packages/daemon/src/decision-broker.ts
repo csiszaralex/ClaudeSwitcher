@@ -26,7 +26,7 @@ const PRE_TOOL_USE_CAP = 500
 export interface PendingDecisionView extends PermissionRequestInfo {
   id: string
   createdAt: number
-  /** True once the app released it (after `PERMISSION_RELEASE_AFTER_MS`): from then on it can be decided only in VS Code or on the phone. */
+  /** True once the app released it (after `PERMISSION_RELEASE_AFTER_MS`): from then on it can be decided only at the session's own prompt (VS Code, the terminal) or on the phone. */
   released: boolean
 }
 
@@ -192,7 +192,9 @@ export class DecisionBroker {
     const pending = this.#pending.get(id)
     if (pending === undefined) return { ok: false, reason: 'Ez a kérés már lezárult.' }
     if (pending.view.released) {
-      return { ok: false, reason: 'Az app már elengedte ezt a kérést. Dönts a VSCode-ban.' }
+      // Host-neutral: the reason goes only to the app, which names the session's own host with the
+      // released request (the desktop's `releasedMessage`), the one home of that wording.
+      return { ok: false, reason: 'Az app már elengedte ezt a kérést.' }
     }
     const result = buildHookResponse(pending.view, decision)
     if (!result.ok) return result

@@ -7,44 +7,61 @@ import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
 
 interface Props {
   decision: PendingDecisionView
-  /** The panel's `summaryView` of the request: its header shows the line count too. */
-  summary: SummaryView
+  /**
+   * The panel's `summaryView` of the request: its header shows the line count too. `undefined` when
+   * the request shows no summary block (summary-view.ts `showsSummary`).
+   */
+  summary: SummaryView | undefined
   /** Where the session's own prompt is, which shows the full text. */
   host: SessionHost
 }
 
-/** The scrolling middle of the decision panel: warning, description, command, preview and details. */
-export function DecisionContent({ decision, summary, host }: Props): JSX.Element {
+/**
+ * The scrolling middle of the decision panel: warning, description, command, preview and details.
+ * `null` when it has none of them.
+ */
+export function DecisionContent({ decision, summary, host }: Props): JSX.Element | null {
   // App re-renders every second (for its clocks); formatting a big script or comparing a file line
   // by line must not run on every tick.
   const { preview, details } = useMemo(() => panelContent(decision), [decision])
   const limitNote = (
     <p className="muted">
       Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik. A teljes
-      szöveg {host.inside}.
+      szöveg {host.inside} látható.
     </p>
   )
 
+  const sandboxOff = sandboxDisabled(decision.toolInput)
+  const hasDetails = details !== undefined && details.blocks.length > 0
+  // Nothing to show, e.g. a question or a plan whose own view shows the content (summary-view.ts
+  // `showsSummary`): no scrolling area at all, so its `min-height` (styles.css `.decision-scroll`)
+  // leaves no empty band.
+  if (!sandboxOff && decision.description === undefined && summary === undefined && preview === undefined && !hasDetails) {
+    return null
+  }
+
   return (
     <div className="decision-scroll">
-      {sandboxDisabled(decision.toolInput) && (
+      {sandboxOff && (
         <p className="decision-warning">Sandbox nélkül futna (dangerouslyDisableSandbox: true).</p>
       )}
       {/* The description above the command: below a long command it would not show without scrolling. */}
       {decision.description !== undefined && <p className="decision-description">{decision.description}</p>}
-      <pre className="decision-summary">
-        {summary.segments.map((segment, index) =>
-          // The escape of an invisible character is highlighted, so it cannot be taken for part of the command.
-          segment.hidden ? (
-            <span key={index} className="invisible-char">
-              {segment.text}
-            </span>
-          ) : (
-            segment.text
-          ),
-        )}
-      </pre>
-      {summary.truncated && limitNote}
+      {summary !== undefined && (
+        <pre className="decision-summary">
+          {summary.segments.map((segment, index) =>
+            // The escape of an invisible character is highlighted, so it cannot be taken for part of the command.
+            segment.hidden ? (
+              <span key={index} className="invisible-char">
+                {segment.text}
+              </span>
+            ) : (
+              segment.text
+            ),
+          )}
+        </pre>
+      )}
+      {summary?.truncated === true && limitNote}
       {preview !== undefined && (
         // Open by default: this is the content to approve itself. A native <details>, so it can be collapsed.
         <details className="decision-details edit-preview" open>
@@ -75,7 +92,7 @@ export function DecisionContent({ decision, summary, host }: Props): JSX.Element
           {preview.truncated && limitNote}
         </details>
       )}
-      {details !== undefined && details.blocks.length > 0 && (
+      {hasDetails && (
         // A native <details>: it opens from the keyboard (Tab, Space) without code of our own.
         <details className="decision-details">
           <summary>Részletek</summary>

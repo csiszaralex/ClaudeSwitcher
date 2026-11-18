@@ -1,3 +1,5 @@
+import type { DecisionKind } from '@claudeswitcher/core'
+import { isUnreadableQuestion } from './decision-actions.js'
 import { DETAILS_LIMIT } from './tool-details.js'
 
 /** A piece of the summary: visible text, or the escape of an invisible character. */
@@ -88,5 +90,32 @@ export function summaryView(summary: string, limit: number = DETAILS_LIMIT): Sum
     segments: revealInvisible(truncated ? summary.slice(0, limit) : summary),
     lines: lineCount(summary),
     truncated,
+  }
+}
+
+/**
+ * Whether the panel shows the request's summary block (and the header its line count). Not where
+ * the panel's action area shows the content itself, which holds only while the request is not
+ * released (a released request gets just the jump row there):
+ * - a question: its summary is its first question (the core's `summarize`), which `QuestionForm`
+ *   shows next to its options;
+ * - a plan: its summary is the plan's first line, which `PlanPanel` shows with the full text.
+ *
+ * An unreadable question (decision-actions.ts `isUnreadableQuestion`) never shows it: its summary
+ * is the tool name, which the header already shows.
+ */
+export function showsSummary(request: {
+  kind: DecisionKind
+  released: boolean
+  questions: readonly unknown[]
+}): boolean {
+  switch (request.kind) {
+    case 'question':
+      return request.released && !isUnreadableQuestion(request)
+    case 'plan':
+      return request.released
+    case 'tool':
+    case 'edit':
+      return true
   }
 }
