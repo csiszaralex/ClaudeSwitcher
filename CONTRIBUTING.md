@@ -134,6 +134,7 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 - `guards.ts` (/browser): input guards (`isRecord`, `nonEmptyString` and others), and flattening text to one line and truncating it (`flatText`, `truncate`).
 - `tool-names.ts` (/browser): the tool name sets (edit tools, command tools) and the Bash tool's name (`BASH_TOOL`). `decision.ts` picks each tool's required field from them (`requiredField`).
 - `decision.ts` (/browser): parsing and classifying a permission request (`parsePermissionRequest`) and the decision kinds (`DecisionKind`).
+- `usage-limit.ts` (/browser): Claude Code's usage limit record in the transcript: its field names (`usageLimitOf`, which `transcript.ts` `readActivityFromLines` calls) and the known limit kinds (`USAGE_LIMIT_KIND`: `five_hour`, `seven_day`). The measurement: `docs/design.md` "The usage limit record".
 - `paths.ts`: the locations under Claude Code's configuration directory (`resolveClaudeDir`, `sessionsDir`, `ideDir`, `userSettingsPath`, `projectsDir`, `subagentsDirOf`).
 - `testing.ts` (the `@claudeswitcher/core/testing` entry, tests only): the fixture loader (`hookPayload`, `parsedPayload`), `tempDir`, the fake process probe (`fakeProbe`) and a fake session record writer (`writeSessionRecord`).
 
@@ -173,6 +174,7 @@ The app reads several undocumented Claude Code internals. If Claude Code changes
 | `procStart` (the process creation FILETIME as a decimal string) and process liveness | core `liveness.ts` (`ProcessProbe.isAlive`, `parsePowerShellSnapshot`), desktop `main/process-probe.ts` |
 | `~/.claude/ide/<port>.lock` and the VS Code process image names | core `session-registry.ts` `parseIdeLock`, `liveness.ts` `VSCODE_IMAGE_NAMES` |
 | The transcript, `projects/<encoded cwd>/<sessionId>.jsonl`, and the shape of its blocks | core `paths.ts` `projectsDir`, `transcript.ts` (`findTranscriptPath`, `readActivityFromLines`), `tool-detail.ts` |
+| The usage limit record in the transcript (`isApiErrorMessage`, `quotaLimits` or `apiErrorParams.rate_limit_info`, `status: 'rejected'`, `resetsAt`, `rateLimitType`) | core `usage-limit.ts` (`usageLimitOf`, `USAGE_LIMIT_KIND`), `transcript.ts` `readActivityFromLines`. The measurement: `docs/design.md` "The usage limit record" |
 | Subagent files (`<sessionId>/subagents/agent-<id>.jsonl` and `agent-<id>.meta.json`) | core `paths.ts` `subagentsDirOf`, `subagent.ts` (`subagentIdFromFile`, `subagentMetaFile`), read in daemon `scanner.ts` `readSubagents` |
 | The registry `entrypoint` values (`claude-vscode`, `cli`, `sdk-cli`) | desktop `shared/entrypoint.ts`, `main/focus-window.ts` (jump) and `shared/request-source.ts` (the source label and the host word) |
 | Hook payloads (`permission_mode` included) | daemon `hook-server.ts`, core `decision.ts` `parsePermissionRequest`. The measured shapes: `packages/core/fixtures/hook-payloads.json`, `spikes/m2-permission/RESULTS.md` |

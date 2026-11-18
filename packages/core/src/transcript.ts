@@ -4,6 +4,7 @@ import { isRecord } from './guards.js'
 import { projectsDir } from './paths.js'
 import { toolDetail } from './tool-detail.js'
 import type { SessionActivity } from './types.js'
+import { isApiErrorRecord, usageLimitOf } from './usage-limit.js'
 
 interface ContentBlock {
   type?: unknown
@@ -46,6 +47,16 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
     if (!Number.isNaN(at)) activity.lastEventAt = at
 
     if (rec['type'] === 'assistant') {
+      const limit = usageLimitOf(rec)
+      if (limit !== undefined) {
+        // Claude Code's synthetic limit record. Its English text ("You've hit your 5-hour limit …")
+        // must not become the row's text: the renderer shows the limit in its own words.
+        activity.usageLimit = limit
+        continue
+      }
+      // Any other error record (a server or an authentication error) keeps its text, as before: it
+      // says what went wrong. A real answer means the session got through again.
+      if (!isApiErrorRecord(rec)) activity.usageLimit = undefined
       for (const block of blocks(rec)) {
         if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
           activity.lastAssistantText = block.text.trim()
@@ -57,6 +68,8 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
         }
       }
     } else if (rec['type'] === 'user') {
+      // A user record after the limit is a new prompt (or a tool result): the session goes on.
+      activity.usageLimit = undefined
       // A tool_result ends the running tool.
       if (blocks(rec).some((b) => b.type === 'tool_result')) {
         activity.runningTool = undefined

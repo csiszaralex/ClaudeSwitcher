@@ -181,6 +181,42 @@ tested.
 file: `queue-operation`, `user`, `attachment`, `file-history-snapshot`, `ai-title`, `atis-latch`,
 `assistant`, and more. Little of it is needed; **an unknown type is skipped, it must never throw.**
 
+#### The usage limit record (measured 2026-11-18, Claude Code 2.1.326)
+
+When the account hits its 5-hour limit, Claude Code ends the turn and writes one synthetic
+`assistant` record into the transcript (ids and paths left out):
+
+```json
+{"type":"assistant","isSidechain":false,"timestamp":"2026-11-18T19:10:51.528Z",
+ "message":{"model":"<synthetic>","role":"assistant","type":"message","stop_reason":"stop_sequence",
+   "content":[{"type":"text","text":"You've hit your 5-hour limit · resets 10:20pm (Europe/Budapest)"}]},
+ "apiError":"usage_limit_reached",
+ "apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1795036800,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false}},
+ "quotaLimits":{"status":"rejected","resetsAt":1795036800,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false},
+ "error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429,"apiErrorType":"rate_limit_error",
+ "entrypoint":"claude-vscode","version":"2.1.326"}
+```
+
+- `resetsAt` is in Unix seconds (1795036800 is 2026-11-18 21:20 UTC, 22:20 in Budapest).
+- The `StopFailure` hook fires too; the app routes it like `Stop` (core `hook-contract.ts`). Its
+  payload was not logged.
+- **The weekly limit**, read afterwards from older transcripts of the same machine (2026-09-16,
+  Claude Code 2.1.268, not provoked on purpose): `rateLimitType: "seven_day"`, the text "You've hit
+  your weekly limit · resets …". These records carry `quotaLimits` but no `apiError` and no
+  `apiErrorParams`; a 5-hour record of the same version has the same shape. The weekly record of a
+  current version was not seen.
+- Records with the same `error: "rate_limit"` from 2.1.224 have no `quotaLimits` at all. The app
+  does not recognise them.
+- In every transcript seen, the next message record after the limit is a `user` record, when the
+  user writes again (`queue-operation` and `attachment` records can come between).
+- Other synthetic error records (`error: "server_error"`, `"authentication_failed"`) have
+  `isApiErrorMessage: true` too, without `quotaLimits`.
+
+The app reads it in core `usage-limit.ts` `usageLimitOf` (the field names) and `transcript.ts`
+`readActivityFromLines` (`SessionActivity.usageLimit`, cleared by a later `user` record or a
+non-error `assistant` record). The limit record's text does not become the row's text; the text of
+the other error records still does.
+
 ### 3.4 Hooks: measured in the VS Code extension
 
 The original text worked from the documentation. What follows is the **measured** behaviour
@@ -488,7 +524,8 @@ Not IO-free; the Node-free part is available through the `/browser` entry point 
   is the already read file content + a `ProcessProbe` interface, so it can be tested without real
   files.
 - **`TranscriptReader`**: the last N lines → `SessionActivity` (the last assistant message, the
-  running tool, a timestamp). Skipping an unknown record type is mandatory.
+  running tool, a timestamp, the usage limit that ended the turn, §3.3). Skipping an unknown record
+  type is mandatory.
 - ~~**`RuleBuilder`**~~: **removed**: Claude Code provides the rule (`permission_suggestions`).
 - **`DecisionModel`** (new in the approve milestone): pure functions for the two ends of a
   decision:

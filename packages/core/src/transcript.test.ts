@@ -155,6 +155,111 @@ describe('readActivityFromLines', () => {
   })
 })
 
+describe('readActivityFromLines: the usage limit', () => {
+  // An invented record in the measured shape (Claude Code 2.1.326, design doc "The usage limit
+  // record"): ids, paths and the session left out, the times made up.
+  const resetsAtSeconds = 1_800_000_000
+  const info = {
+    status: 'rejected',
+    resetsAt: resetsAtSeconds,
+    rateLimitType: 'five_hour',
+    overageStatus: 'rejected',
+    isUsingOverage: false,
+  }
+  const limitRecord = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    type: 'assistant',
+    isSidechain: false,
+    timestamp: '2026-09-04T10:01:00.000Z',
+    message: {
+      model: '<synthetic>',
+      role: 'assistant',
+      type: 'message',
+      stop_reason: 'stop_sequence',
+      content: [{ type: 'text', text: "You've hit your 5-hour limit · resets 3pm (Europe/Budapest)" }],
+    },
+    apiError: 'usage_limit_reached',
+    apiErrorParams: { rate_limit_info: info },
+    quotaLimits: info,
+    error: 'rate_limit',
+    isApiErrorMessage: true,
+    apiErrorStatus: 429,
+    apiErrorType: 'rate_limit_error',
+    ...overrides,
+  })
+  const line = (overrides: Record<string, unknown> = {}): string => JSON.stringify(limitRecord(overrides))
+
+  it('reads the kind and the reset time (in ms) of the limit record', () => {
+    const a = readActivityFromLines([assistantText, line()])
+    expect(a.usageLimit).toEqual({ kind: 'five_hour', resetsAt: resetsAtSeconds * 1000 })
+    expect(a.lastEventAt).toBe(Date.parse('2026-09-04T10:01:00.000Z'))
+  })
+
+  it('does not take the limit text as the last assistant text', () => {
+    expect(readActivityFromLines([assistantText, line()]).lastAssistantText).toBe('Megnézem a konfigot.')
+  })
+
+  it('keeps the text of another synthetic error record', () => {
+    const serverError = JSON.stringify({
+      type: 'assistant',
+      message: { model: '<synthetic>', content: [{ type: 'text', text: 'API Error: 500' }] },
+      error: 'server_error',
+      isApiErrorMessage: true,
+    })
+    const a = readActivityFromLines([serverError])
+    expect(a.lastAssistantText).toBe('API Error: 500')
+    expect(a.usageLimit).toBeUndefined()
+  })
+
+  it('reads the weekly limit, and a record with quotaLimits only', () => {
+    // The 2.1.268 records carry no apiError and no apiErrorParams.
+    const weekly = { ...info, rateLimitType: 'seven_day' }
+    const a = readActivityFromLines([line({ quotaLimits: weekly, apiErrorParams: undefined, apiError: undefined })])
+    expect(a.usageLimit).toEqual({ kind: 'seven_day', resetsAt: resetsAtSeconds * 1000 })
+  })
+
+  it('falls back to apiErrorParams.rate_limit_info without quotaLimits', () => {
+    const a = readActivityFromLines([line({ quotaLimits: undefined })])
+    expect(a.usageLimit).toEqual({ kind: 'five_hour', resetsAt: resetsAtSeconds * 1000 })
+  })
+
+  it('keeps an unknown kind as raw text, and drops a missing or invalid one', () => {
+    const kindOf = (rateLimitType: unknown): string | undefined =>
+      readActivityFromLines([line({ quotaLimits: { ...info, rateLimitType } })]).usageLimit?.kind
+    expect(kindOf('opus_weekly')).toBe('opus_weekly')
+    expect(kindOf(undefined)).toBeUndefined()
+    expect(kindOf(42)).toBeUndefined()
+    expect(kindOf('')).toBeUndefined()
+  })
+
+  it('drops a missing or invalid reset time but keeps the limit', () => {
+    for (const resetsAt of [undefined, '1800000000', -5, 0, null]) {
+      const a = readActivityFromLines([line({ quotaLimits: { ...info, resetsAt }, apiErrorParams: undefined })])
+      expect(a.usageLimit).toEqual({ kind: 'five_hour', resetsAt: undefined })
+    }
+  })
+
+  it('ignores a limit that is not rejected, or a record that is not an API error', () => {
+    const allowed = { ...info, status: 'allowed' }
+    expect(readActivityFromLines([line({ quotaLimits: allowed, apiErrorParams: { rate_limit_info: allowed } })]).usageLimit).toBeUndefined()
+    expect(readActivityFromLines([line({ isApiErrorMessage: undefined })]).usageLimit).toBeUndefined()
+    expect(readActivityFromLines([line({ isApiErrorMessage: 'true' })]).usageLimit).toBeUndefined()
+    expect(readActivityFromLines([line({ quotaLimits: 'rejected', apiErrorParams: null })]).usageLimit).toBeUndefined()
+    expect(readActivityFromLines([line({ type: 'user' })]).usageLimit).toBeUndefined()
+  })
+
+  it('is cleared by a later user record', () => {
+    const prompt = JSON.stringify({ type: 'user', message: { content: 'folytasd' } })
+    expect(readActivityFromLines([line(), prompt]).usageLimit).toBeUndefined()
+  })
+
+  it('is cleared by a later real answer, not by another error record or other record types', () => {
+    const serverError = JSON.stringify({ type: 'assistant', isApiErrorMessage: true, message: { content: [] } })
+    const noise = JSON.stringify({ type: 'queue-operation', operation: 'enqueue' })
+    expect(readActivityFromLines([line(), serverError, noise]).usageLimit).toBeDefined()
+    expect(readActivityFromLines([line(), assistantText]).usageLimit).toBeUndefined()
+  })
+})
+
 describe('findTranscriptPath', () => {
   async function projectsFixture(): Promise<string> {
     const claudeDir = await tempDir('cs-tx-')
