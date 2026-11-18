@@ -102,12 +102,14 @@ describe('SessionStore', () => {
     expect(store.views().map((v) => v.sessionId)).toEqual(['s2'])
   })
 
-  it('sorts waiting sessions first, oldest wait at the top', () => {
+  it('lists the sessions by session id, whatever order the snapshot has', () => {
+    // A fixed order keeps an unchanged state serialising identically (the identical-snapshot filter).
     const store = new SessionStore()
-    store.applySnapshot([live('s1'), live('s2'), live('s3')], noActivity)
-    store.applyNotification({ sessionId: 's2', cwd: 'c', type: 'permission_prompt' }, 200)
-    store.applyNotification({ sessionId: 's3', cwd: 'c', type: 'permission_prompt' }, 100)
-    expect(store.views().map((v) => v.sessionId)).toEqual(['s3', 's2', 's1'])
+    store.applySnapshot([live('s3'), live('s1'), live('s2')], noActivity)
+    store.applyNotification({ sessionId: 's2', cwd: 'c', type: 'permission_prompt' }, 100)
+    expect(store.views().map((v) => v.sessionId)).toEqual(['s1', 's2', 's3'])
+    store.applySnapshot([live('s2'), live('s3'), live('s1')], noActivity)
+    expect(store.views().map((v) => v.sessionId)).toEqual(['s1', 's2', 's3'])
   })
 
   it('notifies listeners when state changes', () => {
@@ -160,7 +162,7 @@ describe('SessionStore', () => {
     const s2 = views.find((v) => v.sessionId === 's2')
     expect(s2?.status).toBe('waiting')
     expect(s2?.waitingSince).toBe(500)
-    expect(views[0]?.sessionId).toBe('s2')
+    expect(views.find((v) => v.sessionId === 's1')?.status).toBe('idle')
   })
 })
 
@@ -304,65 +306,6 @@ describe('SessionStore: the end of a wait', () => {
   })
 })
 
-describe('SessionStore: sorting by the end of the wait', () => {
-  function names(store: SessionStore): string[] {
-    return store.views().map((v) => v.name)
-  }
-
-  it('puts the session that stopped waiting most recently first among the non-waiting ones', () => {
-    // A user request: after a decision the session goes to the top of the non-waiting ones at once,
-    // not into the middle by name.
-    const store = new SessionStore()
-    store.applySnapshot(
-      [live('a', { name: 'alpha' }), live('b', { name: 'bravo' }), live('c', { name: 'charlie' }),
-        live('d', { name: 'delta' })],
-      noActivity,
-    )
-    store.applyNotification({ sessionId: 'c', cwd: 'c', type: 'permission_prompt' }, 100)
-    store.applyNotification({ sessionId: 'd', cwd: 'c', type: 'permission_prompt' }, 150)
-    store.applyNotification({ sessionId: 'a', cwd: 'c', type: 'permission_prompt' }, 200)
-    store.applyToolFinished('c', 300)
-    store.applyLifecycle({ sessionId: 'a', cwd: 'c', kind: 'stop' }, 400)
-
-    // The waiting one first; then the one whose wait ended at 400, then at 300; the never waiting one by name.
-    expect(names(store)).toEqual(['delta', 'alpha', 'charlie', 'bravo'])
-  })
-
-  it('counts the end of a held decision as the end of a wait', () => {
-    const store = new SessionStore()
-    store.applySnapshot(
-      [live('a', { name: 'alpha' }), live('b', { name: 'bravo' }), live('c', { name: 'charlie' })],
-      noActivity,
-    )
-    store.applyNotification({ sessionId: 'a', cwd: 'c', type: 'permission_prompt' }, 100)
-    store.applyToolFinished('a', 200)
-    store.applyPending(new Map([['c', 300]]), 300)
-    store.applyPending(new Map(), 500, 'c')
-
-    expect(names(store)).toEqual(['charlie', 'alpha', 'bravo'])
-  })
-
-  it('does not end a wait while the other source still holds it', () => {
-    // Clearing the Notification does not end the wait while the decision is pending, and vice versa.
-    const store = new SessionStore()
-    store.applySnapshot([live('a', { name: 'alpha' }), live('b', { name: 'bravo' })], noActivity)
-    heldAndNotified(store, 'b', 300)
-    store.applyToolFinished('b', 9_000)
-    store.applyNotification({ sessionId: 'a', cwd: 'c', type: 'permission_prompt' }, 9_100)
-    store.applyToolFinished('a', 9_200)
-    store.applyPending(new Map(), 9_500)
-
-    // The wait of b ended at 9 500, not at 9 000, so it cannot go behind a (9 200).
-    expect(names(store)).toEqual(['bravo', 'alpha'])
-  })
-
-  it('orders sessions that never waited by name, as before', () => {
-    const store = new SessionStore()
-    store.applySnapshot([live('z', { name: 'zulu' }), live('a', { name: 'alpha' })], noActivity)
-    expect(names(store)).toEqual(['alpha', 'zulu'])
-  })
-})
-
 describe('SessionStore: the "just finished" mark (stoppedAt)', () => {
   it('records the time of the last Stop without changing the status values', () => {
     const store = new SessionStore()
@@ -459,8 +402,7 @@ describe('SessionStore: waiting from the registry (after an app restart)', () =>
     // PermissionRequest nor a Notification comes any more, only the registry knows.
     const store = new SessionStore()
     store.applySnapshot([live('a', { name: 'alpha' }), registryWaiting('b', 4_000, { name: 'bravo' })], noActivity, 9_000)
-    const [first] = store.views()
-    expect(first?.sessionId).toBe('b')
+    const first = store.views().find((v) => v.sessionId === 'b')
     expect(first?.status).toBe('waiting')
     expect(first?.waitingSince).toBe(4_000)
     expect(first?.notificationText).toBeUndefined()
@@ -474,13 +416,6 @@ describe('SessionStore: waiting from the registry (after an app restart)', () =>
       9_000,
     )
     expect(store.views().map((v) => v.status)).toEqual(['idle', 'idle', 'idle'])
-  })
-
-  it('orders registry waits with hook waits by when they started', () => {
-    const store = new SessionStore()
-    store.applySnapshot([registryWaiting('r', 2_000, { name: 'r' }), live('n', { name: 'n' })], noActivity, 3_000)
-    store.applyNotification({ sessionId: 'n', cwd: 'c', type: 'permission_prompt' }, 1_000)
-    expect(store.views().map((v) => v.sessionId)).toEqual(['n', 'r'])
   })
 
   it('prefers the hook source for waitingSince when both know the wait', () => {
@@ -532,33 +467,6 @@ describe('SessionStore: waiting from the registry (after an app restart)', () =>
     store.applySnapshot([registryWaiting('s1', 1_000)], noActivity, 3_000)
     expect(store.views()[0]?.status).toBe('idle')
     expect(store.views()[0]?.stoppedAt).toBe(2_000)
-  })
-
-  it('records the end of a registry wait for the ordering', () => {
-    const store = new SessionStore()
-    store.applySnapshot(
-      [live('a', { name: 'alpha' }), registryWaiting('z', 1_000, { name: 'zulu' })],
-      noActivity,
-      1_500,
-    )
-    // The registry switches: the wait has ended, and zulu goes to the top of the non-waiting ones.
-    store.applySnapshot(
-      [live('a', { name: 'alpha' }), live('z', { name: 'zulu', status: 'idle', statusUpdatedAt: 2_000 })],
-      noActivity,
-      4_000,
-    )
-    expect(store.views().map((v) => v.name)).toEqual(['zulu', 'alpha'])
-  })
-
-  it('records the end of a registry wait when a hook clears it', () => {
-    const store = new SessionStore()
-    store.applySnapshot(
-      [live('a', { name: 'alpha' }), registryWaiting('z', 1_000, { name: 'zulu' })],
-      noActivity,
-      1_500,
-    )
-    store.applyToolFinished('z', 2_000)
-    expect(store.views().map((v) => v.name)).toEqual(['zulu', 'alpha'])
   })
 
   it('clears stoppedAt for a registry wait newer than the Stop, not for a lagging one', () => {
