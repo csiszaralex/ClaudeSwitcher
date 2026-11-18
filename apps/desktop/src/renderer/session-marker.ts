@@ -1,7 +1,8 @@
 import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
-import { PERMISSION_RELEASE_AFTER_MS } from '@claudeswitcher/core/browser'
+import { PERMISSION_RELEASE_AFTER_MS, UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
+import { capitalized } from '../shared/hungarian-text.js'
 import { isChoiceKind } from '../shared/request-kind.js'
-import { capitalized, sessionHost, type SessionHost } from '../shared/request-source.js'
+import { sessionHost, type SessionHost } from '../shared/request-source.js'
 import { finishState, type SeenFinishes } from '../shared/session-finished.js'
 
 /**
@@ -41,6 +42,14 @@ const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
 export function releasedMessage(remoteControl: boolean, host: SessionHost): string {
   const where = capitalized(host.inside)
   return remoteControl ? `${where} vagy a telefonon még dönthetsz.` : `${where} még dönthetsz.`
+}
+
+/**
+ * The decision panel's text for an unreadable request: the core's host-neutral `UNREADABLE_REQUEST`,
+ * then the way out at the session's own host (`sessionHost`).
+ */
+export function unreadableMessage(host: SessionHost): string {
+  return `${UNREADABLE_REQUEST} Tilthatod, vagy dönts ${host.inside}.`
 }
 
 /**

@@ -288,7 +288,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
             // The status bar leaves the source out while `panel` is defined, so the stand-in names
             // it. The folder is the row's (`rowFolder`): the request that failed to render is not read.
             <JumpNotice
-              text="A kérés nem jeleníthető meg"
+              text="A kérés nem jeleníthető meg."
               host={selectedSource.host}
               sessionId={panel.row.sessionId}
               origin={{ source: selectedSource, folder: selectedFolder }}

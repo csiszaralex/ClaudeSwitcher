@@ -12,17 +12,17 @@ export function formatDuration(ms: number): string {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
   }
   if (minutes > 0) return `${minutes}:${String(seconds).padStart(2, '0')}`
-  return `${seconds}mp`
+  return `${seconds} mp`
 }
 
 /**
- * A running tool in the row: `Bash: pnpm test`, `Grep „createPanel"`, or without a detail `Read fut`.
+ * A running tool in the row: `Bash: pnpm test`, `Grep „createPanel”`, or without a detail `Read fut`.
  * The same for the main session and a subagent, so the two read alike.
  */
 export function toolLabel(tool: string, detail?: string): string {
   if (detail === undefined || detail === '') return `${tool} fut`
   // The detail of a tool that runs a command is the command itself, which reads better after a colon.
-  return isCommandTool(tool) ? `${tool}: ${detail}` : `${tool} „${detail}"`
+  return isCommandTool(tool) ? `${tool}: ${detail}` : `${tool} „${detail}”`
 }
 
 /** A subagent's work: `<description or type> · <running tool>`, without a tool only the name. */

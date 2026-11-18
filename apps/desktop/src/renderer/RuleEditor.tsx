@@ -2,7 +2,7 @@ import type { PermissionRule } from '@claudeswitcher/core'
 import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
 import { isSubmitChord, MACHINE_RULE_BUTTON, PROJECT_RULE_BUTTON, SUBMIT_CHORD_LABEL } from './decision-actions.js'
-import { broadRules, editorRows, suggestionCount } from './rule-editor.js'
+import { broadRules, editorRows, suggestionCount, unparsableLineText } from './rule-editor.js'
 import type { SessionHost } from '../shared/request-source.js'
 
 interface Props {
@@ -33,7 +33,7 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, host,
   const parsed = parseRules(text)
   const rules = parsed.ok ? parsed.rules : []
   const problem = !parsed.ok
-    ? `A ${parsed.line}. sor nem szabály: „${parsed.text}"`
+    ? unparsableLineText(parsed.line, parsed.text)
     : rules.length === 0
       ? 'Legalább egy szabály kell.'
       : undefined
@@ -118,7 +118,7 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, host,
       )}
       <div className="decision-row">
         <button type="submit" disabled={!canSubmit}>
-          <kbd>{SUBMIT_CHORD_LABEL}</kbd> Engedélyez és felveszi a szabályt
+          <kbd>{SUBMIT_CHORD_LABEL}</kbd> Engedélyezés és a szabály felvétele
         </button>
         <span className="muted">{rules.length.toLocaleString('hu-HU')} szabály</span>
         <button type="button" onClick={onCancel}>

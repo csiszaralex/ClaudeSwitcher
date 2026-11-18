@@ -602,15 +602,15 @@ async function startApp(): Promise<void> {
       .then((conflicts) => {
         const message =
           conflicts.length === 0
-            ? 'A Claude Code integráció telepítve.'
-            : 'A Claude Code integráció csak részben települt.'
+            ? 'A Claude Code-integráció telepítve.'
+            : 'A Claude Code-integráció csak részben települt.'
         void dialog.showMessageBox({
           type: conflicts.length === 0 ? 'info' : 'warning',
           title: 'ClaudeSwitcher',
           message,
           detail: [
             ...conflicts,
-            'Az újonnan indított Claude Code sessionök már jelentenek. A már futó sessionöket lehet, hogy újra kell indítani.',
+            'Az újonnan indított Claude Code-sessionök már jelentenek az appnak. A már futó sessionöket lehet, hogy újra kell indítani.',
           ].join('\n\n'),
         })
         return { ok: conflicts.length === 0, message }
@@ -626,7 +626,7 @@ async function startApp(): Promise<void> {
   function uninstallFromUi(): Promise<InstallReply> {
     return uninstallIntegration(resolveClaudeDir())
       .then(() => {
-        const message = 'A Claude Code integráció eltávolítva.'
+        const message = 'A Claude Code-integráció eltávolítva.'
         void dialog.showMessageBox({ type: 'info', title: 'ClaudeSwitcher', message })
         return { ok: true, message }
       })

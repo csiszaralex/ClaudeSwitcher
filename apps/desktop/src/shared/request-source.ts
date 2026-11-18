@@ -58,16 +58,16 @@ export function requestSource(entrypoint: string | undefined): RequestSource {
 /**
  * Where a session's own prompt is, in the Hungarian texts that send the user there (the jump button,
  * the plan's approval, the notices of a request the app cannot decide). Both forms are lower case,
- * for the middle of a sentence; `capitalized` starts a sentence with them.
+ * for the middle of a sentence; `capitalized` (shared/hungarian-text.ts) starts a sentence with them.
  */
 export interface SessionHost {
-  /** Where: "a VSCode-ban", "a terminálban", "a sessionben". */
+  /** Where: "a VS Code-ban", "a terminálban", "a sessionben". */
   inside: string
-  /** Where to: "a VSCode-ba", "a terminálhoz", "a sessionhöz". */
+  /** Where to: "a VS Code-ba", "a terminálhoz", "a sessionhöz". */
   to: string
 }
 
-const VSCODE_HOST: SessionHost = { inside: 'a VSCode-ban', to: 'a VSCode-ba' }
+const VSCODE_HOST: SessionHost = { inside: 'a VS Code-ban', to: 'a VS Code-ba' }
 const TERMINAL_HOST: SessionHost = { inside: 'a terminálban', to: 'a terminálhoz' }
 /** For a source whose host is not known: it names the session itself. */
 const NEUTRAL_HOST: SessionHost = { inside: 'a sessionben', to: 'a sessionhöz' }
@@ -87,11 +87,6 @@ export function sessionHost(entrypoint: string | undefined): SessionHost {
   if (entrypoint === VSCODE_ENTRYPOINT) return VSCODE_HOST
   if (entrypoint !== undefined && TERMINAL_ENTRYPOINTS.has(entrypoint)) return TERMINAL_HOST
   return NEUTRAL_HOST
-}
-
-/** The phrase with its first letter in upper case, to start a sentence ("A terminálban …"). */
-export function capitalized(phrase: string): string {
-  return phrase.charAt(0).toUpperCase() + phrase.slice(1)
 }
 
 /**

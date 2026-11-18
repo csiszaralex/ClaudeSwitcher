@@ -115,6 +115,7 @@ describe('question request', () => {
     const html = render(
       bashDecision({ kind: 'question', toolName: 'AskUserQuestion', toolInput: {}, summary: 'AskUserQuestion', questions: [] }),
     )
+    expect(html).toContain('itt nem válaszolható meg.')
     expect(html).toContain(`>${DENY_BUTTON.label}</button>`)
   })
 })
@@ -212,9 +213,9 @@ describe("the session's host in the texts", () => {
 
   it('keeps the VS Code wording for an extension session', () => {
     const released = render(bashDecision({ released: true }), 0, 'claude-vscode')
-    expect(released).toContain('A VSCode-ban még dönthetsz.')
-    expect(released).toContain('Ugrás a VSCode-ba')
-    expect(render(plan, 0, 'claude-vscode')).toContain('Jóváhagyás a VSCode-ban →')
+    expect(released).toContain('A VS Code-ban még dönthetsz.')
+    expect(released).toContain('Ugrás a VS Code-ba')
+    expect(render(plan, 0, 'claude-vscode')).toContain('Jóváhagyás a VS Code-ban →')
   })
 
   it('names the terminal for a CLI session and a claude -p run', () => {
@@ -222,7 +223,7 @@ describe("the session's host in the texts", () => {
       const released = render(bashDecision({ released: true }), 0, entrypoint)
       expect(released).toContain('A terminálban még dönthetsz.')
       expect(released).toContain('Ugrás a terminálhoz')
-      expect(released).not.toContain('VSCode')
+      expect(released).not.toContain('VS Code')
       expect(render(plan, 0, entrypoint)).toContain('Jóváhagyás a terminálban →')
     }
   })
@@ -239,8 +240,17 @@ describe("the session's host in the texts", () => {
   it('names the host where a long command is cut and on an unreadable request', () => {
     const long = render(bashDecision({ summary: 'x'.repeat(50_000) }), 0, 'cli')
     expect(long).toContain('A teljes')
-    expect(long).toContain('a terminálban.')
+    expect(long).toContain('a terminálban látható.')
     expect(render(bashDecision({ readable: false }), 0, 'cli')).toContain('Ugrás a terminálhoz')
+  })
+
+  it("names only the session's host on an unreadable request, never VS Code for a terminal session", () => {
+    const cli = render(bashDecision({ readable: false }), 0, 'cli')
+    expect(cli).toContain('Tilthatod, vagy dönts a terminálban.')
+    expect(cli).not.toContain('VS Code')
+    const unknown = render(bashDecision({ readable: false }), 0, undefined)
+    expect(unknown).toContain('Tilthatod, vagy dönts a sessionben.')
+    expect(unknown).not.toContain('VS Code')
   })
 
   it('names the host in the rule editor when a multi-line suggestion was left out', () => {

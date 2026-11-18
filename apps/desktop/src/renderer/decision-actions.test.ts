@@ -43,9 +43,9 @@ describe('ACTION_BUTTONS labels', () => {
     const labels = Object.values(ACTION_BUTTONS).flatMap((buttons) => buttons.map((button) => button.label))
     for (const label of labels) expect(label).not.toContain('…')
     expect(ACTION_BUTTONS.tool.map((button) => button.label)).toEqual([
-      'Engedélyez',
+      'Engedélyezés',
       'Tiltás',
-      'Projekt-szabály',
+      'Projektszabály',
       'Gépszintű szabály',
     ])
   })

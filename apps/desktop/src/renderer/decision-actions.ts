@@ -22,13 +22,13 @@ export interface ActionButton {
 export const DENY_BUTTON: ActionButton = { action: 'deny', key: 'd', label: 'Tiltás', needsArming: false }
 
 /** Allow: in the button row of a command and of a file edit. */
-const ALLOW_BUTTON: ActionButton = { action: 'allow', key: 'a', label: 'Engedélyez', needsArming: true }
+const ALLOW_BUTTON: ActionButton = { action: 'allow', key: 'a', label: 'Engedélyezés', needsArming: true }
 
 /** The two rule buttons. Their labels also name the rule editor each one opens (`RuleEditor`). */
 export const PROJECT_RULE_BUTTON: ActionButton = {
   action: 'rule-project',
   key: 'p',
-  label: 'Projekt-szabály',
+  label: 'Projektszabály',
   needsArming: true,
 }
 export const MACHINE_RULE_BUTTON: ActionButton = {

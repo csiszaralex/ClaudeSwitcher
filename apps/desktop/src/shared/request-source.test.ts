@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { capitalized, requestFacts, requestSource, sessionHost } from './request-source.js'
+import { requestFacts, requestSource, sessionHost } from './request-source.js'
 
 describe('requestSource', () => {
   it('labels the VS Code extension and does not emphasise it', () => {
@@ -35,7 +35,7 @@ describe('requestSource', () => {
 
 describe('sessionHost', () => {
   it('keeps the VS Code wording for an extension session', () => {
-    expect(sessionHost('claude-vscode')).toEqual({ inside: 'a VSCode-ban', to: 'a VSCode-ba' })
+    expect(sessionHost('claude-vscode')).toEqual({ inside: 'a VS Code-ban', to: 'a VS Code-ba' })
   })
 
   it('names the terminal for an interactive terminal session and a claude -p run', () => {
@@ -54,14 +54,6 @@ describe('sessionHost', () => {
     for (const entrypoint of ['claude-vscode', 'cli', 'sdk-cli', 'sdk-future', undefined]) {
       expect(requestSource(entrypoint).host).toEqual(sessionHost(entrypoint))
     }
-  })
-})
-
-describe('capitalized', () => {
-  it('starts a sentence with the phrase, accented letters included', () => {
-    expect(capitalized('a terminálban')).toBe('A terminálban')
-    expect(capitalized('új')).toBe('Új')
-    expect(capitalized('')).toBe('')
   })
 })
 

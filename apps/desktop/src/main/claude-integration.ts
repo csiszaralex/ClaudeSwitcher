@@ -179,13 +179,13 @@ export function applyIntegration(
 
   const rawHooks = existing['hooks']
   if (rawHooks !== undefined && !isRecord(rawHooks)) {
-    conflicts.push('A "hooks" érték nem objektum, ezért a hookokat nem telepítettük.')
+    conflicts.push('A „hooks” érték nem objektum, ezért a hookokat nem telepítettük.')
   } else {
     const hooks: Record<string, unknown> = isRecord(rawHooks) ? { ...rawHooks } : {}
     for (const hook of HOOK_CONTRACT) {
       const current = hooks[hook.event]
       if (current !== undefined && !Array.isArray(current)) {
-        conflicts.push(`A "hooks.${hook.event}" érték nem tömb, ezért ezt az eseményt kihagytuk.`)
+        conflicts.push(`A „hooks.${hook.event}” érték nem tömb, ezért ezt az eseményt kihagytuk.`)
         continue
       }
       const foreign = stripOurHooks(Array.isArray(current) ? current : [])
@@ -196,7 +196,7 @@ export function applyIntegration(
 
   const rawEnv = existing['env']
   if (rawEnv !== undefined && !isRecord(rawEnv)) {
-    conflicts.push('Az "env" érték nem objektum, ezért a tokent nem állítottuk be.')
+    conflicts.push('Az „env” érték nem objektum, ezért a tokent nem állítottuk be.')
   } else {
     settings['env'] = {
       ...without(isRecord(rawEnv) ? rawEnv : {}, [LEGACY_PORT_ENV]),

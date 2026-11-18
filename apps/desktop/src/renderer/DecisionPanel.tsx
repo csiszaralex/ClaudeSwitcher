@@ -1,5 +1,4 @@
 import type { UserDecision } from '@claudeswitcher/core'
-import { UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
 import { errorMessage } from '../shared/error-message.js'
@@ -22,7 +21,7 @@ import { RuleEditor } from './RuleEditor.js'
 import { SourceLabel } from './SourceLabel.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
 import { requestFacts, type RequestSource } from '../shared/request-source.js'
-import { releasedMessage } from './session-marker.js'
+import { releasedMessage, unreadableMessage } from './session-marker.js'
 import { showsSummary, summaryView } from './summary-view.js'
 
 function isRuleAction(action: DecisionAction): boolean {
@@ -246,7 +245,7 @@ export function DecisionPanel({
     if (!decision.readable) {
       return (
         <div className="decision-row">
-          <span className="muted">{UNREADABLE_REQUEST}</span>
+          <span className="muted">{unreadableMessage(source.host)}</span>
           {actionButton(DENY_BUTTON)}
           <JumpButton host={source.host} onJump={onJump} />
         </div>
@@ -277,7 +276,7 @@ export function DecisionPanel({
         if (isUnreadableQuestion(decision)) {
           return (
             <div className="decision-row">
-              <span className="muted">A kérdés formátuma ismeretlen, itt nem válaszolható.</span>
+              <span className="muted">A kérdés formátuma ismeretlen, itt nem válaszolható meg.</span>
               {/* No key letter: a question has no shortcuts (`ACTION_BUTTONS.question`). */}
               <button type="button" disabled={busy} onClick={() => { setMode('deny') }}>
                 {DENY_BUTTON.label}

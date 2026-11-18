@@ -16,7 +16,7 @@ describe('readAppVersion', () => {
 
 describe('withAppVersion', () => {
   it('puts the version before the check time', () => {
-    expect(withAppVersion('0.2.0', 'ellenőrizve: 2mp')).toBe('0.2.0 · ellenőrizve: 2mp')
+    expect(withAppVersion('0.2.0', 'ellenőrizve: 2 mp')).toBe('0.2.0 · ellenőrizve: 2 mp')
   })
 
   it('leaves the check time alone without a version', () => {

@@ -449,7 +449,7 @@ PermissionRequest ─→ PendingDecision, the HTTP response suspended
    │                       Stop/SessionEnd/SubagentStop (the end of the turn);
    │                       the pending request gets an empty 200, which Claude Code drops
    └─ release            → an empty 200 at 590 s (the hook timeout is 600); the row switches
-                           to the "decide in VS Code" state, the prompt stays
+                           to the "decide at the session's own prompt" state, the prompt stays
 ```
 
 **The overlay offers different things by the kind of request:**
@@ -459,7 +459,7 @@ PermissionRequest ─→ PendingDecision, the HTTP response suspended
 | Bash, PowerShell, WebFetch, MCP, … | the tool, the input, who asks (session or subagent) | Allow · Deny (with a reason) · Project level · Machine level | `allow` / `deny`+`message` / `allow`+`updatedPermissions` |
 | Write, Edit | the file, a diff summary | Allow · Deny · For this session automatically | `allow` / `deny` / `allow`+`setMode acceptEdits session` |
 | AskUserQuestion | the questions and the options | option choice (several for multi-select), free text → Answer | `allow`+`updatedInput.answers` (key: the question's text, value: the option label; several labels joined with `", "`; free text verbatim) |
-| ExitPlanMode | the plan's text | Reject with feedback · **"Jóváhagyás a VSCode-ban"** (approve in VS Code: jumps there; for a terminal session "a terminálban") | `deny`+`message`; it cannot be approved from the hook (§10) |
+| ExitPlanMode | the plan's text | Reject with feedback · **"Jóváhagyás a VS Code-ban"** (approve in VS Code: jumps there; for a terminal session "a terminálban") | `deny`+`message`; it cannot be approved from the hook (§10) |
 
 **Project and machine level rule.** Claude Code's suggestion (`permission_suggestions`) **appears
 editable**; the user can rewrite it (narrow it), and Claude Code itself writes the approved
@@ -468,7 +468,7 @@ option asks for a separate confirmation, because it affects every session.
 
 **A late click.** If the decision has already been made (from any source), the overlay's row
 disappears; a click that arrives meanwhile is a no-op. After a release the row stays, but only
-with the "Ugrás a VSCode-ba" (jump to VS Code) button ("Ugrás a terminálhoz" for a terminal session,
+with the "Ugrás a VS Code-ba" (jump to VS Code) button ("Ugrás a terminálhoz" for a terminal session,
 "Ugrás a sessionhöz" for an unknown source: `shared/request-source.ts` `sessionHost`).
 
 ## 6. ~~Presence policy~~: removed

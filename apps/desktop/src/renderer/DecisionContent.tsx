@@ -27,7 +27,7 @@ export function DecisionContent({ decision, summary, host }: Props): JSX.Element
   const limitNote = (
     <p className="muted">
       Levágva: csak az első {DETAILS_LIMIT.toLocaleString('hu-HU')} karakter látszik. A teljes
-      szöveg {host.inside}.
+      szöveg {host.inside} látható.
     </p>
   )
 

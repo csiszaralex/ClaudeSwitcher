@@ -1,5 +1,6 @@
 import type { PermissionRule } from '@claudeswitcher/core'
 import { formatRule } from '@claudeswitcher/core/browser'
+import { capitalized, numberArticle } from '../shared/hungarian-text.js'
 
 /** The rule editor has at least this many rows. */
 export const RULE_EDITOR_MIN_ROWS = 3
@@ -47,6 +48,11 @@ export function suggestionTooltip(rules: readonly PermissionRule[]): string | un
   if (seed.text !== '') lines.push(seed.text)
   if (seed.multiline > 0) lines.push(`${suggestionCount(seed.multiline)} többsoros, a szerkesztő kihagyja.`)
   return lines.join('\n')
+}
+
+/** The editor's error for a line `parseRules` cannot read: its number, with the article it takes, and its text. */
+export function unparsableLineText(line: number, text: string): string {
+  return `${capitalized(numberArticle(String(line)))} ${String(line)}. sor nem szabály: „${text}”`
 }
 
 /** "One suggested rule" or "N suggested rules": the wording shared by the tooltip and the editor. */

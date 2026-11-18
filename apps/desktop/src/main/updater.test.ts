@@ -6,7 +6,6 @@ import {
   updateItemLabel,
   updateNotice,
   updatePrompt,
-  versionArticle,
   type UpdateChoice,
   type UpdateItem,
   type UpdateNotice,
@@ -179,27 +178,13 @@ describe('updateItemLabel', () => {
   })
 })
 
-describe('versionArticle', () => {
-  it('gives "az" when the major version read in Hungarian starts with a vowel, else "a"', () => {
-    const article = (major: number): string => versionArticle(`${String(major)}.2.3`)
-    // "egy", "öt", "ötven…", "ötszáz…", "ezer…", "ötezer", "egymillió".
-    for (const major of [1, 5, 50, 59, 500, 599, 1000, 1999, 5000, 1000000]) expect(article(major), String(major)).toBe('az')
-    // "nulla", "kettő", "tíz", "tizenegy", "tizenöt", "hatvan", "száz", "hatszáz", "kétezer", "tízezer".
-    for (const major of [0, 2, 10, 11, 15, 60, 100, 600, 2000, 10000]) expect(article(major), String(major)).toBe('a')
-  })
-
-  it('gives "a" for a version without a leading number', () => {
-    expect(versionArticle('next')).toBe('a')
-  })
-})
-
 describe('updatePrompt', () => {
   it('names both versions and offers the three choices, with "Most ne" as the default and the cancel', () => {
     expect(updatePrompt('0.2.0', '0.1.0')).toEqual({
       type: 'info',
       title: 'Frissítés elérhető',
       message: 'Elérhető a ClaudeSwitcher 0.2.0 (most: 0.1.0).',
-      detail: 'A frissítés bezárja és újraindítja az appot. A függő engedélykérések a VS Code-ban megmaradnak.',
+      detail: 'A frissítés bezárja és újraindítja az appot. A függő engedélykérések a sessionökben megmaradnak.',
       buttons: ['Frissítés most', 'Most ne', 'Verzió kihagyása'],
       defaultId: 1,
       cancelId: 1,
