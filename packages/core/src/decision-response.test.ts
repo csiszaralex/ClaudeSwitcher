@@ -39,6 +39,10 @@ describe('buildHookResponse', () => {
     expect(buildHookResponse(plan, { type: 'allow' })).toEqual({ ok: false, reason: PLAN_APPROVAL_UNSUPPORTED })
   })
 
+  it("names no host in the refusal texts: the app names it, by the session's source", () => {
+    for (const text of [PLAN_APPROVAL_UNSUPPORTED, UNREADABLE_REQUEST]) expect(text).not.toMatch(/VS ?Code|terminál|session/)
+  })
+
   it('denies with the trimmed message the model will read, or without one', () => {
     expect(decisionOf(buildHookResponse(bash, { type: 'deny', message: '  ne töröld  ' }))).toEqual({
       behavior: 'deny',
@@ -129,14 +133,17 @@ describe('buildHookResponse', () => {
     expect(unknownShape.kind).toBe('question')
     expect(unknownShape.questions).toEqual([])
 
-    expect(buildHookResponse(unknownShape, { type: 'answer', answers: {} }).ok).toBe(false)
+    expect(buildHookResponse(unknownShape, { type: 'answer', answers: {} })).toEqual({
+      ok: false,
+      reason: 'A kérdéseket nem sikerült kiolvasni.',
+    })
     expect(
       buildHookResponse(unknownShape, { type: 'answer', answers: { 'Milyen gyümölcsöket szeretsz?': 'Alma' } }).ok,
     ).toBe(false)
     // The way out: a deny with a message still goes through.
-    expect(decisionOf(buildHookResponse(unknownShape, { type: 'deny', message: 'a VSCode-ban válaszolok' }))).toEqual({
+    expect(decisionOf(buildHookResponse(unknownShape, { type: 'deny', message: 'a VS Code-ban válaszolok' }))).toEqual({
       behavior: 'deny',
-      message: 'a VSCode-ban válaszolok',
+      message: 'a VS Code-ban válaszolok',
     })
   })
 
