@@ -130,7 +130,7 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 - `timings.ts`: the timings several modules use (`POLL_INTERVAL_MS`, `PROBE_TTL_MS`). It imports nothing from Node, but `/browser` does not export it.
 - `protocol.ts` (/browser): the contract between the daemon and the renderer: the protocol version (`DAEMON_PROTOCOL`) and the daemon's address (`DAEMON_HOST`, `DAEMON_WS_PATH`, `DAEMON_WS_TOKEN_PARAM`, `daemonWsUrl`). The renderer CSP (`apps/desktop/src/csp/renderer-csp.ts`) keeps the host as its own literal, and its test ties it to `DAEMON_HOST`.
 - `guards.ts` (/browser): input guards (`isRecord`, `nonEmptyString` and others), and flattening text to one line and truncating it (`flatText`, `truncate`).
-- `tool-names.ts` (/browser): the tool name sets (edit tools, command tools). `decision.ts` picks each tool's required field from them (`requiredField`).
+- `tool-names.ts` (/browser): the tool name sets (edit tools, command tools) and the Bash tool's name (`BASH_TOOL`). `decision.ts` picks each tool's required field from them (`requiredField`).
 - `decision.ts` (/browser): parsing and classifying a permission request (`parsePermissionRequest`) and the decision kinds (`DecisionKind`).
 - `paths.ts`: the locations under Claude Code's configuration directory (`resolveClaudeDir`, `sessionsDir`, `ideDir`, `userSettingsPath`, `projectsDir`, `subagentsDirOf`).
 - `testing.ts` (the `@claudeswitcher/core/testing` entry, tests only): the fixture loader (`hookPayload`, `parsedPayload`), `tempDir`, the fake process probe (`fakeProbe`) and a fake session record writer (`writeSessionRecord`).

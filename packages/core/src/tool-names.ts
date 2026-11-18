@@ -14,8 +14,11 @@ export function isEditTool(toolName: string): toolName is EditTool {
   return EDIT_TOOL_SET.has(toolName)
 }
 
+/** Claude Code's bash tool. */
+export const BASH_TOOL = 'Bash'
+
 /** Tools that run a command: their detail is the command itself (and its description). */
-export const COMMAND_TOOLS = ['Bash', 'PowerShell'] as const
+export const COMMAND_TOOLS = [BASH_TOOL, 'PowerShell'] as const
 
 export type CommandTool = (typeof COMMAND_TOOLS)[number]
 
