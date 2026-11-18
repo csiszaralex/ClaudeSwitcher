@@ -49,6 +49,19 @@ export function activeDecision<D extends { released: boolean }>(list: readonly D
 }
 
 /**
+ * What the decision panel shows: the selected row and its `activeDecision`. `undefined` without a
+ * selected row or without a request in it: then no panel shows, and the status bar names the row's
+ * source and folder instead. With a panel the status bar leaves them out: the panel's source line
+ * names the source and the request's working folder (`requestFacts`).
+ */
+export function panelRequest<S extends SessionLike, D extends DecisionLike>(
+  row: Row<S, D> | undefined,
+): { row: Row<S, D>; decision: D } | undefined {
+  const decision = row === undefined ? undefined : activeDecision(row.decisions)
+  return row === undefined || decision === undefined ? undefined : { row, decision }
+}
+
+/**
  * The row waits, but the app has no request about it that it can decide: only the registry or a
  * Notification knows about the wait (e.g. the app restarted while the session was already waiting,
  * or the PermissionRequest went to another daemon). Then only VS Code can decide.

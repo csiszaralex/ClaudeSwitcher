@@ -1,5 +1,6 @@
+import type { DecisionKind } from '@claudeswitcher/core'
 import { describe, expect, it } from 'vitest'
-import { lineCount, revealInvisible, summaryView } from './summary-view.js'
+import { lineCount, revealInvisible, showsSummary, summaryView } from './summary-view.js'
 import { DETAILS_LIMIT } from './tool-details.js'
 
 describe('revealInvisible', () => {
@@ -60,5 +61,36 @@ describe('summaryView', () => {
 
   it('takes a smaller limit for tests', () => {
     expect(summaryView('abcdef', 3)).toEqual({ segments: [{ text: 'abc', hidden: false }], lines: 1, truncated: true })
+  })
+})
+
+describe('showsSummary', () => {
+  const questions = [{ question: 'Which one?' }]
+  const request = (kind: DecisionKind, released: boolean, list: readonly unknown[] = []) => ({
+    kind,
+    released,
+    questions: list,
+  })
+
+  it('hides it while the question form or the plan panel shows the content itself', () => {
+    expect(showsSummary(request('question', false, questions))).toBe(false)
+    expect(showsSummary(request('plan', false))).toBe(false)
+  })
+
+  it('shows it for a released question and a released plan: only the jump row stands below them', () => {
+    expect(showsSummary(request('question', true, questions))).toBe(true)
+    expect(showsSummary(request('plan', true))).toBe(true)
+  })
+
+  it('hides it for an unreadable question, whose summary is the tool name the header shows', () => {
+    expect(showsSummary(request('question', false))).toBe(false)
+    expect(showsSummary(request('question', true))).toBe(false)
+  })
+
+  it('shows it for a command and a file edit, released or not', () => {
+    for (const released of [false, true]) {
+      expect(showsSummary(request('tool', released))).toBe(true)
+      expect(showsSummary(request('edit', released))).toBe(true)
+    }
   })
 })

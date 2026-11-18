@@ -61,6 +61,82 @@ describe('DecisionPanel layout', () => {
   it('shows no description paragraph when the tool gives none', () => {
     expect(render(bashDecision({ description: undefined }))).not.toContain('decision-description')
   })
+
+  it('shows the line count of a multi-line command in the header', () => {
+    expect(render(bashDecision({ summary: 'node a.js\nnode b.js' }))).toContain('decision-lines')
+  })
+})
+
+describe('question request', () => {
+  const question = (text: string, header: string) => ({
+    question: text,
+    header,
+    multiSelect: false,
+    options: [{ label: 'Alpha' }, { label: 'Beta' }],
+  })
+
+  it('shows each question once, in its form, without the summary block or its line count', () => {
+    const first = 'Which build\nshould run first?'
+    const html = render(
+      bashDecision({
+        kind: 'question',
+        toolName: 'AskUserQuestion',
+        toolInput: {},
+        summary: first,
+        description: undefined,
+        questions: [question(first, 'Build'), question('Which target?', 'Target')],
+      }),
+    )
+    expect(html).not.toContain('decision-summary')
+    expect(html).not.toContain('decision-lines')
+    expect(html.split(first)).toHaveLength(2)
+    expect(html).toContain('Which target?')
+    // Nothing else goes into the scrolling area, so it is left out instead of showing an empty band.
+    expect(html).not.toContain('decision-scroll')
+  })
+
+  it('shows the question in the summary block once the app released it: only the jump row is below', () => {
+    const html = render(
+      bashDecision({
+        kind: 'question',
+        toolName: 'AskUserQuestion',
+        toolInput: {},
+        summary: 'Which one?',
+        description: undefined,
+        questions: [question('Which one?', 'Pick')],
+        released: true,
+      }),
+    )
+    expect(html).toContain('<pre class="decision-summary">Which one?</pre>')
+    expect(html).toContain('Az app elengedte.')
+  })
+})
+
+describe('plan request', () => {
+  const planText = '# Rename the build step\n\nThen run it.'
+  const plan = (released: boolean) =>
+    bashDecision({
+      kind: 'plan',
+      toolName: 'ExitPlanMode',
+      toolInput: { plan: planText },
+      plan: planText,
+      summary: 'Rename the build step',
+      description: undefined,
+      released,
+    })
+
+  it('shows the plan once, in the plan panel, without the summary block or an empty scrolling area', () => {
+    const html = render(plan(false))
+    expect(html).not.toContain('decision-summary')
+    expect(html).not.toContain('decision-scroll')
+    expect(html.split('Rename the build step')).toHaveLength(2)
+  })
+
+  it('shows the plan title in the summary block once the app released it', () => {
+    const html = render(plan(true))
+    expect(html).toContain('<pre class="decision-summary">Rename the build step</pre>')
+    expect(html).not.toContain('class="plan"')
+  })
 })
 
 describe('request source', () => {

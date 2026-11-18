@@ -23,7 +23,7 @@ import { SourceLabel } from './SourceLabel.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
 import { requestFacts, type RequestSource } from '../shared/request-source.js'
 import { releasedMessage } from './session-marker.js'
-import { summaryView } from './summary-view.js'
+import { showsSummary, summaryView } from './summary-view.js'
 
 function isRuleAction(action: DecisionAction): boolean {
   return action === 'rule-project' || action === 'rule-machine'
@@ -310,8 +310,9 @@ export function DecisionPanel({
   }
 
   // Memoised on the request, so the App's re-render every second (for its clocks) does not format
-  // it again. The header shows its line count, `DecisionContent` its text.
-  const summary = useMemo(() => summaryView(decision.summary), [decision])
+  // it again. The header shows its line count, `DecisionContent` its text; neither shows while the
+  // question form or the plan panel below shows the content itself (`showsSummary`).
+  const summary = useMemo(() => (showsSummary(decision) ? summaryView(decision.summary) : undefined), [decision])
 
   // For a question and a plan the action area itself is long (questions, plan text): there its
   // inside scrolls, and the submit buttons stay at the bottom.
@@ -326,7 +327,7 @@ export function DecisionPanel({
       <header className="decision-head">
         <span className="decision-kind">{KIND_LABEL[decision.kind]}</span>
         <span className="decision-tool">{decision.toolName}</span>
-        {summary.lines > 1 && <span className="decision-lines">{summary.lines.toLocaleString('hu-HU')} sor</span>}
+        {summary !== undefined && summary.lines > 1 && <span className="decision-lines">{summary.lines.toLocaleString('hu-HU')} sor</span>}
         {agentLabel !== undefined && (
           <span className="decision-agent" title={agentLabel}>
             {agentLabel}
