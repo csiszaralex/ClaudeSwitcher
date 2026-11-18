@@ -1,7 +1,7 @@
 import type { PermissionRule } from '@claudeswitcher/core'
 import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
-import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
+import { isSubmitChord, MACHINE_RULE_BUTTON, PROJECT_RULE_BUTTON, SUBMIT_CHORD_LABEL } from './decision-actions.js'
 import { broadRules, editorRows, suggestionCount } from './rule-editor.js'
 import type { SessionHost } from '../shared/request-source.js'
 
@@ -55,9 +55,10 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, host,
       }}
     >
       <p className="muted">
+        {/* Named as the button that opened the editor. */}
         {machine
-          ? 'Gépszintű szabály: minden projektre és sessionre érvényes (~/.claude/settings.json).'
-          : 'Projekt-szabály: csak ebben a projektben (.claude/settings.local.json).'}
+          ? `${MACHINE_RULE_BUTTON.label}: minden projektre és sessionre érvényes (~/.claude/settings.json).`
+          : `${PROJECT_RULE_BUTTON.label}: csak ebben a projektben (.claude/settings.local.json).`}
       </p>
       {multilineSuggestions > 0 && (
         <p className="decision-error">

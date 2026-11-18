@@ -120,8 +120,8 @@ The jump brings the session's window to the front. For a VS Code extension sessi
 
 Selecting a waiting session opens its request. What you can do depends on the request:
 
-- **A tool call** (a command, a web fetch, an MCP tool): **"Engedélyez"** (allow, key A), **"Tilt…"** (deny, key D, with an optional reason sent to the session), **"Projekt-szabály…"** (project rule, key P) and **"Gépszintű szabály…"** (machine-wide rule, key G). The rule buttons show Claude Code's suggested rule, which you can edit before allowing; Claude Code then writes it to the project's `.claude/settings.local.json` or to `~/.claude/settings.json`.
-- **A file edit:** **"Engedélyez"** (A), **"Tilt…"** (D), and **"Erre a sessionre automatikusan"** (S): accept this session's further edits automatically.
+- **A tool call** (a command, a web fetch, an MCP tool): **"Engedélyez"** (allow, key A), **"Tiltás"** (deny, key D, with an optional reason sent to the session), **"Projekt-szabály"** (project rule, key P) and **"Gépszintű szabály"** (machine-wide rule, key G). The rule buttons show Claude Code's suggested rule, which you can edit before allowing; Claude Code then writes it to the project's `.claude/settings.local.json` or to `~/.claude/settings.json`.
+- **A file edit:** **"Engedélyez"** (A), **"Tiltás"** (D), and **"Erre a sessionre automatikusan"** (S): accept this session's further edits automatically.
 - **A question:** pick the options or type an answer, then **"Válasz elküldése"** (send answer). Each question shows once, above its options. Once the app has released the request, the panel shows the first question above the jump button.
 - **A plan:** **"Elutasítás visszajelzéssel"** (reject with feedback). A plan cannot be approved from the app; **"Jóváhagyás a VSCode-ban →"** (approve in VS Code) jumps there. The plan's text shows once, in full; once the app has released the request, only its first line shows.
 

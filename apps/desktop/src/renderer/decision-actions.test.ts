@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ACTION_BUTTONS,
   isActivationTarget,
   isSubmitChord,
   isTypingTarget,
@@ -34,6 +35,19 @@ describe('shortcutFor', () => {
 
   it('has no key for a plan: a stray key must not reject it, and approval happens in VS Code', () => {
     for (const key of ['a', 'd', 'p', 'g', 's']) expect(shortcutFor('plan', key, true)).toBeUndefined()
+  })
+})
+
+describe('ACTION_BUTTONS labels', () => {
+  it('names every button in full words: an ellipsis would read as a cut-off label', () => {
+    const labels = Object.values(ACTION_BUTTONS).flatMap((buttons) => buttons.map((button) => button.label))
+    for (const label of labels) expect(label).not.toContain('…')
+    expect(ACTION_BUTTONS.tool.map((button) => button.label)).toEqual([
+      'Engedélyez',
+      'Tiltás',
+      'Projekt-szabály',
+      'Gépszintű szabály',
+    ])
   })
 })
 

@@ -2,7 +2,7 @@ import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { ACTION_BUTTONS, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
+import { ACTION_BUTTONS, DENY_BUTTON, SUBMIT_CHORD_LABEL, shortcutFor } from './decision-actions.js'
 import { DecisionPanel } from './DecisionPanel.js'
 import { requestSource, sessionHost } from '../shared/request-source.js'
 import { RuleEditor } from './RuleEditor.js'
@@ -109,6 +109,13 @@ describe('question request', () => {
     )
     expect(html).toContain('<pre class="decision-summary">Which one?</pre>')
     expect(html).toContain('Az app elengedte.')
+  })
+
+  it('offers the deny button by its full label when the questions cannot be read', () => {
+    const html = render(
+      bashDecision({ kind: 'question', toolName: 'AskUserQuestion', toolInput: {}, summary: 'AskUserQuestion', questions: [] }),
+    )
+    expect(html).toContain(`>${DENY_BUTTON.label}</button>`)
   })
 })
 

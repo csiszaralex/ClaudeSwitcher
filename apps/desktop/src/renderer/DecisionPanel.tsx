@@ -207,7 +207,7 @@ export function DecisionPanel({
             }}
           />
           <button type="submit" disabled={busy}>
-            Tilt
+            {DENY_BUTTON.label}
           </button>
           <button
             type="button"
@@ -278,8 +278,9 @@ export function DecisionPanel({
           return (
             <div className="decision-row">
               <span className="muted">A kérdés formátuma ismeretlen, itt nem válaszolható.</span>
+              {/* No key letter: a question has no shortcuts (`ACTION_BUTTONS.question`). */}
               <button type="button" disabled={busy} onClick={() => { setMode('deny') }}>
-                Tilt…
+                {DENY_BUTTON.label}
               </button>
               <JumpButton host={source.host} onJump={onJump} />
             </div>
