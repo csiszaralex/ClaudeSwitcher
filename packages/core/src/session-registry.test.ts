@@ -41,6 +41,14 @@ describe('parseSessionRecord', () => {
     expect(r!.bridgeSessionId).toBeNull()
   })
 
+  it('keeps the messaging pipe as raw text, and only a string', () => {
+    // An invented pipe in the measured shape (2.1.325): the JSON string "\\\\.\\pipe\\LOCAL\\cc-msg-<32 hex>".
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    expect(parseSessionRecord(JSON.parse(JSON.stringify({ ...REAL_SESSION, messagingSocketPath: pipe })))!.messagingSocketPath).toBe(pipe)
+    expect(parseSessionRecord(REAL_SESSION)!.messagingSocketPath).toBeUndefined()
+    expect(parseSessionRecord({ ...REAL_SESSION, messagingSocketPath: 42 })!.messagingSocketPath).toBeUndefined()
+  })
+
   it('survives unknown future fields', () => {
     const r = parseSessionRecord({ ...REAL_SESSION, somethingNew: { a: 1 } })
     expect(r).not.toBeNull()

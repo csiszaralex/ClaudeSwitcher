@@ -31,6 +31,7 @@ export function parseSessionRecord(raw: unknown): SessionRecord | null {
       : raw['waitingFor'] === null ? null
       : undefined,
     statusUpdatedAt: typeof raw['statusUpdatedAt'] === 'number' ? raw['statusUpdatedAt'] : undefined,
+    messagingSocketPath: typeof raw['messagingSocketPath'] === 'string' ? raw['messagingSocketPath'] : undefined,
   }
 }
 

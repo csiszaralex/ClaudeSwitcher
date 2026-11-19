@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { tempDir } from './testing.js'
-import { findTranscriptPath, readActivityFromLines, tailLines } from './transcript.js'
+import { findTranscriptPath, readActivityFromLines, readTranscriptActivity, tailLines } from './transcript.js'
 
 const assistantText = JSON.stringify({
   type: 'assistant',
@@ -299,6 +299,191 @@ describe('readActivityFromLines: the tab title', () => {
     expect(a.runningTool).toBe('Bash')
     expect(a.lastAssistantText).toBeUndefined()
     expect(a.lastEventAt).toBe(Date.parse('2026-09-04T10:00:05.000Z'))
+  })
+})
+
+// Invented records in the measured shapes (Claude Code 2.1.325, design doc "Cross-session
+// messages"): the pipes, ids, names and texts are made up.
+const PIPE_A = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+const PIPE_B = String.raw`\\.\pipe\LOCAL\cc-msg-f9e8d7c6b5a4938271605f4e3d2c1b0a`
+const prompting = { sessionId: '7d2e9a40-1c3b-4f5e-8a6d-2b1c0e9f8a7d', timestamp: '2026-11-19T10:00:00.000Z' }
+const header = (pipe: string, name: string): string =>
+  `<cross-session-message from="uds:${pipe}" hop-chain="aa11bb22cc33dd44" from-name="${name}" from-mode="prompting">\nNézd meg a hibát.`
+const enqueued = (pipe: string, name: string): string =>
+  JSON.stringify({ ...prompting, type: 'queue-operation', operation: 'enqueue', content: header(pipe, name) })
+const dequeued = JSON.stringify({ ...prompting, type: 'queue-operation', operation: 'dequeue' })
+const origin = (pipe: string, name: string): Record<string, unknown> => ({
+  kind: 'peer',
+  from: `uds:${pipe}`,
+  msg_id: '3f1e2d4c-5b6a-4978-8a9b-0c1d2e3f4a5b',
+  name,
+  fromMode: 'prompting',
+  body: 'Nézd meg a hibát.',
+})
+/** The idle recipient's delivery: a meta `user` record that starts the turn. */
+const delivered = (pipe: string, name: string): string =>
+  JSON.stringify({ ...prompting, type: 'user', isMeta: true, message: { role: 'user', content: header(pipe, name) }, origin: origin(pipe, name) })
+/** The busy recipient's delivery: a `queued_command` attachment that joins the running turn. */
+const absorbed = (pipe: string, name: string): string =>
+  JSON.stringify({
+    ...prompting,
+    type: 'attachment',
+    attachment: { type: 'queued_command', prompt: header(pipe, name), commandMode: 'prompt', origin: origin(pipe, name) },
+  })
+const removed = JSON.stringify({ ...prompting, type: 'queue-operation', operation: 'remove', reason: 'absorbed_mid_turn' })
+const endTurn = JSON.stringify({
+  ...prompting,
+  type: 'assistant',
+  message: { model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Kész, visszaírtam.' }] },
+})
+const toolTurn = JSON.stringify({
+  ...prompting,
+  type: 'assistant',
+  message: { model: 'claude-x', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'pnpm test' } }] },
+})
+
+describe('readActivityFromLines: who prompted the session', () => {
+  const pipes = (lines: string[], earlier: string[] = []): string[] | undefined =>
+    readActivityFromLines(lines, earlier).promptedBy?.map((sender) => sender.pipe)
+
+  it('names an idle recipient sender from its arrival until the end of the turn that handles it', () => {
+    expect(readActivityFromLines([enqueued(PIPE_A, 'Orchestrator')]).promptedBy).toEqual([{ pipe: PIPE_A, name: 'Orchestrator' }])
+    expect(pipes([enqueued(PIPE_A, 'Orchestrator'), dequeued, delivered(PIPE_A, 'Orchestrator'), toolTurn])).toEqual([PIPE_A])
+    expect(readActivityFromLines([enqueued(PIPE_A, 'Orchestrator'), dequeued, delivered(PIPE_A, 'Orchestrator'), toolTurn, endTurn]).promptedBy).toBeUndefined()
+  })
+
+  it('keeps a message queued behind a running turn pending across that turn end', () => {
+    // The message came while the session worked on something else, and that turn ended before it was taken up.
+    const queued = [toolTurn, enqueued(PIPE_A, 'Orchestrator'), endTurn]
+    expect(pipes(queued)).toEqual([PIPE_A])
+    expect(pipes([...queued, dequeued, delivered(PIPE_A, 'Orchestrator'), toolTurn])).toEqual([PIPE_A])
+    expect(pipes([...queued, dequeued, delivered(PIPE_A, 'Orchestrator'), toolTurn, endTurn])).toBeUndefined()
+  })
+
+  it('names the sender of a message absorbed by the running turn until that turn ends', () => {
+    const lines = [toolTurn, enqueued(PIPE_A, 'Orchestrator'), absorbed(PIPE_A, 'Orchestrator'), removed, toolTurn]
+    expect(pipes(lines)).toEqual([PIPE_A])
+    expect(pipes([...lines, endTurn])).toBeUndefined()
+  })
+
+  it('ends the turn at a synthetic record too', () => {
+    const synthetic = JSON.stringify({
+      ...prompting,
+      type: 'assistant',
+      isApiErrorMessage: true,
+      message: { model: '<synthetic>', stop_reason: 'stop_sequence', content: [{ type: 'text', text: 'API Error' }] },
+    })
+    expect(pipes([dequeued, delivered(PIPE_A, 'Orchestrator'), synthetic])).toBeUndefined()
+  })
+
+  it('gives one entry per sender, with several senders at once', () => {
+    const lines = [
+      delivered(PIPE_A, 'Orchestrator'),
+      toolTurn,
+      enqueued(PIPE_B, 'Reviewer'),
+      absorbed(PIPE_B, 'Reviewer'),
+      enqueued(PIPE_A, 'Orchestrator'),
+      absorbed(PIPE_A, 'Orchestrator'),
+    ]
+    expect(readActivityFromLines(lines).promptedBy).toEqual([
+      { pipe: PIPE_A, name: 'Orchestrator' },
+      { pipe: PIPE_B, name: 'Reviewer' },
+    ])
+  })
+
+  it('keeps the latest name, and a sender without one', () => {
+    const renamed = [delivered(PIPE_A, 'Old name'), absorbed(PIPE_A, 'New name')]
+    expect(readActivityFromLines(renamed).promptedBy).toEqual([{ pipe: PIPE_A, name: 'New name' }])
+    const nameless = JSON.stringify({ ...prompting, type: 'queue-operation', operation: 'enqueue', content: `<cross-session-message from="uds:${PIPE_A}" from-mode="prompting">\nszia` })
+    expect(readActivityFromLines([nameless]).promptedBy).toEqual([{ pipe: PIPE_A }])
+  })
+
+  it('ignores a subagent handback, a plain queued prompt and a sender that is no pipe', () => {
+    const handback = JSON.stringify({
+      ...prompting,
+      type: 'attachment',
+      attachment: {
+        type: 'queued_command',
+        prompt: '<agent-message from="0a1b2c3d4e5f60718">kész</agent-message>',
+        origin: { kind: 'peer', from: '0a1b2c3d4e5f60718', senderTaskId: 'task-1', name: 'worker', handback: true },
+      },
+    })
+    const plainPrompt = JSON.stringify({ ...prompting, type: 'queue-operation', operation: 'enqueue', content: 'futtasd a teszteket' })
+    const humanCommand = JSON.stringify({ ...prompting, type: 'attachment', attachment: { type: 'queued_command', prompt: 'és a lintet is', origin: { kind: 'human' } } })
+    const noPipe = JSON.stringify({ ...prompting, type: 'queue-operation', operation: 'enqueue', content: '<cross-session-message from="uds:" from-name="X">\nszia' })
+    expect(readActivityFromLines([toolTurn, handback, plainPrompt, humanCommand, noPipe]).promptedBy).toBeUndefined()
+  })
+
+  it('reads the earlier lines only for the senders', () => {
+    expect(pipes([toolTurn], [delivered(PIPE_A, 'Orchestrator')])).toEqual([PIPE_A])
+    expect(pipes([toolTurn], [delivered(PIPE_A, 'Orchestrator'), endTurn])).toBeUndefined()
+    // The earlier end turn's text does not become the row's text.
+    expect(readActivityFromLines([toolTurn], [endTurn]).lastAssistantText).toBeUndefined()
+  })
+
+  it('leaves the other fields as they were', () => {
+    const a = readActivityFromLines([delivered(PIPE_A, 'Orchestrator'), toolTurn])
+    expect(a.runningTool).toBe('Bash')
+    expect(a.toolDetail).toBe('pnpm test')
+  })
+})
+
+describe('readTranscriptActivity', () => {
+  const TAIL = 256 * 1024
+  // A tool result of about 2 KB that holds none of the cross-session markers.
+  const filler = JSON.stringify({ ...prompting, type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok '.repeat(700) }] } })
+  const fillerOf = (bytes: number): string[] => Array.from({ length: Math.ceil(bytes / (filler.length + 1)) }, () => filler)
+
+  async function transcriptOf(lines: string[]): Promise<string> {
+    const file = path.join(await tempDir('cs-activity-'), 'transcript.jsonl')
+    await writeFile(file, `${lines.join('\n')}\n`, 'utf8')
+    return file
+  }
+
+  it('reads a small transcript as readActivityFromLines does', async () => {
+    const lines = [delivered(PIPE_A, 'Orchestrator'), toolTurn]
+    expect(await readTranscriptActivity(await transcriptOf(lines))).toEqual(readActivityFromLines(lines))
+  })
+
+  it('finds the sender of a turn that outgrew the tail, which the tail alone loses', async () => {
+    const file = await transcriptOf([endTurn, dequeued, delivered(PIPE_A, 'Orchestrator'), ...fillerOf(1.5 * 1024 * 1024), toolTurn])
+    expect(readActivityFromLines(await tailLines(file)).promptedBy).toBeUndefined()
+    const a = await readTranscriptActivity(file)
+    expect(a.promptedBy).toEqual([{ pipe: PIPE_A, name: 'Orchestrator' }])
+    expect(a.runningTool).toBe('Bash')
+  })
+
+  it('finds a delivery whose line runs across the start of the tail', async () => {
+    const delivery = delivered(PIPE_A, 'Orchestrator')
+    // One ASCII line after the delivery, so long that the 256 KB tail starts halfway into the delivery line.
+    const restBytes = TAIL - Math.floor(Buffer.byteLength(delivery) / 2)
+    const pad = (body: number): string => JSON.stringify({ type: 'pad', x: 'p'.repeat(body) })
+    const rest = `${pad(restBytes - pad(0).length - 1)}\n`
+    expect(Buffer.byteLength(rest)).toBe(restBytes)
+    const file = path.join(await tempDir('cs-activity-'), 'transcript.jsonl')
+    await writeFile(file, `${fillerOf(4096).join('\n')}\n${delivery}\n${rest}`, 'utf8')
+    expect(readActivityFromLines(await tailLines(file)).promptedBy).toBeUndefined()
+    expect((await readTranscriptActivity(file)).promptedBy).toEqual([{ pipe: PIPE_A, name: 'Orchestrator' }])
+  })
+
+  it('does not look back past a turn end in the tail', async () => {
+    const file = await transcriptOf([delivered(PIPE_A, 'Orchestrator'), ...fillerOf(TAIL * 2), endTurn])
+    expect((await readTranscriptActivity(file)).promptedBy).toBeUndefined()
+  })
+
+  it('stops at the last turn end before the tail', async () => {
+    const file = await transcriptOf([delivered(PIPE_B, 'Reviewer'), endTurn, ...fillerOf(TAIL), delivered(PIPE_A, 'Orchestrator'), ...fillerOf(TAIL * 2)])
+    expect((await readTranscriptActivity(file)).promptedBy).toEqual([{ pipe: PIPE_A, name: 'Orchestrator' }])
+  })
+
+  it('looks back at most lookbackBytes', async () => {
+    const file = await transcriptOf([delivered(PIPE_A, 'Orchestrator'), ...fillerOf(TAIL * 3)])
+    expect((await readTranscriptActivity(file, TAIL)).promptedBy).toBeUndefined()
+    expect((await readTranscriptActivity(file, TAIL * 4)).promptedBy).toEqual([{ pipe: PIPE_A, name: 'Orchestrator' }])
+  })
+
+  it('returns nothing for a file that does not exist', async () => {
+    expect(await readTranscriptActivity(path.join(tmpdir(), 'cs-nope', 'missing.jsonl'))).toEqual({})
   })
 })
 

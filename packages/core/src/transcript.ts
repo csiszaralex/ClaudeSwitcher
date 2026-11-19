@@ -1,5 +1,6 @@
-import { open, readdir } from 'node:fs/promises'
+import { open, readdir, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
+import { createPromptTracker, isTurnEnd, mayConcernPrompts } from './cross-session.js'
 import { isRecord } from './guards.js'
 import { projectsDir } from './paths.js'
 import { toolDetail } from './tool-detail.js'
@@ -24,26 +25,46 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
   return content.filter(isRecord)
 }
 
+/** A transcript line as a record, or `undefined` for an empty, broken or non-object line. Never throws. */
+function parseLine(line: string): Record<string, unknown> | undefined {
+  const trimmed = line.trim()
+  if (trimmed === '') return undefined
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether a raw line ends a turn (`cross-session.ts` `isTurnEnd`), parsing only a line that may (`mayConcernPrompts`). */
+function isTurnEndLine(line: string): boolean {
+  if (!mayConcernPrompts(line)) return false
+  const rec = parseLine(line)
+  return rec !== undefined && isTurnEnd(rec)
+}
+
 /**
  * Reads from the transcript's last lines what the session is doing now. An unknown record type is
  * skipped silently: the format grows, and a new type must not break the monitor.
+ *
+ * @param earlierLines lines from before `lines`, in file order, that only the senders the session
+ * works for (`promptedBy`) are read from: a turn can outgrow the tail (`readTranscriptActivity`).
  */
-export function readActivityFromLines(lines: string[]): SessionActivity {
+export function readActivityFromLines(lines: readonly string[], earlierLines: readonly string[] = []): SessionActivity {
   const activity: SessionActivity = {}
   const titles: TitlesSeen = {}
+  const prompts = createPromptTracker()
+
+  for (const line of earlierLines) {
+    const rec = parseLine(line)
+    if (rec !== undefined) prompts.see(rec)
+  }
 
   for (const line of lines) {
-    const trimmed = line.trim()
-    if (trimmed === '') continue
-
-    let rec: Record<string, unknown>
-    try {
-      const parsed: unknown = JSON.parse(trimmed)
-      if (!isRecord(parsed)) continue
-      rec = parsed
-    } catch {
-      continue
-    }
+    const rec = parseLine(line)
+    if (rec === undefined) continue
+    prompts.see(rec)
 
     const at = typeof rec['timestamp'] === 'string' ? Date.parse(rec['timestamp']) : NaN
     if (!Number.isNaN(at)) activity.lastEventAt = at
@@ -88,6 +109,8 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
 
   const tabTitle = shownTabTitle(titles)
   if (tabTitle !== undefined) activity.tabTitle = tabTitle
+  const promptedBy = prompts.senders()
+  if (promptedBy.length > 0) activity.promptedBy = promptedBy
   return activity
 }
 
@@ -127,8 +150,116 @@ export async function findTranscriptPath(
   return undefined
 }
 
+/** The tail a session's activity is read from (`tailLines`' default, `readTranscriptActivity`). */
+const TAIL_BYTES = 256 * 1024
+
+/**
+ * How far before the tail `readTranscriptActivity` looks for the start of a turn that outgrew it.
+ * Measured (2026-11-19, 611 deliveries, design doc "Cross-session messages"): between the delivery
+ * of a cross-session message and the end of the turn that handles it, a transcript grew by 53 KB at
+ * the median, 748 KB at p90, 4.7 MB at p99 and 9.0 MB at most; 138 of them outgrew the 256 KB tail.
+ * A lookback of the whole 16 MB took 19 ms (a synthetic 17 MB transcript without a turn end).
+ */
+const PROMPT_LOOKBACK_BYTES = 16 * 1024 * 1024
+
+/** The piece `readTranscriptActivity` reads at a time when it looks back. */
+const LOOKBACK_CHUNK_BYTES = 1024 * 1024
+
+const NEWLINE = 0x0a
+
+interface Tail {
+  /** The complete lines of the tail. */
+  lines: string[]
+  /** Where the tail starts in the file. */
+  start: number
+  /** The bytes before the tail's first newline: the end of a line that starts before `start` (empty at the file's start). */
+  head: Buffer
+}
+
+/** Reads the last `maxBytes` bytes and splits off the first, partial line. Throws on an I/O error. */
+async function readTail(handle: FileHandle, maxBytes: number): Promise<Tail> {
+  const { size } = await handle.stat()
+  const start = Math.max(0, size - maxBytes)
+  const length = size - start
+  if (length === 0) return { lines: [], start, head: Buffer.alloc(0) }
+
+  const buffer = Buffer.alloc(length)
+  await handle.read(buffer, 0, length, start)
+  if (start === 0) return { lines: buffer.toString('utf8').split('\n'), start, head: Buffer.alloc(0) }
+  // A newline byte never occurs inside a multi-byte UTF-8 character, so the split is safe on bytes.
+  const newline = buffer.indexOf(NEWLINE)
+  if (newline === -1) return { lines: [], start, head: buffer }
+  return { lines: buffer.subarray(newline + 1).toString('utf8').split('\n'), start, head: buffer.subarray(0, newline) }
+}
+
+/**
+ * The lines before `end` that may concern a cross-session message (`mayConcernPrompts`), in file
+ * order, back to the last turn end (`isTurnEndLine`) or at most `limit` bytes. `head` is the end of
+ * the line that runs across `end`. Reads `LOOKBACK_CHUNK_BYTES` at a time, from the end backwards.
+ */
+async function promptLinesBefore(handle: FileHandle, end: number, head: Buffer, limit: number): Promise<string[]> {
+  const floor = Math.max(0, end - limit)
+  const chunks: string[][] = []
+  let carry = head
+  let pos = end
+  while (pos > floor) {
+    const start = Math.max(floor, pos - LOOKBACK_CHUNK_BYTES)
+    const buffer = Buffer.alloc(pos - start)
+    await handle.read(buffer, 0, buffer.length, start)
+    const joined = Buffer.concat([buffer, carry])
+    pos = start
+    let from = 0
+    if (start > 0) {
+      // The bytes up to the first newline belong to a line that starts in the next piece back.
+      const newline = joined.indexOf(NEWLINE)
+      if (newline === -1) {
+        carry = joined
+        continue
+      }
+      carry = joined.subarray(0, newline)
+      from = newline + 1
+    }
+    const lines = joined.subarray(from).toString('utf8').split('\n').filter(mayConcernPrompts)
+    chunks.unshift(lines)
+    if (lines.some(isTurnEndLine)) break
+  }
+  return chunks.flat()
+}
+
+/**
+ * The session's activity from its transcript (`readActivityFromLines`): the last 256 KB
+ * (`TAIL_BYTES`), and, when they hold no turn end, the lines before them back to the last one
+ * (`promptLinesBefore`, at most `lookbackBytes`), for the senders the running turn works for. Only
+ * the lines that may concern a cross-session message are kept from there. Never throws.
+ */
+export async function readTranscriptActivity(
+  filePath: string,
+  lookbackBytes: number = PROMPT_LOOKBACK_BYTES,
+): Promise<SessionActivity> {
+  let handle
+  try {
+    handle = await open(filePath, 'r')
+  } catch {
+    return {}
+  }
+  try {
+    const tail = await readTail(handle, TAIL_BYTES)
+    const earlier =
+      tail.start > 0 && !tail.lines.some(isTurnEndLine)
+        ? await promptLinesBefore(handle, tail.start, tail.head, lookbackBytes)
+        : []
+    return readActivityFromLines(tail.lines, earlier)
+  } catch (error) {
+    // Best-effort like `tailLines`: the scan goes on with what the other sessions give.
+    console.error(`[transcript] readTranscriptActivity failed for ${filePath}`, error)
+    return {}
+  } finally {
+    await handle.close()
+  }
+}
+
 /** Reads the file's last `maxBytes` bytes and drops the first, partial line. */
-export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promise<string[]> {
+export async function tailLines(filePath: string, maxBytes = TAIL_BYTES): Promise<string[]> {
   let handle
   try {
     handle = await open(filePath, 'r')
@@ -136,16 +267,7 @@ export async function tailLines(filePath: string, maxBytes = 256 * 1024): Promis
     return []
   }
   try {
-    const { size } = await handle.stat()
-    const start = Math.max(0, size - maxBytes)
-    const length = size - start
-    if (length === 0) return []
-
-    const buffer = Buffer.alloc(length)
-    await handle.read(buffer, 0, length, start)
-    const lines = buffer.toString('utf8').split('\n')
-    if (start > 0) lines.shift()
-    return lines
+    return (await readTail(handle, maxBytes)).lines
   } catch (error) {
     // An I/O error or an allocation failure must not propagate: the caller (e.g. scanSessions)
     // works best-effort. The allocation failure can only be triggered by a synthetic test.
