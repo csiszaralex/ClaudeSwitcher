@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
+import { PeekPanel } from './PeekPanel.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import {
   formatDuration,
@@ -14,6 +15,7 @@ import {
   waitsOnText,
 } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
+import { isPeekKey, PEEK_TEXT, peekScrollTop } from './peek.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
@@ -90,6 +92,10 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // The search (Ctrl+K, session-search.ts): `undefined` while it is closed, else the query typed.
   const [query, setQuery] = useState<string | undefined>()
   const searchField = useRef<HTMLInputElement | null>(null)
+  // The peek (Space, peek.ts): the session whose conversation shows in place of the list, else
+  // `undefined`. Its history's scroll box, which the keys scroll.
+  const [peekId, setPeekId] = useState<string | undefined>()
+  const peekHistory = useRef<HTMLDivElement | null>(null)
 
   // All rows: the sessions, plus a row of its own for each pending request whose session the
   // snapshot does not know yet, in the list's order (rows.ts).
@@ -100,6 +106,9 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   const ids = rows.map((row) => row.sessionId)
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedRowView = selected === -1 ? undefined : rows[selected]
+  // The peeked row, among all rows: the search does not hide it. Only a row with a session has a
+  // conversation; a row that only holds requests opens nothing.
+  const peekRow = peekId === undefined ? undefined : allRows.find((row) => row.sessionId === peekId && row.session !== undefined)
 
   // The panel shows the oldest request the app can still decide (rows.ts `panelRequest`); the
   // status marker needs all of them. Computed once: it decides both the panel and the status bar.
@@ -151,8 +160,9 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         const armedAt = armUntil(Date.now())
         keyHistory.current.shownArmedAt = armedAt
         rerenderOnShow(armedAt)
-        // The search starts closed on every show.
+        // The search and the peek start closed on every show.
         setQuery(undefined)
+        setPeekId(undefined)
         setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current, preferred))
       }),
     [],
@@ -197,10 +207,47 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // the selection out of the visible area, and Enter would activate a session the user cannot
   // even see. That is the worst kind of bug in this app, because it "works" just the same, it
   // just does not do what you expected.
+  // The list comes back after the peek, so the closing scrolls too.
   const selectedRow = useRef<HTMLLIElement | null>(null)
   useEffect(() => {
     selectedRow.current?.scrollIntoView({ block: 'nearest' })
-  }, [selected])
+  }, [selected, peekId])
+
+  // A session that went away while its peek was open: back to the list.
+  const peekGone = peekId !== undefined && peekRow === undefined
+  useEffect(() => {
+    if (peekGone) setPeekId(undefined)
+  }, [peekGone])
+
+  /** Back from the peek to the list, with the peeked session selected (a new request may have moved the selection meanwhile). */
+  function closePeek(id: string): void {
+    setSelectedId(id)
+    setPeekId(undefined)
+  }
+
+  /**
+   * The keys while the peek is open: Space or Esc goes back to the list, Enter jumps to the session
+   * as on its row, the arrows, PageUp/PageDown and Home/End scroll the history. Every other key does
+   * nothing; the decision panel is not drawn meanwhile, so its key letters do nothing either.
+   */
+  function onPeekKey(event: KeyboardEvent, id: string): void {
+    if (isPeekKey(event) || event.key === 'Escape') {
+      event.preventDefault()
+      closePeek(id)
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void window.claudeswitcher.focusSession(id)
+      return
+    }
+    const box = peekHistory.current
+    const top = box === null ? undefined : peekScrollTop(event.key, box)
+    if (box !== null && top !== undefined) {
+      event.preventDefault()
+      box.scrollTop = top
+    }
+  }
 
   /** Typing in the search: the list shows the matches, and the first match is selected. */
   function onQuery(next: string): void {
@@ -219,6 +266,10 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // replaced on every render anyway, and this way it surely sees the freshest rows.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
+      if (peekRow !== undefined) {
+        onPeekKey(event, peekRow.sessionId)
+        return
+      }
       const inSearch = searchField.current !== null && event.target === searchField.current
       // Ctrl+K opens the search, also from the search field itself (the focus stays there), but not
       // from another text field, whose keys are its own.
@@ -240,6 +291,19 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
       // the query (the panel's key letters skip a text field too, `isTypingTarget`).
       if (isTypingTarget(event.target) && !inSearch) return
       if (inSearch && !SEARCH_FIELD_KEYS.has(event.key)) return
+      // Space opens the peek of the selected session, also on a focused button or <summary>, which
+      // it must not press: its default is prevented, the focus leaves the element, and the panel
+      // with its buttons is not drawn while the peek is open. A text field keeps its Space (the
+      // returns above).
+      if (isPeekKey(event)) {
+        event.preventDefault()
+        const row = rows[resolveSelectedIndex(ids, selectedId)]
+        if (row?.session !== undefined) {
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+          setPeekId(row.sessionId)
+        }
+        return
+      }
       // On a focused button or <summary>, Enter belongs to the element (presses or opens it), not a jump.
       if (event.key === 'Enter' && isActivationTarget(event.target)) return
       if (event.key === 'Escape') {
@@ -268,151 +332,171 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
 
   return (
     <div className="overlay">
-      {query !== undefined && (
-        <div className="search">
-          {/* Its arrows, Enter and Esc are handled by App's window handler (`onKey`), as the list's. */}
-          <input
-            ref={searchField}
-            className="search-field"
-            type="text"
-            value={query}
-            placeholder="Session keresése…"
-            aria-label="Session keresése név vagy mappa szerint"
-            spellCheck={false}
-            autoFocus
-            onChange={(event) => {
-              onQuery(event.target.value)
-            }}
-          />
-        </div>
-      )}
-      <ul className="sessions">
-        {rows.length === 0 && (
-          // "No session", "the daemon cannot be reached" and "the search finds none" are not the
-          // same: the user has to see which one it is.
-          <li className="empty">
-            {allRows.length > 0 ? 'Nincs találat' : connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
-          </li>
-        )}
-        {rows.map((row, index) => {
-          const pending = activeDecision(row.decisions)
-          const marker = row.marker
-          const badge = pendingBadge(row.decisions)
-          // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
-          const source = requestSource(row.session?.entrypoint)
-          const flagged = source.standsOut && row.decisions.length > 0
-          const note = promptedByNote(row.promptedBy)
-          return (
-            <li
-              key={row.sessionId}
-              ref={index === selected ? selectedRow : null}
-              className={`session ${row.status} ${index === selected ? 'selected' : ''}`}
-              onClick={() => {
-                setSelectedId(row.sessionId)
-              }}
-              onDoubleClick={() => {
-                void window.claudeswitcher.focusSession(row.sessionId)
-              }}
-            >
-              <span className={`marker tone-${marker.tone}`} title={marker.title}>
-                {marker.glyph}
-              </span>
-              <span className="name">
-                {/*
-                  Only the text is truncated (…), never the dot: it must show with a long name too.
-                  The tooltip also names the registry name when the row shows the tab title.
-                */}
-                <span className="name-text" title={row.session === undefined ? row.name : nameTooltip(row.session)}>
-                  {row.name}
-                </span>
-                {row.session !== undefined && hasRemoteControl(row.session) && (
-                  <span className="remote" title="Remote Control: telefonról is elérhető">
-                    ●
-                  </span>
-                )}
-                {flagged && (
-                  <span className="source-tag" title={source.title}>
-                    {source.label}
-                  </span>
-                )}
-                {badge !== undefined && (
-                  <span className="pending-count" title="Ennyi kérése vár az appban">
-                    {badge}
-                  </span>
-                )}
-              </span>
-              <span
-                className="summary"
-                // A pending decision overrides the row; the tooltip still lists every active subagent.
-                title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
-              >
-                {/* The sessions this one works for, first, so the end of a long text is what CSS cuts. */}
-                {note !== undefined && (
-                  <span className="prompted-by" title={`Megkérte: ${row.promptedBy.join(', ')}`}>
-                    {note}{' '}
-                  </span>
-                )}
-                {pending !== undefined
-                  ? pendingRowText(pending)
-                  : row.waitsOn.length > 0
-                    ? waitsOnText(row.waitsOn)
-                    : row.session !== undefined
-                      ? summarize(row.session, now)
-                      : ''}
-              </span>
-              <span className="age">
-                {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-
-      {panel !== undefined && (
-        // A boundary of its own, keyed by the request id: a faulty request takes down only its own
-        // panel, the list and the other requests keep working. Another request gets a new boundary.
+      {peekRow !== undefined ? (
+        // In place of the list, the search and the panel: their keys rest meanwhile (App's `onKey`).
         <ErrorBoundary
-          key={panel.decision.id}
-          label="decision panel"
-          fallback={() => (
-            // The status bar leaves the source out while `panel` is defined, so the stand-in names
-            // it. The folder is the row's (`rowFolder`): the request that failed to render is not read.
-            <JumpNotice
-              text="A kérés nem jeleníthető meg."
-              host={selectedSource.host}
-              sessionId={panel.row.sessionId}
-              origin={{ source: selectedSource, folder: selectedFolder }}
-            />
-          )}
+          key={peekRow.sessionId}
+          label="peek"
+          fallback={() => <p className="empty">{PEEK_TEXT.unreadable}</p>}
         >
-          <DecisionPanel
-            decision={panel.decision}
-            source={selectedSource}
-            agentLabel={subagentLabel(panel.decision, panel.row.session?.subagents)}
-            remoteControl={panel.row.session !== undefined && hasRemoteControl(panel.row.session)}
-            keyHistory={keyHistory}
-            onDecided={() => {
-              afterDecision(panel.decision).catch((error: unknown) => {
-                console.error('[overlay] could not move on after the decision', error)
-              })
-            }}
-            onJump={() => {
-              // By the session id. For an unknown session the main process finds no window and does
-              // not jump. The native prompt is still there, in VS Code or in the terminal.
-              void window.claudeswitcher.focusSession(panel.row.sessionId)
-            }}
+          <PeekPanel
+            sessionId={peekRow.sessionId}
+            name={peekRow.name}
+            marker={peekRow.marker}
+            folder={rowFolder(peekRow)}
+            sessions={sessions}
+            scrollRef={peekHistory}
           />
         </ErrorBoundary>
-      )}
+      ) : (
+        <>
+          {query !== undefined && (
+            <div className="search">
+              {/* Its arrows, Enter and Esc are handled by App's window handler (`onKey`), as the list's. */}
+              <input
+                ref={searchField}
+                className="search-field"
+                type="text"
+                value={query}
+                placeholder="Session keresése…"
+                aria-label="Session keresése név vagy mappa szerint"
+                spellCheck={false}
+                autoFocus
+                onChange={(event) => {
+                  onQuery(event.target.value)
+                }}
+              />
+            </div>
+          )}
+          <ul className="sessions">
+            {rows.length === 0 && (
+              // "No session", "the daemon cannot be reached" and "the search finds none" are not the
+              // same: the user has to see which one it is.
+              <li className="empty">
+                {allRows.length > 0 ? 'Nincs találat' : connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
+              </li>
+            )}
+            {rows.map((row, index) => {
+              const pending = activeDecision(row.decisions)
+              const marker = row.marker
+              const badge = pendingBadge(row.decisions)
+              // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
+              const source = requestSource(row.session?.entrypoint)
+              const flagged = source.standsOut && row.decisions.length > 0
+              const note = promptedByNote(row.promptedBy)
+              return (
+                <li
+                  key={row.sessionId}
+                  ref={index === selected ? selectedRow : null}
+                  className={`session ${row.status} ${index === selected ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectedId(row.sessionId)
+                  }}
+                  onDoubleClick={() => {
+                    void window.claudeswitcher.focusSession(row.sessionId)
+                  }}
+                >
+                  <span className={`marker tone-${marker.tone}`} title={marker.title}>
+                    {marker.glyph}
+                  </span>
+                  <span className="name">
+                    {/*
+                      Only the text is truncated (…), never the dot: it must show with a long name too.
+                      The tooltip also names the registry name when the row shows the tab title.
+                    */}
+                    <span className="name-text" title={row.session === undefined ? row.name : nameTooltip(row.session)}>
+                      {row.name}
+                    </span>
+                    {row.session !== undefined && hasRemoteControl(row.session) && (
+                      <span className="remote" title="Remote Control: telefonról is elérhető">
+                        ●
+                      </span>
+                    )}
+                    {flagged && (
+                      <span className="source-tag" title={source.title}>
+                        {source.label}
+                      </span>
+                    )}
+                    {badge !== undefined && (
+                      <span className="pending-count" title="Ennyi kérése vár az appban">
+                        {badge}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className="summary"
+                    // A pending decision overrides the row; the tooltip still lists every active subagent.
+                    title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
+                  >
+                    {/* The sessions this one works for, first, so the end of a long text is what CSS cuts. */}
+                    {note !== undefined && (
+                      <span className="prompted-by" title={`Megkérte: ${row.promptedBy.join(', ')}`}>
+                        {note}{' '}
+                      </span>
+                    )}
+                    {pending !== undefined
+                      ? pendingRowText(pending)
+                      : row.waitsOn.length > 0
+                        ? waitsOnText(row.waitsOn)
+                        : row.session !== undefined
+                          ? summarize(row.session, now)
+                          : ''}
+                  </span>
+                  <span className="age">
+                    {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
 
-      {panel === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
-        // No held request, so nothing to decide, but the row must not be a dead end: the native
-        // prompt is there, in VS Code or in the terminal.
-        <JumpNotice
-          text={outsideAppMessage(selectedSource.host)}
-          host={selectedSource.host}
-          sessionId={selectedRowView.sessionId}
-        />
+          {panel !== undefined && (
+            // A boundary of its own, keyed by the request id: a faulty request takes down only its own
+            // panel, the list and the other requests keep working. Another request gets a new boundary.
+            <ErrorBoundary
+              key={panel.decision.id}
+              label="decision panel"
+              fallback={() => (
+                // The status bar leaves the source out while `panel` is defined, so the stand-in names
+                // it. The folder is the row's (`rowFolder`): the request that failed to render is not read.
+                <JumpNotice
+                  text="A kérés nem jeleníthető meg."
+                  host={selectedSource.host}
+                  sessionId={panel.row.sessionId}
+                  origin={{ source: selectedSource, folder: selectedFolder }}
+                />
+              )}
+            >
+              <DecisionPanel
+                decision={panel.decision}
+                source={selectedSource}
+                agentLabel={subagentLabel(panel.decision, panel.row.session?.subagents)}
+                remoteControl={panel.row.session !== undefined && hasRemoteControl(panel.row.session)}
+                keyHistory={keyHistory}
+                onDecided={() => {
+                  afterDecision(panel.decision).catch((error: unknown) => {
+                    console.error('[overlay] could not move on after the decision', error)
+                  })
+                }}
+                onJump={() => {
+                  // By the session id. For an unknown session the main process finds no window and does
+                  // not jump. The native prompt is still there, in VS Code or in the terminal.
+                  void window.claudeswitcher.focusSession(panel.row.sessionId)
+                }}
+              />
+            </ErrorBoundary>
+          )}
+
+          {panel === undefined && selectedRowView !== undefined && waitsOutsideApp(selectedRowView) && (
+            // No held request, so nothing to decide, but the row must not be a dead end: the native
+            // prompt is there, in VS Code or in the terminal.
+            <JumpNotice
+              text={outsideAppMessage(selectedSource.host)}
+              host={selectedSource.host}
+              sessionId={selectedRowView.sessionId}
+            />
+          )}
+        </>
       )}
 
       <div className="status-bar">
@@ -420,10 +504,11 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
           The selected session's source (as the panel shows it, shared/request-source.ts) and its
           folder, shortened in the middle, the full path in the tooltip. Not while a decision panel
           shows (`panel`): its source line names the source and the request's working folder, and
-          the panel's error stand-in (`JumpNotice` with `origin`) the source and this folder. It
-          truncates on a narrow window; the right part never does.
+          the panel's error stand-in (`JumpNotice` with `origin`) the source and this folder. Nor
+          while the peek shows: its header names the folder, and the selection may have moved to
+          another session meanwhile. It truncates on a narrow window; the right part never does.
         */}
-        {selectedRowView !== undefined && panel === undefined && (
+        {selectedRowView !== undefined && panel === undefined && peekRow === undefined && (
           <span className="status-session">
             <SourceLabel source={selectedSource} />
             {selectedFolder !== undefined && (
@@ -435,16 +520,21 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         )}
         <span className="status-checks">
           {/*
-            The hint of the search's keys (`SEARCH_KEYS_LABEL`), the account's usage limit while
+            The hint of the search's keys (`SEARCH_KEYS_LABEL`), or of the peek's while it shows
+            (`PEEK_TEXT.keys`), the account's usage limit while
             one runs (`usageLimitStatusText`), the app's version, then the time of the heartbeat.
             The heartbeat is the only sign that
             the list is ALIVE and just has no change. The daemon does not resend an identical
             snapshot, so on an idle machine a still list and a stopped poll would otherwise look
             exactly the same.
           */}
-          <span className="muted" title="Session keresése">
-            Keresés: {SEARCH_KEYS_LABEL}
-          </span>
+          {peekRow !== undefined ? (
+            <span className="muted">{PEEK_TEXT.keys}</span>
+          ) : (
+            <span className="muted" title="Session keresése">
+              Keresés: {SEARCH_KEYS_LABEL}
+            </span>
+          )}
           {limitNote !== undefined && (
             <span className="status-limit" title="Egy munkamenet elérte a használati limitet">
               {limitNote}

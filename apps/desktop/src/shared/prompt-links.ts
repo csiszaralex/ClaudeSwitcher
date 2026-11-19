@@ -53,10 +53,24 @@ export function recipientsOf<S extends LinkedSession>(
 export function promptersOf(session: LinkedSession, sessions: readonly LinkedSession[]): string[] {
   if (session.status === 'idle') return []
   const names = (session.activity?.promptedBy ?? []).flatMap((sender) => {
-    const live = sessions.find((other) => other.sessionId !== session.sessionId && other.messagingSocketPath === sender.pipe)
-    const liveName = live === undefined ? '' : sessionName(live)
-    const name = liveName !== '' ? liveName : sender.name
-    return name === undefined || name === '' ? [] : [name]
+    const name = senderName(sender, session.sessionId, sessions)
+    return name === undefined ? [] : [name]
   })
   return [...new Set(names)].sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * The name of a cross-session message's sender, as `recipientId`'s views show it (the row's note,
+ * `promptersOf`, and the peek's incoming messages): the shown name (`sessionName`) of the other live
+ * session that has its pipe, else the name its message gave; `undefined` with neither.
+ */
+export function senderName(
+  sender: PromptSender,
+  recipientId: string,
+  sessions: readonly LinkedSession[],
+): string | undefined {
+  const live = sessions.find((other) => other.sessionId !== recipientId && other.messagingSocketPath === sender.pipe)
+  const liveName = live === undefined ? '' : sessionName(live)
+  const name = liveName !== '' ? liveName : sender.name
+  return name === undefined || name === '' ? undefined : name
 }

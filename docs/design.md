@@ -373,7 +373,10 @@ The app reads it in core `conversation.ts` (the records, `conversationFromLines`
 `transcript.ts` `readTranscriptConversation` (read back from the end until those turns start, at
 most 16 MB, keeping only the lines `mayBeConversation` passes). Over all 44 transcripts the read
 took 9 ms at the median and 65 ms at most (two runs, `node` on the built core, the owner's
-machine); 2 of them reached the 16 MB limit before 20 turns.
+machine); 2 of them reached the 16 MB limit before 20 turns. The desktop app reads it in the main
+process, for a session the daemon lists, and keeps the last reply while the transcript's size and
+last write stay the same (`main/conversation-reader.ts`), so the peek's poll every second reads
+the file only when it changed.
 
 ### 3.4 Hooks: measured in the VS Code extension
 

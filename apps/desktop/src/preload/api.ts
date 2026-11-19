@@ -22,6 +22,11 @@ export interface ClaudeSwitcherApi {
    */
   finishesSeen: () => Promise<unknown>
   focusSession: (sessionId: string) => Promise<boolean>
+  /**
+   * The session's recent conversation; the main process gives a `ConversationReply`, the renderer
+   * reads it with a check (`readConversationReply`).
+   */
+  conversation: (sessionId: string) => Promise<unknown>
   hide: () => Promise<void>
   /** The main process gives the reply as a `DecideResult`; the renderer reads it with a check. */
   decide: (id: string, decision: UserDecision) => Promise<unknown>

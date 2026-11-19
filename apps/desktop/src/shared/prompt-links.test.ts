@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { promptersOf, recipientsOf, type LinkedSession } from './prompt-links.js'
+import { promptersOf, recipientsOf, senderName, type LinkedSession } from './prompt-links.js'
 
 // Invented sessions and pipes in the measured shapes (design doc "Cross-session messages").
 const PIPE_A = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
@@ -63,5 +63,18 @@ describe('promptersOf', () => {
 
   it('names nobody while the session is idle', () => {
     expect(promptersOf(worker('idle', { pipe: PIPE_A }), [orchestrator])).toEqual([])
+  })
+})
+
+describe('senderName', () => {
+  it('names a live sender by its shown name, else by the name the message gave', () => {
+    const titled = { ...orchestrator, activity: { tabTitle: 'Kiadás koordinálása' } }
+    expect(senderName({ pipe: PIPE_A, name: 'name in the message' }, 'w', [titled])).toBe('Kiadás koordinálása')
+    expect(senderName({ pipe: PIPE_GONE, name: 'Old orchestrator' }, 'w', [titled])).toBe('Old orchestrator')
+  })
+
+  it('gives undefined for a sender with neither, and never names the recipient itself', () => {
+    expect(senderName({ pipe: PIPE_GONE }, 'w', [orchestrator])).toBeUndefined()
+    expect(senderName({ pipe: PIPE_A, name: '' }, 'o', [orchestrator])).toBeUndefined()
   })
 })
