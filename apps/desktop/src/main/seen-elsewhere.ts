@@ -8,12 +8,14 @@ import type { ForegroundTitle } from './focus-window.js'
 /**
  * How long a finished session's tab must stay the active tab of the foreground VS Code window, with
  * the same match all along (`createSeenWatch`), before its finish counts as seen. Agreed with the
- * owner: long enough that a tab passed on the way (Ctrl+Tab, Alt+Tab) does not count.
+ * owner: long enough that a tab clicked past on the way does not count, short enough for a glance
+ * (measured: glances of 0.5 to 1.6 s, `docs/design.md` "The window title and the tab title"). With
+ * the poll below, a match counts after 1 to 1.25 s.
  */
-export const SEEN_DWELL_MS = 1500
+export const SEEN_DWELL_MS = 1000
 
 /** How often `main/index.ts` reads the foreground window while a finish may be seen this way (`watchesSeen`). */
-export const SEEN_POLL_MS = 500
+export const SEEN_POLL_MS = 250
 
 /**
  * The part of a session the match reads; the daemon's `SessionView` fits it. The links

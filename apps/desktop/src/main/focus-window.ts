@@ -465,7 +465,7 @@ export function foregroundTitleOf(api: ForegroundTitleReader, buffer: Buffer): F
   return { hwnd, pid: pidOut[0], title: buffer.toString('utf16le', 0, length * 2) }
 }
 
-/** One reused buffer: the poll (`main/seen-elsewhere.ts` `SEEN_POLL_MS`) reads twice a second. */
+/** One reused buffer: the poll reads every `main/seen-elsewhere.ts` `SEEN_POLL_MS`. */
 let titleBuffer: Buffer | undefined
 
 /** The foreground window and its title now (`foregroundTitleOf`), or `undefined`, also without the user32 bindings. */
