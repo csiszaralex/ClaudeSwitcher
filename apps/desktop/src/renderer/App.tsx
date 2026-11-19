@@ -18,7 +18,7 @@ import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waits
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
-import { filterRows, isSearchChord, SEARCH_CHORD_LABEL } from './session-search.js'
+import { filterRows, isSearchChord, isSearchKey, SEARCH_KEYS_LABEL } from './session-search.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
 import { usageLimitStatusText } from './usage-limit.js'
@@ -228,6 +228,13 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         openSearch()
         return
       }
+      // A plain `/` opens it too, but only outside every text field, the search field included,
+      // where it is just a character of the query.
+      if (isSearchKey(event) && !isTypingTarget(event.target)) {
+        event.preventDefault()
+        openSearch()
+        return
+      }
       // In another text field the typing belongs to the field: neither the arrows nor Enter nor
       // Esc control the list. In the search field only the arrows, Enter and Esc do; the rest is
       // the query (the panel's key letters skip a text field too, `isTypingTarget`).
@@ -428,7 +435,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         )}
         <span className="status-checks">
           {/*
-            The hint of the search's key (`SEARCH_CHORD_LABEL`), the account's usage limit while
+            The hint of the search's keys (`SEARCH_KEYS_LABEL`), the account's usage limit while
             one runs (`usageLimitStatusText`), the app's version, then the time of the heartbeat.
             The heartbeat is the only sign that
             the list is ALIVE and just has no change. The daemon does not resend an identical
@@ -436,7 +443,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
             exactly the same.
           */}
           <span className="muted" title="Session keresése">
-            {SEARCH_CHORD_LABEL}: keresés
+            Keresés: {SEARCH_KEYS_LABEL}
           </span>
           {limitNote !== undefined && (
             <span className="status-limit" title="Egy munkamenet elérte a használati limitet">

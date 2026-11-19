@@ -22,8 +22,11 @@ export interface SearchableRow {
 /** The key that opens the search, with Ctrl. */
 const SEARCH_KEY = 'k'
 
-/** The `isSearchChord` label, for the hint in the status bar. */
-export const SEARCH_CHORD_LABEL = 'Ctrl+K'
+/** The one key that opens the search on its own (`isSearchKey`). */
+const SEARCH_SLASH = '/'
+
+/** The keys that open the search (`isSearchChord`, `isSearchKey`), for the hint in the status bar. */
+export const SEARCH_KEYS_LABEL = '/ vagy Ctrl+K'
 
 /**
  * Whether a keydown is Ctrl+K, which opens the search. Not with Alt or Meta: AltGr on the Hungarian
@@ -31,6 +34,17 @@ export const SEARCH_CHORD_LABEL = 'Ctrl+K'
  */
 export function isSearchChord(event: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): boolean {
   return event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === SEARCH_KEY
+}
+
+/**
+ * Whether a keydown is a plain `/`, which opens the search too: one key, and no decision panel
+ * shortcut uses it (`decision-actions.ts`). Plain letters cannot: the panel's buttons are letters
+ * (D denies at once), so the same key would search on one row and decide on another. Shift does not
+ * matter, because `/` is Shift+6 on the Hungarian layout; Ctrl, Alt (AltGr) and Meta do. App calls
+ * it only outside text fields, so a `/` typed into the search field or a reason stays a character.
+ */
+export function isSearchKey(event: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): boolean {
+  return !event.ctrlKey && !event.altKey && !event.metaKey && event.key === SEARCH_SLASH
 }
 
 /**
