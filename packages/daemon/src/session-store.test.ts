@@ -56,6 +56,13 @@ describe('SessionStore', () => {
     expect(store.views()[0]!.status).toBe('idle')
   })
 
+  it('passes the tab title through to the view unchanged', () => {
+    // The desktop app matches it against the VS Code window title, so nothing may reshape it.
+    const store = new SessionStore()
+    store.applySnapshot([live('s1')], new Map([['s1', { lastAssistantText: 'kész', tabTitle: 'Parser munka…' }]]))
+    expect(store.views()[0]!.activity.tabTitle).toBe('Parser munka…')
+  })
+
   it('reports waiting after a permission_prompt notification', () => {
     const store = new SessionStore()
     store.applySnapshot([live('s1')], noActivity)

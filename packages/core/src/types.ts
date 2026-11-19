@@ -55,6 +55,12 @@ export interface SessionActivity {
    * cleared by any later user record or non-error assistant record (`readActivityFromLines`).
    */
   usageLimit?: UsageLimit | undefined
+  /**
+   * The title the session's tab shows in the VS Code extension: the latest custom title, else the
+   * latest AI title (`tab-title.ts`), from the transcript tail. Absent while the tail has no title
+   * record.
+   */
+  tabTitle?: string | undefined
 }
 
 /** An active subagent as the UI gets it: what the session's background worker is doing now. */

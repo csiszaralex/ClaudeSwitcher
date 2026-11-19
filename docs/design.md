@@ -110,6 +110,46 @@ The `pid` is the VS Code window's process (checked: 8108 → the window whose `M
 The pairing looks only at the cwd (core `liveness.ts` `resolveLiveSessions`), so a terminal session
 whose cwd is inside an open workspace gets that window's lock too, wherever it really runs.
 
+#### The window title and the tab title (measured 2026-11-19, Claude Code 2.1.325)
+
+Measured with `scripts/measure/title-watch.ps1` on VS Code for Windows, read only:
+
+- All VS Code windows belonged to one process: every window had the same pid. The pid says "this is
+  that VS Code", not which window.
+- The window title contains the active editor's title (`${activeEditorShort}`). For a Claude Code
+  tab that is the session's tab title. A tab switch in the foreground window (mouse, Ctrl+Tab,
+  split editor groups) changes the window title at once; after a window switch (Alt+Tab, the
+  taskbar) the foreground window's title already shows its active tab. A file tab shows the file
+  name instead.
+- The tab title is the transcript's latest `{"type":"custom-title","customTitle":…}` when the user
+  renamed the session, else the latest `{"type":"ai-title","aiTitle":…}`. The custom title wins
+  even when `ai-title` records come after it (a renamed session kept showing its custom title while
+  its later `ai-title` records said something else). Both records are written again at the end of
+  every turn, next to `last-prompt`.
+- A long title is cut: the first 24 characters, then `…` (U+2026). "Claude Code session manager
+  app" showed as "Claude Code session mana…"; a 10 character title showed whole.
+- A new tab shows "Claude Code" before the first prompt, then the prompt text for about 2 s, then
+  the AI title.
+- The window title template is the user's `window.title` setting. The owner's is
+  `${rootName}${separator}${activeEditorShort}`. The VS Code default on Windows (VS Code source,
+  `src/vs/workbench/browser/parts/titlebar/windowTitle.ts`, `defaultWindowTitle`, separator
+  `' - '`) is
+  `${dirty}${activeEditorShort}${separator}${rootName}${separator}${folderLocation}${separator}${profileName}${separator}${appName}`.
+  So the title cannot be parsed by position or by separator.
+
+Read only, from the owner's transcripts (2026-11-19, 107 session transcripts under
+`~/.claude/projects`): 101 had an `ai-title` record and 11 a `custom-title` record, every one a
+non-empty string with only `type`, the title field and `sessionId`. The latest title record was at
+most 33 904 bytes before the end of its file, well inside the 256 KB tail the scanner reads
+(`transcript.ts` `tailLines`). In 10 of the 11 renamed sessions `ai-title` records came after the
+last `custom-title` record.
+
+Not measured: sessions outside VS Code (a CLI in a terminal), and where exactly the cut starts (a
+title of exactly 24 or 25 characters).
+
+The app reads the tab title in core `tab-title.ts` (the record names and the precedence) and
+`transcript.ts` `readActivityFromLines` (`SessionActivity.tabTitle`).
+
 #### Mapping to terminal windows (measured 2026-11-16, Claude Code 2.1.325)
 
 A terminal session (`entrypoint: "cli"`) has no lock file of its own. Measured read-only on five
