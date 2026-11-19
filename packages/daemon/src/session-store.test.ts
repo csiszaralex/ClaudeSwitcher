@@ -38,6 +38,20 @@ describe('SessionStore', () => {
     expect(byId.get('s3')!.entrypoint).toBeUndefined()
   })
 
+  it('carries the messaging pipe and the senders a session works for, unchanged', () => {
+    // The desktop app links a sender to its recipients by comparing the two, so neither may be reshaped.
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const store = new SessionStore()
+    store.applySnapshot(
+      [live('s1', { messagingSocketPath: pipe }), live('s2')],
+      new Map([['s2', { runningTool: 'Bash', promptedBy: [{ pipe, name: 'alpha-01' }] }]]),
+    )
+    const byId = new Map(store.views().map((v) => [v.sessionId, v]))
+    expect(byId.get('s1')!.messagingSocketPath).toBe(pipe)
+    expect(byId.get('s2')!.messagingSocketPath).toBeUndefined()
+    expect(byId.get('s2')!.activity.promptedBy).toEqual([{ pipe, name: 'alpha-01' }])
+  })
+
   it('falls back to the directory name when the session has no name', () => {
     const store = new SessionStore()
     store.applySnapshot([live('s1', { name: undefined })], noActivity)

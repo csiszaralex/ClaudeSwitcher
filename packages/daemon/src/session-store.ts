@@ -289,6 +289,7 @@ export class SessionStore {
         workspaceFolder: session.window?.workspaceFolders[0],
         bridgeSessionId: session.record.bridgeSessionId,
         entrypoint: session.record.entrypoint,
+        messagingSocketPath: session.record.messagingSocketPath,
         // The hook sources are more precise; the registry only when none of them knows of the wait.
         waitingSince: wait?.since ?? pending ?? registryWait,
         notificationText: wait?.text,
