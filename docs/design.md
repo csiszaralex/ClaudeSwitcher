@@ -334,6 +334,47 @@ loop in a mesh. A turn the user interrupts (see above) leaves its senders pendin
 end, but the recipient is idle then, so nobody waits on it; only its next turn's row note names
 them.
 
+#### The conversation (measured 2026-11-19, Claude Code 2.1.325)
+
+The peek (Space on a row) shows a session's recent conversation, read only. Measured on the owner's
+transcripts of the last 7 days (44 files, 271 978 lines, Claude Code 2.1.215 to 2.1.328, the most
+common 2.1.325), counts only:
+
+- **The user's prompt** is a `user` record with `origin: {"kind":"human"}` and no `isMeta` (2 705),
+  its `message.content` a string or an array of `text` and `image` blocks. 144 text blocks are only
+  the IDE's or the browser's context (`<ide_opened_file>`, `<ide_selection>`,
+  `<browser_instruction>`), each beside other blocks of the same prompt. No prompt held a
+  `<system-reminder>`.
+- **A prompt typed while the session works** joins the running turn as an `attachment` of type
+  `queued_command` with the same `origin` and the text in `prompt` (170). Only 3 of them had a
+  `user` record with the same text, so it is no copy.
+- **A slash command** is a `user` record without an `origin`, a string
+  `<command-name>/name</command-name><command-message>…</command-message><command-args>…</command-args>`
+  (59). Its caveat (`isMeta`, `<local-command-caveat>`, 59) and its output
+  (`<local-command-stdout>`, 57) come as records of their own.
+- **The answer** is an `assistant` record's `text` blocks; its `tool_use` blocks are the tool
+  calls, its `thinking` blocks the reasoning (21 516 of them).
+- **An incoming message** (§"Cross-session messages") carries its text in `origin.body`. The
+  record's own content holds the body too, but inside Claude Code's preamble and the
+  `<cross-session-message>` tag (483 `user` records and 122 `queued_command` attachments checked).
+- **The rest is noise for the peek:** tool results (`user` records with `toolUseResult`, 32 345),
+  the other `isMeta` records, the compacted summary (`isCompactSummary`, 108), the background tasks'
+  notices (`origin.kind: "task-notification"`, 863 `user` records), the other attachment types, and
+  the record types `system`, `api-request`, `api-request-blob`, the title records and more.
+- **Size.** Of the 16 transcripts with at least 20 turns (a turn starts at a prompt, a slash
+  command or an incoming message), the last 20 took 6.6 MB at the median, 10.7 MB at p90 and
+  24.9 MB at most; the largest transcript was 244 MB. Tool results and the API request records are
+  most of it. Every `user` and `assistant` line had `"type":"user"` or `"type":"assistant"` as raw
+  text (32 911 and 57 594 lines in the 10 largest files), so a line pre-filter on these substrings
+  loses none.
+
+The app reads it in core `conversation.ts` (the records, `conversationFromLines`: the last
+`CONVERSATION_TURNS`, 20, turns, each text cut at `CONVERSATION_ENTRY_MAX`, 20 000 characters) and
+`transcript.ts` `readTranscriptConversation` (read back from the end until those turns start, at
+most 16 MB, keeping only the lines `mayBeConversation` passes). Over all 44 transcripts the read
+took 9 ms at the median and 65 ms at most (two runs, `node` on the built core, the owner's
+machine); 2 of them reached the 16 MB limit before 20 turns.
+
 ### 3.4 Hooks: measured in the VS Code extension
 
 The original text worked from the documentation. What follows is the **measured** behaviour

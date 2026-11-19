@@ -38,6 +38,7 @@ const RECORD = {
   attachment: 'attachment',
   queuedCommand: 'queued_command',
   peer: 'peer',
+  body: 'body',
   endTurn: 'end_turn',
   synthetic: '<synthetic>',
 } as const
@@ -78,16 +79,51 @@ function arrivalOf(rec: Record<string, unknown>): PromptSender | undefined {
   return senderOf(attributes.get(RECORD.from), attributes.get(RECORD.fromName))
 }
 
+/**
+ * Where a delivered prompt's `origin` lives: the `user` record itself, or the `attachment` of a
+ * `queued_command` record (a prompt that joined the running turn). `conversation.ts` reads the
+ * user's own prompts from the same two places (with `origin.kind: "human"`). `undefined` for any
+ * other record.
+ */
+export function deliveryOf(rec: Record<string, unknown>): { holder: Record<string, unknown>; queued: boolean } | undefined {
+  if (rec['type'] === RECORD.user) return { holder: rec, queued: false }
+  const attachment = rec['attachment']
+  if (rec['type'] === RECORD.attachment && isRecord(attachment) && attachment['type'] === RECORD.queuedCommand) {
+    return { holder: attachment, queued: true }
+  }
+  return undefined
+}
+
+/** Whether a raw line may be a `queued_command` attachment (`deliveryOf`); a cheap pre-filter for `conversation.ts`. */
+export function mayBeQueuedDelivery(line: string): boolean {
+  return line.includes(`"${RECORD.queuedCommand}"`)
+}
+
+/** The peer `origin` of a delivery (`deliveryOf`), else `undefined`. */
+function peerOriginOf(rec: Record<string, unknown>): Record<string, unknown> | undefined {
+  const origin = deliveryOf(rec)?.holder['origin']
+  return isRecord(origin) && origin['kind'] === RECORD.peer ? origin : undefined
+}
+
 /** The sender of a delivery (a `user` record or a `queued_command` attachment with a peer origin), else `undefined`. */
-function deliveryOf(rec: Record<string, unknown>): PromptSender | undefined {
-  const holder =
-    rec['type'] === RECORD.user ? rec
-    : rec['type'] === RECORD.attachment && isRecord(rec['attachment']) && rec['attachment']['type'] === RECORD.queuedCommand
-      ? rec['attachment']
-      : undefined
-  const origin = holder?.['origin']
-  if (!isRecord(origin) || origin['kind'] !== RECORD.peer) return undefined
-  return senderOf(origin['from'], origin['name'])
+function deliverySenderOf(rec: Record<string, unknown>): PromptSender | undefined {
+  const origin = peerOriginOf(rec)
+  return origin === undefined ? undefined : senderOf(origin['from'], origin['name'])
+}
+
+/**
+ * The sender and the text of a delivered cross-session message, for the conversation view
+ * (`conversation.ts`), else `undefined` (a subagent's handback included: its `from` has no `uds:`).
+ * The text is the origin's `body`: measured 2026-11-19 on the deliveries of 7 days (483 `user`
+ * records, 122 `queued_command` attachments), the record's own content holds the body too, but
+ * wrapped in Claude Code's preamble and the `<cross-session-message>` tag.
+ */
+export function peerMessageOf(rec: Record<string, unknown>): { sender: PromptSender; body: string } | undefined {
+  const origin = peerOriginOf(rec)
+  if (origin === undefined) return undefined
+  const sender = senderOf(origin['from'], origin['name'])
+  const body = origin[RECORD.body]
+  return sender === undefined || typeof body !== 'string' ? undefined : { sender, body }
 }
 
 /** Whether the record ends a turn (see `RECORD`). */
@@ -126,7 +162,7 @@ export function createPromptTracker(): {
         queued.set(arrival.pipe, (queued.get(arrival.pipe) ?? 0) + 1)
         return
       }
-      const delivery = deliveryOf(rec)
+      const delivery = deliverySenderOf(rec)
       if (delivery !== undefined) {
         note(delivery)
         // A delivery whose arrival lies before the lines read takes nothing from the queue.
