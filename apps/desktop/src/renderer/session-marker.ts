@@ -1,9 +1,9 @@
 import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS, UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import { capitalized } from '../shared/hungarian-text.js'
-import { isChoiceKind } from '../shared/request-kind.js'
 import { sessionHost, type SessionHost } from '../shared/request-source.js'
 import { finishState, type SeenFinishes } from '../shared/session-finished.js'
+import { sessionState } from '../shared/session-state.js'
 import { sessionUsageLimit } from './usage-limit.js'
 
 /**
@@ -75,10 +75,11 @@ function releasedMarker(remoteControl: boolean, host: SessionHost): StatusMarker
  * The session's status marker. `decisions` are the session's OWN pending decisions, `seen` the
  * finishes the user has seen (`useSeenFinishes`).
  *
- * Order: a request the app can still decide (not released) is the strongest sign, in the choice
- * color if one of them asks for more than a yes or a no; if there are only released ones, that is a
- * state of its own, because from there the app can no longer decide.
- * Then come the Notification wait, running, the usage limit (`sessionUsageLimit`: a turn the limit
+ * Order: first the steps the tray icon shows too (`sessionState`, their one home): a request the
+ * app can still decide (not released) is the strongest sign, in the choice color if one of them asks
+ * for more than a yes or a no; if there are only released ones, that is a state of its own, because
+ * from there the app can no longer decide; then the Notification wait, and running.
+ * Then come the usage limit (`sessionUsageLimit`: a turn the limit
  * ended has a `stoppedAt` too, from the `StopFailure` hook, and the limit says more than the ✓), and
  * "just finished" (`finishState`, the rule the tray's done mark follows too): green while unseen,
  * blue once seen.
@@ -95,12 +96,18 @@ export function statusMarker(
   decisions: readonly { released: boolean; kind: DecisionKind }[],
   seen: SeenFinishes,
 ): StatusMarker {
-  const held = decisions.filter((d) => !d.released)
-  if (held.some((d) => isChoiceKind(d.kind))) return MARKERS.choice
-  if (held.length > 0) return MARKERS.waiting
-  if (decisions.length > 0) return releasedMarker(hasRemoteControl(view), sessionHost(view.entrypoint))
-  if (view.status === 'waiting') return MARKERS.waiting
-  if (view.status === 'working') return MARKERS.working
+  switch (sessionState(view.status, decisions)) {
+    case 'choice':
+      return MARKERS.choice
+    case 'yes-no':
+      return MARKERS.waiting
+    case 'released':
+      return releasedMarker(hasRemoteControl(view), sessionHost(view.entrypoint))
+    case 'working':
+      return MARKERS.working
+    case 'rest':
+      break
+  }
   if (sessionUsageLimit(view) !== undefined) return MARKERS.limit
   switch (finishState(view, seen)) {
     case 'unseen':
