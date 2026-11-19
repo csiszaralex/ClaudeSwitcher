@@ -1,6 +1,6 @@
 import { PERMISSION_RELEASE_AFTER_MS, type DecisionKind, type SessionStatus } from '@claudeswitcher/core'
-import { isChoiceKind } from '../shared/request-kind.js'
 import { finishState, type SeenFinishes } from '../shared/session-finished.js'
+import { sessionState, type SessionState } from '../shared/session-state.js'
 
 /**
  * When the tray starts to flash for a held request nobody has decided: 50 s before the release
@@ -18,6 +18,8 @@ export interface TraySession {
 
 /** The part of a pending request the tray reads; the daemon's `PendingDecisionView` fits it. */
 export interface TrayDecision {
+  /** The session that asks, to tell the session's state (`sessionState`) as the list does. */
+  sessionId: string
   kind: DecisionKind
   /** Released by the app (`PERMISSION_RELEASE_AFTER_MS`): it can no longer be decided here. */
   released: boolean
@@ -36,12 +38,21 @@ export interface TrayInput {
 
 /**
  * What waits, as the icon's colour shows it: nothing, a yes/no request (or a Notification wait),
- * or a request that asks for a choice (`isChoiceKind`), which wins over yes/no.
+ * a request that asks for a choice, or only requests the app has released. Each session counts with
+ * its state as the list's marker shows it (`sessionState`); across the sessions a choice wins over a
+ * yes/no, and either wins over a released one, because those the app can still decide.
  */
-type TrayWait = 'none' | 'yes-no' | 'choice'
+type TrayWait = 'none' | 'yes-no' | 'choice' | 'released'
+
+/** The strength of each wait: the strongest one across the sessions is the icon's. */
+const WAIT_RANK: Readonly<Record<TrayWait, number>> = { none: 0, released: 1, 'yes-no': 2, choice: 3 }
 
 export interface TrayState {
-  /** The sessions whose status is `waiting`: the number the tooltip gives. */
+  /**
+   * The sessions whose status is `waiting`: the number the tooltip gives. A session with only
+   * released requests counts too: the daemon keeps it waiting (`session-store.ts` `applyPending`),
+   * since its own prompt still waits for the user.
+   */
   waitingCount: number
   wait: TrayWait
   /**
@@ -49,6 +60,8 @@ export interface TrayState {
    * rows, and its usage limit rows not opened since (the exception in `finishState`).
    */
   finishedCount: number
+  /** The sessions that work (`sessionState` `working`): the list's ◐ rows. */
+  workingCount: number
   /**
    * A request the app can still decide has been held longer than `PERMISSION_WARN_AFTER_MS`: the
    * icon flashes until it is decided, released or gone.
@@ -56,30 +69,73 @@ export interface TrayState {
   flash: boolean
 }
 
-/** Nothing waits and nothing finished: the icon before the first tick. */
-export const IDLE_TRAY_STATE: TrayState = { waitingCount: 0, wait: 'none', finishedCount: 0, flash: false }
+/** Nothing waits, works or finished: the icon before the first tick. */
+export const IDLE_TRAY_STATE: TrayState = {
+  waitingCount: 0,
+  wait: 'none',
+  finishedCount: 0,
+  workingCount: 0,
+  flash: false,
+}
+
+/** The wait a session's state stands for; `working` and `rest` wait for nothing. */
+function waitOf(state: SessionState): TrayWait {
+  switch (state) {
+    case 'choice':
+    case 'yes-no':
+    case 'released':
+      return state
+    case 'working':
+    case 'rest':
+      return 'none'
+  }
+}
+
+/**
+ * The state of every row the list shows (`renderer/rows.ts` `buildRows`): each known session with
+ * its own requests, and each group of requests whose session is not known yet, which the list shows
+ * as a waiting row of its own.
+ */
+function rowStates(input: TrayInput): SessionState[] {
+  const bySession = new Map<string, TrayDecision[]>()
+  for (const decision of input.decisions) {
+    const list = bySession.get(decision.sessionId)
+    if (list === undefined) bySession.set(decision.sessionId, [decision])
+    else list.push(decision)
+  }
+  const known = new Set(input.sessions.map((session) => session.sessionId))
+  const states = input.sessions.map((session) => sessionState(session.status, bySession.get(session.sessionId) ?? []))
+  for (const [sessionId, list] of bySession) {
+    if (!known.has(sessionId)) states.push(sessionState('waiting', list))
+  }
+  return states
+}
 
 /** The tray's state from the daemon's state. Pure; `main/index.ts` calls it in the one-second tray tick. */
 export function trayState(input: TrayInput): TrayState {
   const waitingCount = input.sessions.filter((session) => session.status === 'waiting').length
-  const held = input.decisions.filter((decision) => !decision.released)
-  const wait: TrayWait = held.some((decision) => isChoiceKind(decision.kind))
-    ? 'choice'
-    : waitingCount > 0 || held.length > 0
-      ? 'yes-no'
-      : 'none'
+  const states = rowStates(input)
+  const wait = states.map(waitOf).reduce<TrayWait>((a, b) => (WAIT_RANK[b] > WAIT_RANK[a] ? b : a), 'none')
+  const workingCount = states.filter((state) => state === 'working').length
   const finishedCount = input.sessions.filter((session) => finishState(session, input.acknowledged) === 'unseen').length
-  const flash = held.some((decision) => input.now - decision.createdAt > PERMISSION_WARN_AFTER_MS)
-  return { waitingCount, wait, finishedCount, flash }
+  const flash = input.decisions.some(
+    (decision) => !decision.released && input.now - decision.createdAt > PERMISSION_WARN_AFTER_MS,
+  )
+  return { waitingCount, wait, finishedCount, workingCount, flash }
 }
 
 const APP_NAME = 'ClaudeSwitcher'
 
-/** The tray icon's tooltip: the app name, then what waits, then what finished. */
+/**
+ * The tray icon's tooltip: the app name, then what waits (with the word for a burgundy or a lemon
+ * icon), then what finished, then what works.
+ */
 export function trayTooltip(state: TrayState): string {
   const parts: string[] = []
   if (state.waitingCount > 0) parts.push(`${String(state.waitingCount)} session vár rád`)
   if (state.wait === 'choice') parts.push('választásra vár')
+  if (state.wait === 'released') parts.push('az app elengedte')
   if (state.finishedCount > 0) parts.push(`${String(state.finishedCount)} végzett`)
+  if (state.workingCount > 0) parts.push(`${String(state.workingCount)} dolgozik`)
   return parts.length === 0 ? APP_NAME : `${APP_NAME}: ${parts.join(', ')}`
 }

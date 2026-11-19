@@ -13,8 +13,12 @@ export const TRAY_COLORS = {
   yesNo: '#d97757',
   /** A request that asks for a choice (a question or a plan): `--choice`. */
   choice: '#b8406a',
+  /** Only requests the app has released: `--warning`, the list's ◆. */
+  released: '#e3b341',
   /** A session finished and the user has not seen it yet: `--success`, the list's ✓. */
   done: '#8fbf7a',
+  /** A session works: `--info`, the list's ◐. */
+  working: '#7aa2c4',
   /** The flash frame of a request about to be released: `--danger`, the list's warning red. */
   flash: '#e0796b',
   /** The exclamation mark on the flash frame. */
@@ -46,21 +50,27 @@ function waitColor(state: TrayState): string | undefined {
       return TRAY_COLORS.yesNo
     case 'choice':
       return TRAY_COLORS.choice
+    case 'released':
+      return TRAY_COLORS.released
   }
 }
 
 /**
- * The icon for a tray state. What waits is the stronger sign, so it keeps the centre; a finish
- * nobody has seen yet turns an idle icon green, and puts a green ring around a waiting one. While
- * the state flashes, every frame with `flashOn` is the flash frame instead, and the frames between
- * are the normal icon (`main/tray.ts` alternates `flashOn` on each tick).
+ * The icon for a tray state. The centre, the first match winning: what waits (a request the app can
+ * decide, else one it has released), a finish nobody has seen yet (green), a session at work (blue),
+ * else idle grey. An unseen finish puts a green ring around a waiting centre, a released one
+ * included: it waits for the user too, and the finish must not disappear behind it. A working session
+ * gets no ring: it needs nothing from the user. While the state flashes, every frame with `flashOn`
+ * is the flash frame instead, and the frames between are the normal icon (`main/tray.ts` alternates
+ * `flashOn` on each tick).
  */
 export function trayLook(state: TrayState, flashOn: boolean): TrayLook {
   if (state.flash && flashOn) return FLASH_LOOK
   const waiting = waitColor(state)
   const finished = state.finishedCount > 0
-  if (waiting === undefined) return { fill: finished ? TRAY_COLORS.done : TRAY_COLORS.idle }
-  return finished ? { fill: waiting, ring: TRAY_COLORS.done } : { fill: waiting }
+  if (waiting !== undefined) return finished ? { fill: waiting, ring: TRAY_COLORS.done } : { fill: waiting }
+  if (finished) return { fill: TRAY_COLORS.done }
+  return { fill: state.workingCount > 0 ? TRAY_COLORS.working : TRAY_COLORS.idle }
 }
 
 /** Only 16x16 for now: the size Windows shows in the taskbar at 100 % scaling. */

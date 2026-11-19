@@ -14,7 +14,15 @@ import {
 import { APP_USER_MODEL_ID } from './app-id.js'
 import { createAutostart, type LoginItems } from './autostart.js'
 import { loadConfig, saveSettings, saveSkippedVersion } from './config.js'
-import { TAB_FOCUS_SETTLE_MS, focusSessionWindow, isFastFocusAvailable, tabFocusUri } from './focus-window.js'
+import { createFocusReturn } from './focus-return.js'
+import {
+  TAB_FOCUS_SETTLE_MS,
+  captureForeground,
+  focusSessionWindow,
+  giveBackForeground,
+  isFastFocusAvailable,
+  tabFocusUri,
+} from './focus-window.js'
 import { errorMessage } from '../shared/error-message.js'
 import { acknowledgeFinish } from '../shared/session-finished.js'
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
@@ -456,9 +464,10 @@ async function startApp(): Promise<void> {
     () => false,
   )
 
-  handleFrom(RENDERER, OVERLAY_CHANNELS.hide, () => {
-    overlay.hide()
-  })
+  // Esc, and the hide after the last decision: the user is done with the list, so the focus goes
+  // back to the window in front before it opened (`dismiss`). Not the jump above, which brings up
+  // the session's window on purpose.
+  handleFrom(RENDERER, OVERLAY_CHANNELS.hide, () => overlay.dismiss())
 
   handleFrom(RENDERER, OVERLAY_CHANNELS.settings, () => {
     return { hideAfterLastDecision: settings.snapshot().values.hideAfterLastDecision }
@@ -483,6 +492,7 @@ async function startApp(): Promise<void> {
     page: RENDERER,
     preload: path.join(dirname, '../preload/index.cjs'),
     isQuitting: quitSequence.isQuitting,
+    focusReturn: createFocusReturn({ capture: captureForeground, restore: giveBackForeground }),
   })
 
   // The hotkey is registered BEFORE the tray, because the menu shows the result. An invalid

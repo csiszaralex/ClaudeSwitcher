@@ -11,9 +11,12 @@ import {
   GW_OWNER,
   MAX_ANCESTORS,
   PSEUDO_CONSOLE_CLASS,
+  SHELL_WINDOW_CLASSES,
   TAB_FOCUS_SETTLE_MS,
   ancestorChain,
   bringToFront,
+  canGiveBack,
+  captureForeground,
   codeCliCommand,
   countMainWindows,
   findMainWindow,
@@ -23,12 +26,15 @@ import {
   isFastFocusAvailable,
   isSafeForCli,
   liveTerminalScanner,
+  previousWindowOf,
   quoteForCli,
   scanWindowsForPid,
   tabFocusUri,
   terminalWindowOf,
   type FocusApi,
   type FocusOutcome,
+  type ForegroundReader,
+  type GiveBackCheck,
   type TerminalWindowScanner,
   type WindowScanner,
 } from './focus-window.js'
@@ -421,6 +427,82 @@ describe('foregroundWindow', () => {
     const hwnd = foregroundWindow()
     expect(typeof hwnd).toBe('number')
     expect(Number.isFinite(hwnd)).toBe(true)
+  })
+})
+
+describe('previousWindowOf', () => {
+  /** A fake foreground window of the given class and process. */
+  function reader(hwnd: number, className: string, pid = 4242): ForegroundReader {
+    return {
+      GetForegroundWindow: () => hwnd,
+      GetWindowThreadProcessId: (_hWnd, out) => {
+        out[0] = pid
+        return 1
+      },
+      className: () => className,
+    }
+  }
+
+  it('remembers the foreground window with its process', () => {
+    expect(previousWindowOf(reader(0x1234, 'Chrome_WidgetWin_1'))).toEqual({ hwnd: 0x1234, pid: 4242 })
+  })
+
+  it('remembers nothing without a foreground window', () => {
+    expect(previousWindowOf(reader(0, ''))).toBeUndefined()
+  })
+
+  it('remembers neither the desktop nor a taskbar', () => {
+    for (const className of SHELL_WINDOW_CLASSES) expect(previousWindowOf(reader(0x1234, className))).toBeUndefined()
+    expect([...SHELL_WINDOW_CLASSES]).toEqual(['Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd'])
+  })
+
+  it('reads a BigInt handle as a plain number', () => {
+    const api = { ...reader(0, 'Notepad'), GetForegroundWindow: () => 0x99n }
+    expect(previousWindowOf(api)).toEqual({ hwnd: 0x99, pid: 4242 })
+  })
+})
+
+describe('canGiveBack', () => {
+  const previous = { hwnd: 0x1234, pid: 4242 }
+  function check(overrides: { exists?: boolean; visible?: boolean; minimised?: boolean; pid?: number } = {}): GiveBackCheck {
+    return {
+      IsWindow: () => (overrides.exists ?? true ? 1 : 0),
+      IsWindowVisible: () => (overrides.visible ?? true ? 1 : 0),
+      IsIconic: () => (overrides.minimised ?? false ? 1 : 0),
+      GetWindowThreadProcessId: (_hWnd, out) => {
+        out[0] = overrides.pid ?? previous.pid
+        return 1
+      },
+    }
+  }
+
+  it('allows a window that still exists, is visible, not minimised and has the same process', () => {
+    expect(canGiveBack(check(), previous)).toBe(true)
+  })
+
+  it('refuses a window that is gone, hidden or minimised', () => {
+    expect(canGiveBack(check({ exists: false }), previous)).toBe(false)
+    expect(canGiveBack(check({ visible: false }), previous)).toBe(false)
+    expect(canGiveBack(check({ minimised: true }), previous)).toBe(false)
+  })
+
+  it('refuses a handle another process has now: the window was replaced', () => {
+    expect(canGiveBack(check({ pid: 5151 }), previous)).toBe(false)
+  })
+})
+
+describe('captureForeground (live)', () => {
+  it.skipIf(!onWindows)('reads the foreground window without changing it, as plain numbers', () => {
+    // Only reads. On a locked screen, or with the desktop or the taskbar in front, the result is
+    // rightly `undefined`.
+    expect(isFastFocusAvailable()).toBe(true)
+    const before = foregroundWindow()
+    const captured = captureForeground()
+    if (captured !== undefined) {
+      expect(typeof captured.hwnd).toBe('number')
+      expect(typeof captured.pid).toBe('number')
+    }
+    expect(foregroundWindow()).toBe(before)
   })
 })
 

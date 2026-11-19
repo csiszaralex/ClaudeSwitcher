@@ -20,7 +20,18 @@ const finished = (stoppedAt: number): TraySession => ({
 })
 /** An invented clock: the requests below were created at `NOW` unless a test says otherwise. */
 const NOW = 1_800_000_000_000
-const held = (kind: TrayDecision['kind'], createdAt = NOW): TrayDecision => ({ kind, released: false, createdAt })
+/** A request of the `waiting` session unless a test says otherwise. */
+const held = (kind: TrayDecision['kind'], createdAt = NOW, sessionId = waiting.sessionId): TrayDecision => ({
+  sessionId,
+  kind,
+  released: false,
+  createdAt,
+})
+const released = (kind: TrayDecision['kind'], sessionId = waiting.sessionId): TrayDecision => ({
+  ...held(kind, NOW, sessionId),
+  released: true,
+})
+const working: TraySession = { sessionId: '6f1c2a3e-0000-4000-8000-000000000005', status: 'working' }
 
 /** The input at `NOW`, with nothing acknowledged unless given. */
 function input(sessions: TraySession[], decisions: TrayDecision[], acknowledged = new Map<string, number>()): TrayInput {
@@ -28,8 +39,8 @@ function input(sessions: TraySession[], decisions: TrayDecision[], acknowledged 
 }
 
 describe('trayState', () => {
-  it('is idle with nothing waiting', () => {
-    expect(trayState(input([idle, { ...idle, status: 'working' }], []))).toEqual(IDLE_TRAY_STATE)
+  it('is idle with nothing waiting or working', () => {
+    expect(trayState(input([idle], []))).toEqual(IDLE_TRAY_STATE)
   })
 
   it('shows a yes/no wait for a command or an edit request', () => {
@@ -38,38 +49,81 @@ describe('trayState', () => {
   })
 
   it('shows a Notification wait without a held request as yes/no', () => {
-    expect(trayState(input([waiting], []))).toEqual({ waitingCount: 1, wait: 'yes-no', finishedCount: 0, flash: false })
+    expect(trayState(input([waiting], []))).toEqual({ ...IDLE_TRAY_STATE, waitingCount: 1, wait: 'yes-no' })
   })
 
   it('shows a choice wait when any held request is a question or a plan', () => {
     const state = trayState(input([waiting, waiting], [held('tool'), held('plan')]))
-    expect(state).toEqual({ waitingCount: 2, wait: 'choice', finishedCount: 0, flash: false })
+    expect(state).toEqual({ ...IDLE_TRAY_STATE, waitingCount: 2, wait: 'choice' })
     expect(trayState(input([waiting], [held('question')])).wait).toBe('choice')
   })
 
   it('ignores a released choice request', () => {
-    const state = trayState(input([waiting], [{ kind: 'question', released: true, createdAt: NOW }, held('edit')]))
+    const state = trayState(input([waiting], [released('question'), held('edit')]))
     expect(state.wait).toBe('yes-no')
+  })
+
+  it('counts held requests whose session is not known yet, as the list shows them', () => {
+    expect(trayState(input([], [held('plan', NOW, '6f1c2a3e-0000-4000-8000-0000000000ff')])).wait).toBe('choice')
+    expect(trayState(input([], [released('tool', '6f1c2a3e-0000-4000-8000-0000000000ff')])).wait).toBe('released')
+  })
+})
+
+describe('trayState: released requests', () => {
+  it('shows a session whose requests are all released as released, though it still waits', () => {
+    expect(trayState(input([waiting], [released('tool')]))).toEqual({ ...IDLE_TRAY_STATE, waitingCount: 1, wait: 'released' })
+    expect(trayState(input([waiting], [released('question'), released('edit')])).wait).toBe('released')
+  })
+
+  it('lets a request the app can decide win over a released one in another session', () => {
+    const other: TraySession = { ...waiting, sessionId: '6f1c2a3e-0000-4000-8000-000000000006' }
+    expect(trayState(input([waiting, other], [released('tool'), held('edit', NOW, other.sessionId)])).wait).toBe('yes-no')
+    expect(trayState(input([waiting, other], [released('tool'), held('plan', NOW, other.sessionId)])).wait).toBe('choice')
+  })
+
+  it('lets a Notification wait without a request win over a released one in another session', () => {
+    const other: TraySession = { ...waiting, sessionId: '6f1c2a3e-0000-4000-8000-000000000006' }
+    expect(trayState(input([waiting, other], [released('tool')])).wait).toBe('yes-no')
+  })
+})
+
+describe('trayState: working sessions', () => {
+  it('counts the working sessions', () => {
+    const second: TraySession = { ...working, sessionId: '6f1c2a3e-0000-4000-8000-000000000007' }
+    expect(trayState(input([working, second, idle], []))).toEqual({ ...IDLE_TRAY_STATE, workingCount: 2 })
+  })
+
+  it('counts a working session next to a waiting one, but the wait stays', () => {
+    expect(trayState(input([working, waiting], [held('tool')]))).toEqual({
+      ...IDLE_TRAY_STATE,
+      waitingCount: 1,
+      wait: 'yes-no',
+      workingCount: 1,
+    })
+  })
+
+  it('does not count a waiting session as working', () => {
+    expect(trayState(input([waiting], [])).workingCount).toBe(0)
   })
 })
 
 describe('trayState: finished sessions', () => {
   it('counts a finished session nobody has seen', () => {
-    expect(trayState(input([finished(5_000), idle], []))).toEqual({ waitingCount: 0, wait: 'none', finishedCount: 1, flash: false })
+    expect(trayState(input([finished(5_000), idle], []))).toEqual({ ...IDLE_TRAY_STATE, finishedCount: 1 })
   })
 
   it('counts it next to a waiting one', () => {
     expect(trayState(input([finished(5_000), waiting], [held('tool')]))).toEqual({
+      ...IDLE_TRAY_STATE,
       waitingCount: 1,
       wait: 'yes-no',
       finishedCount: 1,
-      flash: false,
     })
   })
 
   it('does not count a session that runs again next to a stale stoppedAt', () => {
-    const working: TraySession = { ...finished(5_000), status: 'working' }
-    expect(trayState(input([working], [])).finishedCount).toBe(0)
+    const again: TraySession = { ...finished(5_000), status: 'working' }
+    expect(trayState(input([again], [])).finishedCount).toBe(0)
   })
 
   it('does not count an acknowledged finish', () => {
@@ -112,8 +166,8 @@ describe('trayState: the flash before the release', () => {
   })
 
   it('does not flash for a released request, however old', () => {
-    const released: TrayDecision = { kind: 'tool', released: true, createdAt: NOW - 2 * PERMISSION_WARN_AFTER_MS }
-    expect(trayState(input([waiting], [released])).flash).toBe(false)
+    const old: TrayDecision = { ...released('tool'), createdAt: NOW - 2 * PERMISSION_WARN_AFTER_MS }
+    expect(trayState(input([waiting], [old])).flash).toBe(false)
   })
 })
 
@@ -123,16 +177,23 @@ describe('trayTooltip', () => {
   })
 
   it('keeps the count wording, and adds the choice', () => {
-    expect(trayTooltip({ waitingCount: 2, wait: 'yes-no', finishedCount: 0, flash: false })).toBe('ClaudeSwitcher: 2 session vár rád')
-    expect(trayTooltip({ waitingCount: 1, wait: 'choice', finishedCount: 0, flash: false })).toBe(
+    expect(trayTooltip({ ...IDLE_TRAY_STATE, waitingCount: 2, wait: 'yes-no' })).toBe('ClaudeSwitcher: 2 session vár rád')
+    expect(trayTooltip({ ...IDLE_TRAY_STATE, waitingCount: 1, wait: 'choice' })).toBe(
       'ClaudeSwitcher: 1 session vár rád, választásra vár',
     )
   })
 
   it('adds the unseen finishes', () => {
-    expect(trayTooltip({ waitingCount: 0, wait: 'none', finishedCount: 2, flash: false })).toBe('ClaudeSwitcher: 2 végzett')
-    expect(trayTooltip({ waitingCount: 1, wait: 'yes-no', finishedCount: 1, flash: false })).toBe(
+    expect(trayTooltip({ ...IDLE_TRAY_STATE, finishedCount: 2 })).toBe('ClaudeSwitcher: 2 végzett')
+    expect(trayTooltip({ ...IDLE_TRAY_STATE, waitingCount: 1, wait: 'yes-no', finishedCount: 1 })).toBe(
       'ClaudeSwitcher: 1 session vár rád, 1 végzett',
     )
+  })
+
+  it('names a released wait, and adds the working sessions last', () => {
+    expect(trayTooltip({ ...IDLE_TRAY_STATE, waitingCount: 1, wait: 'released' })).toBe(
+      'ClaudeSwitcher: 1 session vár rád, az app elengedte',
+    )
+    expect(trayTooltip({ ...IDLE_TRAY_STATE, finishedCount: 1, workingCount: 2 })).toBe('ClaudeSwitcher: 1 végzett, 2 dolgozik')
   })
 })
