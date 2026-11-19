@@ -260,6 +260,48 @@ describe('readActivityFromLines: the usage limit', () => {
   })
 })
 
+describe('readActivityFromLines: the tab title', () => {
+  const sessionId = '5b0d7c1e-3f2a-4c8b-9e6d-1a2b3c4d5e6f'
+  const ai = (aiTitle: unknown): string => JSON.stringify({ type: 'ai-title', aiTitle, sessionId })
+  const custom = (customTitle: unknown): string => JSON.stringify({ type: 'custom-title', customTitle, sessionId })
+  const lastPrompt = JSON.stringify({ type: 'last-prompt', lastPrompt: 'futtasd a teszteket', sessionId })
+
+  it('takes the latest AI title', () => {
+    expect(readActivityFromLines([ai('Fix the parser'), assistantText, ai('Fix the parser tests'), lastPrompt]).tabTitle).toBe(
+      'Fix the parser tests',
+    )
+  })
+
+  it('prefers the custom title, even when AI titles come after it', () => {
+    const a = readActivityFromLines([ai('Fix the parser'), custom('Parser munka'), assistantText, ai('Fix the parser tests')])
+    expect(a.tabTitle).toBe('Parser munka')
+  })
+
+  it('takes the latest custom title', () => {
+    expect(readActivityFromLines([custom('Első név'), ai('Something'), custom('Második név')]).tabTitle).toBe('Második név')
+  })
+
+  it('has no tab title without a title record', () => {
+    expect(readActivityFromLines([assistantText, lastPrompt]).tabTitle).toBeUndefined()
+    expect('tabTitle' in readActivityFromLines([assistantText])).toBe(false)
+  })
+
+  it('skips a title that is not a non-blank string', () => {
+    for (const bad of ['', '   ', 42, null, undefined, { text: 'x' }]) {
+      expect(readActivityFromLines([ai(bad)]).tabTitle).toBeUndefined()
+      expect(readActivityFromLines([ai('Kept title'), custom(bad)]).tabTitle).toBe('Kept title')
+      expect(readActivityFromLines([custom('Kept name'), custom(bad)]).tabTitle).toBe('Kept name')
+    }
+  })
+
+  it('does not let a title record change the other fields', () => {
+    const a = readActivityFromLines([assistantTool, ai('Run the tests')])
+    expect(a.runningTool).toBe('Bash')
+    expect(a.lastAssistantText).toBeUndefined()
+    expect(a.lastEventAt).toBe(Date.parse('2026-09-04T10:00:05.000Z'))
+  })
+})
+
 describe('findTranscriptPath', () => {
   async function projectsFixture(): Promise<string> {
     const claudeDir = await tempDir('cs-tx-')

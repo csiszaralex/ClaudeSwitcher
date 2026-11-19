@@ -3,6 +3,7 @@ import path from 'node:path'
 import { isRecord } from './guards.js'
 import { projectsDir } from './paths.js'
 import { toolDetail } from './tool-detail.js'
+import { shownTabTitle, titleRecordOf, type TitlesSeen } from './tab-title.js'
 import type { SessionActivity } from './types.js'
 import { isApiErrorRecord, usageLimitOf } from './usage-limit.js'
 
@@ -29,6 +30,7 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
  */
 export function readActivityFromLines(lines: string[]): SessionActivity {
   const activity: SessionActivity = {}
+  const titles: TitlesSeen = {}
 
   for (const line of lines) {
     const trimmed = line.trim()
@@ -45,6 +47,12 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
 
     const at = typeof rec['timestamp'] === 'string' ? Date.parse(rec['timestamp']) : NaN
     if (!Number.isNaN(at)) activity.lastEventAt = at
+
+    const titled = titleRecordOf(rec)
+    if (titled !== undefined) {
+      titles[titled.source] = titled.title
+      continue
+    }
 
     if (rec['type'] === 'assistant') {
       const limit = usageLimitOf(rec)
@@ -78,6 +86,8 @@ export function readActivityFromLines(lines: string[]): SessionActivity {
     }
   }
 
+  const tabTitle = shownTabTitle(titles)
+  if (tabTitle !== undefined) activity.tabTitle = tabTitle
   return activity
 }
 
