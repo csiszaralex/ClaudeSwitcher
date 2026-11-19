@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filterRows, foldForSearch, isSearchChord, matchesQuery, searchKeys, type SearchableRow } from './session-search.js'
+import { filterRows, foldForSearch, isSearchChord, isSearchKey, matchesQuery, searchKeys, type SearchableRow } from './session-search.js'
 
 // Invented sessions in the shape the list's rows have.
 const hub: SearchableRow = {
@@ -98,5 +98,26 @@ describe('isSearchChord', () => {
     expect(isSearchChord(key('k', { ctrlKey: true, altKey: true }))).toBe(false)
     expect(isSearchChord(key('k', { ctrlKey: true, metaKey: true }))).toBe(false)
     expect(isSearchChord(key('j', { ctrlKey: true }))).toBe(false)
+  })
+})
+
+describe('isSearchKey', () => {
+  const key = (k: string, extra: { ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } = {}) => ({
+    key: k,
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    ...extra,
+  })
+
+  it('is a plain / (Shift+6 on the Hungarian layout gives the same key)', () => {
+    expect(isSearchKey(key('/'))).toBe(true)
+  })
+
+  it('is not / with Ctrl, Alt (AltGr) or Meta, nor a decision panel letter, nor another key', () => {
+    expect(isSearchKey(key('/', { ctrlKey: true }))).toBe(false)
+    expect(isSearchKey(key('/', { altKey: true }))).toBe(false)
+    expect(isSearchKey(key('/', { metaKey: true }))).toBe(false)
+    for (const letter of ['a', 'd', 'p', 'g', 's', 'k']) expect(isSearchKey(key(letter))).toBe(false)
   })
 })

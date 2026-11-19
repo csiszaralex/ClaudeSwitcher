@@ -571,7 +571,7 @@ is now `ACTION_BUTTONS`, read by `shortcutFor`):
   question and a plan have no letter. For an unreadable request only D remains;
 - in a text field the typing belongs to the field. The letters do not fire on a key repeat, on a
   freshly shown panel, or for a short time after typing (`key-guard.ts`);
-- added later: Ctrl+K opens the list's search (`session-search.ts`, README "Searching the list").
+- added later: / or Ctrl+K opens the list's search (`session-search.ts`, README "Searching the list").
   In its field the arrows, Enter and Esc act on the matches, and the first Esc closes the search.
 
 ## 5. Data flow
