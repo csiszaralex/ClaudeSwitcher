@@ -93,6 +93,20 @@ describe('statusMarker', () => {
     expect(statusMarker(session('waiting', 5_000), [], NONE_SEEN).tone).toBe('waiting')
   })
 
+  it('shows an idle session the usage limit stopped in its own tone, over the finish', () => {
+    const limited = { ...session('idle', 1), activity: { usageLimit: { kind: 'five_hour' } } }
+    expect(statusMarker(limited, [], NONE_SEEN).tone).toBe('limit')
+    expect(statusMarker(limited, [], new Map([[SESSION_ID, 1]])).tone).toBe('limit')
+    expect(statusMarker({ ...limited, stoppedAt: undefined }, [], NONE_SEEN).tone).toBe('limit')
+  })
+
+  it('puts a request, a wait and work above the usage limit', () => {
+    const activity = { usageLimit: { kind: 'five_hour' } }
+    expect(statusMarker({ ...session('idle'), activity }, [{ released: false, kind: 'tool' as const }], NONE_SEEN).tone).toBe('waiting')
+    expect(statusMarker({ ...session('waiting'), activity }, [], NONE_SEEN).tone).toBe('waiting')
+    expect(statusMarker({ ...session('working'), activity }, [], NONE_SEEN).tone).toBe('working')
+  })
+
   it('shows a plain idle session as idle', () => {
     expect(statusMarker(session('idle'), [], NONE_SEEN).tone).toBe('idle')
   })
@@ -104,6 +118,7 @@ describe('statusMarker', () => {
       statusMarker(session('working'), [], NONE_SEEN),
       statusMarker(session('idle', 1), [], NONE_SEEN),
       statusMarker(session('idle'), [], NONE_SEEN),
+      statusMarker({ ...session('idle'), activity: { usageLimit: {} } }, [], NONE_SEEN),
     ]
     // A color-blind user must tell them apart too: the glyph's shape differs, not just its color.
     expect(new Set(markers.map((m) => m.glyph)).size).toBe(markers.length)

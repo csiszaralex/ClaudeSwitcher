@@ -36,12 +36,25 @@ export interface IdeLock {
 
 export type SessionStatus = 'waiting' | 'working' | 'idle'
 
+/** A usage limit the account hit, as the transcript reports it (`usage-limit.ts` `usageLimitOf`). */
+export interface UsageLimit {
+  /** The raw `rateLimitType` (`USAGE_LIMIT_KIND` names the known ones); absent when the record has none. */
+  kind?: string | undefined
+  /** When the limit resets (epoch ms); absent when the record has no valid time. */
+  resetsAt?: number | undefined
+}
+
 export interface SessionActivity {
   lastAssistantText?: string | undefined
   runningTool?: string | undefined
   /** In short, what the running tool works on (command, pattern, file name…); see `toolDetail`. */
   toolDetail?: string | undefined
   lastEventAt?: number | undefined
+  /**
+   * The usage limit that ended the session's last turn: set by Claude Code's synthetic limit record,
+   * cleared by any later user record or non-error assistant record (`readActivityFromLines`).
+   */
+  usageLimit?: UsageLimit | undefined
 }
 
 /** An active subagent as the UI gets it: what the session's background worker is doing now. */

@@ -44,7 +44,10 @@ export interface TrayState {
   /** The sessions whose status is `waiting`: the number the tooltip gives. */
   waitingCount: number
   wait: TrayWait
-  /** The sessions whose finish the user has not seen yet (`finishState` `unseen`): the list's green ✓ rows. */
+  /**
+   * The sessions whose finish the user has not seen yet (`finishState` `unseen`): the list's green ✓
+   * rows, and its usage limit rows not opened since (the exception in `finishState`).
+   */
   finishedCount: number
   /**
    * A request the app can still decide has been held longer than `PERMISSION_WARN_AFTER_MS`: the

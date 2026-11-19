@@ -23,6 +23,7 @@
   --success: #8fbf7a; /* unseen done marker, added diff lines */
   --success-tint: #8fbf7a1a; /* added diff lines */
   --link: #5fa8e8; /* Remote Control dot, setup link */
+  --limit: #a98fd8; /* usage limit marker and status bar note */
 }
 
 body {
@@ -56,6 +57,7 @@ body {
 .marker.tone-working { color: var(--info); }
 .marker.tone-done { color: var(--success); }
 .marker.tone-seen { color: var(--info); }
+.marker.tone-limit { color: var(--limit); }
 .marker.tone-idle { color: var(--text-faint); }
 
 /* Flex, so only the text is truncated (…), never the Remote Control dot. */
@@ -101,8 +103,9 @@ body {
 /* Left: the selected session's source and folder; it gives way on a narrow window, the folder truncated. */
 .status-session { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
 .status-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); }
-/* Right: the app version with the check time, and the reconnect note, never wrapped; on its own it still sits on the right. */
+/* Right: the usage limit note, the app version with the check time, and the reconnect note, never wrapped; on its own it still sits on the right. */
 .status-checks { flex: none; display: flex; gap: 16px; margin-left: auto; white-space: nowrap; }
+.status-limit { color: var(--limit); }
 
 .muted { color: var(--text-faint); }
 

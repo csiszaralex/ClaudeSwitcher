@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize, toolLabel } from './format.js'
 
+/** The overlay's clock for `summarize`; only the usage limit's text depends on it. */
+const NOW = Date.parse('2026-09-04T10:00:00.000Z')
+
 describe('shortenPath', () => {
   it('keeps the first two and the last two segments of a long Windows path', () => {
     expect(shortenPath('P:\\proj\\alpha\\apps\\beta')).toBe('P:\\proj\\…\\apps\\beta')
@@ -53,33 +56,47 @@ describe('summarize', () => {
       status: 'waiting',
       notificationText: 'Claude needs permission to run pnpm test',
       activity: { runningTool: 'Bash' },
-    })
+    }, NOW)
     expect(line).toBe('Claude needs permission to run pnpm test')
   })
 
   it('names the running tool when working', () => {
-    expect(summarize({ status: 'working', activity: { runningTool: 'Bash' } })).toBe('Bash fut')
+    expect(summarize({ status: 'working', activity: { runningTool: 'Bash' } }, NOW)).toBe('Bash fut')
   })
 
   it('shows the last assistant text when idle', () => {
-    expect(summarize({ status: 'idle', activity: { lastAssistantText: 'Kész.' } })).toBe('Kész.')
+    expect(summarize({ status: 'idle', activity: { lastAssistantText: 'Kész.' } }, NOW)).toBe('Kész.')
   })
 
   it('truncates a long summary', () => {
     const long = 'x'.repeat(200)
-    expect(summarize({ status: 'idle', activity: { lastAssistantText: long } }).length).toBe(80)
+    expect(summarize({ status: 'idle', activity: { lastAssistantText: long } }, NOW).length).toBe(80)
   })
 
   it('falls back when there is nothing to say', () => {
-    expect(summarize({ status: 'idle', activity: {} })).toBe('—')
+    expect(summarize({ status: 'idle', activity: {} }, NOW)).toBe('—')
   })
 
   it('survives a session whose activity is missing entirely', () => {
     // By its type the daemon always gives `activity`, but a bad message does not. This would throw
     // during render, and the whole overlay would disappear.
     const broken = { status: 'idle' } as unknown as Parameters<typeof summarize>[0]
-    expect(() => summarize(broken)).not.toThrow()
-    expect(summarize(broken)).toBe('—')
+    expect(() => summarize(broken, NOW)).not.toThrow()
+    expect(summarize(broken, NOW)).toBe('—')
+  })
+
+  it('shows the usage limit of an idle session instead of the last assistant text', () => {
+    // No `resetsAt` and an expired one: neither text depends on the machine's time zone.
+    const activity = { lastAssistantText: 'Kész.', usageLimit: { kind: 'five_hour' } }
+    expect(summarize({ status: 'idle', activity }, NOW)).toBe('Elérte az 5 órás limitet.')
+    const expired = { lastAssistantText: 'Kész.', usageLimit: { kind: 'five_hour', resetsAt: NOW - 1 } }
+    expect(summarize({ status: 'idle', activity: expired }, NOW)).toBe('A limit lejárt, folytathatod.')
+  })
+
+  it('does not show the usage limit of a session that works or waits again', () => {
+    const activity = { runningTool: 'Bash', usageLimit: { kind: 'five_hour' } }
+    expect(summarize({ status: 'working', activity }, NOW)).toBe('Bash fut')
+    expect(summarize({ status: 'waiting', notificationText: 'Engedély kell', activity }, NOW)).toBe('Engedély kell')
   })
 })
 
@@ -103,31 +120,31 @@ describe('summarize: the tool detail and the subagents', () => {
   const reading = { agentId: 'a2', agentType: 'Explore', runningTool: 'Read', toolDetail: 'x.ts', updatedAt: 1 }
 
   it('names what the main session tool works on', () => {
-    expect(summarize({ status: 'working', activity: { runningTool: 'Bash', toolDetail: 'pnpm test' } })).toBe('Bash: pnpm test')
+    expect(summarize({ status: 'working', activity: { runningTool: 'Bash', toolDetail: 'pnpm test' } }, NOW)).toBe('Bash: pnpm test')
   })
 
   it('shows the work of an active subagent instead of the main session', () => {
-    const line = summarize({ status: 'working', activity: { runningTool: 'Agent' }, subagents: [searching] })
+    const line = summarize({ status: 'working', activity: { runningTool: 'Agent' }, subagents: [searching] }, NOW)
     expect(line).toBe('↳ Final-review fix wave · Grep „createPanel”')
   })
 
   it('shows the most recent subagent and a count of the others', () => {
-    const line = summarize({ status: 'idle', activity: {}, subagents: [searching, reading] })
+    const line = summarize({ status: 'idle', activity: {}, subagents: [searching, reading] }, NOW)
     expect(line).toBe('↳ +1 · Final-review fix wave · Grep „createPanel”')
   })
 
   it('falls back to the agent type, then to a generic name, and shows a subagent between tools', () => {
-    expect(summarize({ status: 'idle', activity: {}, subagents: [reading] })).toBe('↳ Explore · Read „x.ts”')
-    expect(summarize({ status: 'idle', activity: {}, subagents: [{ agentId: 'a3', updatedAt: 1 }] })).toBe('↳ subagent')
+    expect(summarize({ status: 'idle', activity: {}, subagents: [reading] }, NOW)).toBe('↳ Explore · Read „x.ts”')
+    expect(summarize({ status: 'idle', activity: {}, subagents: [{ agentId: 'a3', updatedAt: 1 }] }, NOW)).toBe('↳ subagent')
   })
 
   it('keeps the notification text of a waiting session over the subagents', () => {
-    const line = summarize({ status: 'waiting', notificationText: 'Engedély kell', activity: {}, subagents: [searching] })
+    const line = summarize({ status: 'waiting', notificationText: 'Engedély kell', activity: {}, subagents: [searching] }, NOW)
     expect(line).toBe('Engedély kell')
   })
 
   it('ignores an empty subagent list', () => {
-    expect(summarize({ status: 'idle', activity: { lastAssistantText: 'Kész.' }, subagents: [] })).toBe('Kész.')
+    expect(summarize({ status: 'idle', activity: { lastAssistantText: 'Kész.' }, subagents: [] }, NOW)).toBe('Kész.')
   })
 })
 

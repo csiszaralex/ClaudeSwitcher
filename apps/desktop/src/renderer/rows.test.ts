@@ -7,14 +7,14 @@ const session = (
   sessionId: string,
   status: Status,
   waitingSince?: number,
-  extra: { stoppedAt?: number; lastEventAt?: number; name?: string } = {},
+  extra: { stoppedAt?: number; lastEventAt?: number; name?: string; usageLimit?: { kind?: string } } = {},
 ) => ({
   sessionId,
   status,
   name: extra.name ?? `name-${sessionId}`,
   waitingSince,
   stoppedAt: extra.stoppedAt,
-  activity: { lastEventAt: extra.lastEventAt },
+  activity: { lastEventAt: extra.lastEventAt, usageLimit: extra.usageLimit },
 })
 
 const decision = (
@@ -107,10 +107,11 @@ describe('buildRows', () => {
 describe('buildRows order', () => {
   const ids = (rows: { sessionId: string }[]): string[] => rows.map((r) => r.sessionId)
 
-  it('orders the groups by marker: yes/no, choice, released, unseen done, working, seen done, idle', () => {
+  it('orders the groups by marker: yes/no, choice, released, unseen done, working, seen done, usage limit, idle', () => {
     // The daemon's order is the reverse on purpose: the rows must not keep it.
     const sessions = [
       session('idle', 'idle'),
+      session('limit', 'idle', undefined, { stoppedAt: 55, usageLimit: { kind: 'five_hour' } }),
       session('seen', 'idle', undefined, { stoppedAt: 50 }),
       session('working', 'working'),
       session('done', 'idle', undefined, { stoppedAt: 60 }),
@@ -124,8 +125,8 @@ describe('buildRows order', () => {
       decision('dy', 'yesno', 45),
     ]
     const rows = buildRows(sessions, decisions, new Map([['seen', 50]]))
-    expect(rows.map((r) => r.marker.tone)).toEqual(['waiting', 'choice', 'released', 'done', 'working', 'seen', 'idle'])
-    expect(ids(rows)).toEqual(['yesno', 'choice', 'released', 'done', 'working', 'seen', 'idle'])
+    expect(rows.map((r) => r.marker.tone)).toEqual(['waiting', 'choice', 'released', 'done', 'working', 'seen', 'limit', 'idle'])
+    expect(ids(rows)).toEqual(['yesno', 'choice', 'released', 'done', 'working', 'seen', 'limit', 'idle'])
   })
 
   it('counts a Notification wait without a request in the yes/no group', () => {

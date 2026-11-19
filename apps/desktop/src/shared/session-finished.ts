@@ -32,7 +32,9 @@ export function acknowledgeFinish(
  * Whether the session has finished (`hasFinished`), and if so, whether the user has seen that
  * finish (`acknowledgeFinish`). The one rule of "seen": the tray's done mark counts the `unseen`
  * ones (`main/tray-state.ts` `trayState`), and the list shows `unseen` as a green ✓ and `seen` as a
- * blue one (`renderer/session-marker.ts` `statusMarker`), so the two always agree.
+ * blue one (`renderer/session-marker.ts` `statusMarker`), so the two always agree. One exception:
+ * a turn the usage limit ended finishes too (its `StopFailure` sets `stoppedAt`), but the list
+ * shows its usage limit marker instead of the ✓, while the tray still counts an unseen one.
  */
 export function finishState(
   view: { sessionId: string; status: SessionStatus; stoppedAt?: number | undefined },

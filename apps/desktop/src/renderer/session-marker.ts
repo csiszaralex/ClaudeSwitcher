@@ -4,14 +4,16 @@ import { capitalized } from '../shared/hungarian-text.js'
 import { isChoiceKind } from '../shared/request-kind.js'
 import { sessionHost, type SessionHost } from '../shared/request-source.js'
 import { finishState, type SeenFinishes } from '../shared/session-finished.js'
+import { sessionUsageLimit } from './usage-limit.js'
 
 /**
  * The states of the mark at the start of the row; the CSS class `tone-…` gives its color. `waiting`
  * is a yes/no request (or a Notification wait), `choice` a request that asks for more
  * (`isChoiceKind`): the same dot in another color. `done` is a finish the user has not seen yet,
- * `seen` one they have (`finishState`): the same ✓ in another color.
+ * `seen` one they have (`finishState`): the same ✓ in another color. `limit` is a session whose turn
+ * ended at the account's usage limit (`sessionUsageLimit`).
  */
-export type MarkerTone = 'waiting' | 'choice' | 'released' | 'working' | 'done' | 'seen' | 'idle'
+export type MarkerTone = 'waiting' | 'choice' | 'released' | 'working' | 'done' | 'seen' | 'limit' | 'idle'
 
 export interface StatusMarker {
   tone: MarkerTone
@@ -31,6 +33,8 @@ const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
   done: { tone: 'done', glyph: '✓', title: 'Épp végzett' },
   // The same ✓: whether the finish was seen is told by the color and the tooltip, not the shape.
   seen: { tone: 'seen', glyph: '✓', title: 'Végzett, már megnyitottad' },
+  // The row's text says which limit and until when (`usageLimitRowText`).
+  limit: { tone: 'limit', glyph: '◷', title: 'Használati limit miatt állt meg' },
   idle: { tone: 'idle', glyph: '○', title: 'Tétlen' },
 }
 
@@ -74,8 +78,10 @@ function releasedMarker(remoteControl: boolean, host: SessionHost): StatusMarker
  * Order: a request the app can still decide (not released) is the strongest sign, in the choice
  * color if one of them asks for more than a yes or a no; if there are only released ones, that is a
  * state of its own, because from there the app can no longer decide.
- * Then come the Notification wait, running, and "just finished" (`finishState`, the rule the tray's
- * done mark follows too): green while unseen, blue once seen.
+ * Then come the Notification wait, running, the usage limit (`sessionUsageLimit`: a turn the limit
+ * ended has a `stoppedAt` too, from the `StopFailure` hook, and the limit says more than the ✓), and
+ * "just finished" (`finishState`, the rule the tray's done mark follows too): green while unseen,
+ * blue once seen.
  */
 export function statusMarker(
   view: {
@@ -84,6 +90,7 @@ export function statusMarker(
     stoppedAt?: number | undefined
     bridgeSessionId?: unknown
     entrypoint?: string | undefined
+    activity?: { usageLimit?: unknown } | undefined
   },
   decisions: readonly { released: boolean; kind: DecisionKind }[],
   seen: SeenFinishes,
@@ -94,6 +101,7 @@ export function statusMarker(
   if (decisions.length > 0) return releasedMarker(hasRemoteControl(view), sessionHost(view.entrypoint))
   if (view.status === 'waiting') return MARKERS.waiting
   if (view.status === 'working') return MARKERS.working
+  if (sessionUsageLimit(view) !== undefined) return MARKERS.limit
   switch (finishState(view, seen)) {
     case 'unseen':
       return MARKERS.done
