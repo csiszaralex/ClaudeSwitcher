@@ -102,6 +102,8 @@ For a change that should only touch comments (a translation, for example), `pnpm
 
 To find out which process shows a window that flashes up (a console during a test run, for example), `scripts/measure/window-watch.ps1` logs every top-level window shown, with its class, title, process, parent process and command line, read only. The usage is at the top of the script; the log goes to `%TEMP%` by default.
 
+To see what a window title shows while you switch tabs and windows, `scripts/measure/title-watch.ps1` logs, read only, every foreground change and every title change of a top-level window of one process (`Code` by default), with whether that window is in the foreground. The usage is at the top of the script; the log goes to `%TEMP%` by default.
+
 ### Code
 
 - **No synchronous child processes** (`execSync`, `execFileSync`, `spawnSync`) outside tests. They stop the Electron main thread, and with it the daemon and every session's hooks. ESLint enforces this.
