@@ -70,7 +70,7 @@ The daemon runs inside the Electron main process, not as a separate process; the
 
 The native prompt in VS Code is open the whole time, and the first decision wins. The broker learns about a decision made in VS Code from `PostToolUse` or `PostToolUseFailure` (matched through the `tool_use_id` of the preceding `PreToolUse`), from the hook connection being closed (the native "No" or Esc), or from the end of the turn (`Stop`, `SessionEnd`, `SubagentStop`). The still-pending request then gets an empty 200, which Claude Code ignores. A request nobody decides is released with an empty 200 after `PERMISSION_RELEASE_AFTER_MS`, and on quit `releaseAll` answers every held request before the server closes. Any error in this path is also an empty 200: Claude Code treats that as "no decision", never as a denial.
 
-Session discovery runs alongside: every `POLL_INTERVAL_MS`, and after every `Stop`, `StopFailure` and `SessionEnd`, `daemon.ts` `refresh` calls `scanner.ts` `scanSessions`, which reads the session registry, the IDE lock files and the transcript tails.
+Session discovery runs alongside: every `POLL_INTERVAL_MS`, and after every `Stop`, `StopFailure` and `SessionEnd`, `daemon.ts` `refresh` calls `scanner.ts` `scanSessions`, which reads the session registry, the IDE lock files and the transcript tails (core `transcript.ts` `readTranscriptActivity`: the last 256 KB, and for a turn that outgrew them, the lines that may concern a cross-session message back to the turn's start).
 
 ## Rules
 
