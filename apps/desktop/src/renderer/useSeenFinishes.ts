@@ -20,9 +20,10 @@ export function readSeenFinishes(raw: unknown): SeenFinishes {
 
 /**
  * The finishes the user has seen, as the main process keeps them (`acknowledgeFinish`). Read when
- * the page loads and on every `shown`: the main process records a finish only when the user opens
- * the session from the overlay (`focusSession`), and only after hiding the overlay, so the next
- * time the list is visible it has the fresh map.
+ * the page loads and on every `shown`: the main process records a finish only while the overlay is
+ * hidden, after hiding it when the user opens the session from the overlay (`focusSession`), and
+ * never while it is visible when the session's VS Code tab is in front (`watchSeen` in
+ * `main/index.ts`), so the next time the list is visible it has the fresh map, and no push is needed.
  */
 export function useSeenFinishes(): SeenFinishes {
   const [seen, setSeen] = useState<SeenFinishes>(() => new Map())

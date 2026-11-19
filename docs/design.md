@@ -149,6 +149,9 @@ title of exactly 24 or 25 characters).
 
 The app reads the tab title in core `tab-title.ts` (the record names and the precedence) and
 `transcript.ts` `readActivityFromLines` (`SessionActivity.tabTitle`).
+Desktop `main/seen-elsewhere.ts` counts a finish as seen when the foreground window, a window of
+the session's VS Code process, shows the session's tab title for `SEEN_DWELL_MS`: as a whole piece
+of the title, or cut, by prefix, so it works with any template that contains `${activeEditorShort}`.
 
 #### Mapping to terminal windows (measured 2026-11-16, Claude Code 2.1.325)
 

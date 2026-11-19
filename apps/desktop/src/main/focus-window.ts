@@ -24,6 +24,8 @@ interface User32 {
   GetWindowTextLengthW(hWnd: number): number
   /** Writes the class name as UTF-16 into `buffer` and returns its length in characters, 0 on error. */
   GetClassNameW(hWnd: number, buffer: Buffer, maxChars: number): number
+  /** Writes the window title as UTF-16 into `buffer` and returns its length in characters, 0 on error or for no title. */
+  GetWindowTextW(hWnd: number, buffer: Buffer, maxChars: number): number
   GetForegroundWindow(): number | bigint
   SetForegroundWindow(hWnd: number): number
   IsIconic(hWnd: number): number
@@ -42,6 +44,8 @@ let user32: User32 | null | undefined
  * app would die silently, without a dialog. This way an unavailable native module only disables the
  * paths that need user32: the fast pid path of a VS Code session, whose `code` CLI fallback keeps
  * working, and the terminal path, which has no fallback, so a terminal session's jump then fails.
+ * Reading the foreground window's title (`readForegroundTitle`) stops too, so a finish then counts
+ * as seen only when the session is opened from the overlay.
  */
 function loadUser32(): User32 | null {
   if (user32 !== undefined) return user32
@@ -58,6 +62,7 @@ function loadUser32(): User32 | null {
       IsWindowVisible: lib.func('int IsWindowVisible(intptr hWnd)'),
       GetWindowTextLengthW: lib.func('int GetWindowTextLengthW(intptr hWnd)'),
       GetClassNameW: lib.func('int GetClassNameW(intptr hWnd, _Out_ uint8_t *lpClassName, int nMaxCount)'),
+      GetWindowTextW: lib.func('int GetWindowTextW(intptr hWnd, _Out_ uint8_t *lpString, int nMaxCount)'),
       GetForegroundWindow: lib.func('intptr GetForegroundWindow()'),
       SetForegroundWindow: lib.func('int SetForegroundWindow(intptr hWnd)'),
       IsIconic: lib.func('int IsIconic(intptr hWnd)'),
@@ -423,6 +428,52 @@ export function canGiveBack(api: GiveBackCheck, window: PreviousWindow): boolean
 export function captureForeground(): PreviousWindow | undefined {
   const api = loadUser32()
   return api === null ? undefined : previousWindowOf({ ...api, className: classNameReader(api) })
+}
+
+/**
+ * The foreground window with its process and title, for counting a finish as seen when its VS Code
+ * tab is in front (`main/seen-elsewhere.ts`).
+ */
+export interface ForegroundTitle {
+  hwnd: number
+  pid: number
+  title: string
+}
+
+/**
+ * The title buffer in characters. VS Code's titles are far shorter; a longer title is cut by
+ * `GetWindowTextW`, which loses only its end.
+ */
+const WINDOW_TITLE_CHARS = 512
+
+/** The user32 subset reading the foreground window's title needs, so it can be tested with a fake. */
+export type ForegroundTitleReader = Pick<User32, 'GetForegroundWindow' | 'GetWindowThreadProcessId' | 'GetWindowTextW'>
+
+/**
+ * The foreground window and its title, or `undefined`: no foreground window (0), or a window without
+ * a title. Only reads. `GetWindowTextW` on another process's window reads the caption Windows keeps
+ * for it and sends that window no message (the Win32 documentation of `GetWindowTextW`), so a hung
+ * VS Code cannot block the main thread here.
+ */
+export function foregroundTitleOf(api: ForegroundTitleReader, buffer: Buffer): ForegroundTitle | undefined {
+  const hwnd = Number(api.GetForegroundWindow())
+  if (hwnd === 0) return undefined
+  const length = api.GetWindowTextW(hwnd, buffer, Math.floor(buffer.length / 2))
+  if (length <= 0) return undefined
+  const pidOut: [number] = [0]
+  api.GetWindowThreadProcessId(hwnd, pidOut)
+  return { hwnd, pid: pidOut[0], title: buffer.toString('utf16le', 0, length * 2) }
+}
+
+/** One reused buffer: the poll (`main/seen-elsewhere.ts` `SEEN_POLL_MS`) reads twice a second. */
+let titleBuffer: Buffer | undefined
+
+/** The foreground window and its title now (`foregroundTitleOf`), or `undefined`, also without the user32 bindings. */
+export function readForegroundTitle(): ForegroundTitle | undefined {
+  const api = loadUser32()
+  if (api === null) return undefined
+  titleBuffer ??= Buffer.alloc(WINDOW_TITLE_CHARS * 2)
+  return foregroundTitleOf(api, titleBuffer)
 }
 
 /**

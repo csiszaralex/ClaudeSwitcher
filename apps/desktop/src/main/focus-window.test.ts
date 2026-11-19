@@ -22,18 +22,21 @@ import {
   findMainWindow,
   findTerminalWindow,
   focusWith,
+  foregroundTitleOf,
   foregroundWindow,
   isFastFocusAvailable,
   isSafeForCli,
   liveTerminalScanner,
   previousWindowOf,
   quoteForCli,
+  readForegroundTitle,
   scanWindowsForPid,
   tabFocusUri,
   terminalWindowOf,
   type FocusApi,
   type FocusOutcome,
   type ForegroundReader,
+  type ForegroundTitleReader,
   type GiveBackCheck,
   type TerminalWindowScanner,
   type WindowScanner,
@@ -501,6 +504,65 @@ describe('captureForeground (live)', () => {
     if (captured !== undefined) {
       expect(typeof captured.hwnd).toBe('number')
       expect(typeof captured.pid).toBe('number')
+    }
+    expect(foregroundWindow()).toBe(before)
+  })
+})
+
+describe('foregroundTitleOf', () => {
+  /** A fake foreground window with the given title and process; `copied` overrides what GetWindowTextW returns. */
+  function reader(hwnd: number | bigint, title: string, pid = 4242, copied?: number): ForegroundTitleReader & { maxChars: number[] } {
+    const maxChars: number[] = []
+    return {
+      maxChars,
+      GetForegroundWindow: () => hwnd,
+      GetWindowThreadProcessId: (_hWnd, out) => {
+        out[0] = pid
+        return 1
+      },
+      GetWindowTextW: (_hWnd, buffer, max) => {
+        maxChars.push(max)
+        const text = title.slice(0, max - 1)
+        buffer.write(text, 0, 'utf16le')
+        return copied ?? text.length
+      },
+    }
+  }
+
+  it('reads the foreground window, its process and its title, accents and the cut mark included', () => {
+    const title = 'alpha - Számlázás mana…'
+    expect(foregroundTitleOf(reader(0x1234, title), Buffer.alloc(1024))).toEqual({ hwnd: 0x1234, pid: 4242, title })
+  })
+
+  it('passes the buffer size in characters, so a long title is cut, not overflowed', () => {
+    const api = reader(0x1234, 'x'.repeat(40))
+    expect(foregroundTitleOf(api, Buffer.alloc(20))?.title).toBe('x'.repeat(9))
+    expect(api.maxChars).toEqual([10])
+  })
+
+  it('reads nothing without a foreground window or without a title', () => {
+    expect(foregroundTitleOf(reader(0, 'alpha'), Buffer.alloc(64))).toBeUndefined()
+    expect(foregroundTitleOf(reader(0x1234, ''), Buffer.alloc(64))).toBeUndefined()
+    expect(foregroundTitleOf(reader(0x1234, 'alpha', 4242, 0), Buffer.alloc(64))).toBeUndefined()
+  })
+
+  it('reads a BigInt handle as a plain number', () => {
+    expect(foregroundTitleOf(reader(0x99n, 'alpha'), Buffer.alloc(64))?.hwnd).toBe(0x99)
+  })
+})
+
+describe('readForegroundTitle (live)', () => {
+  it.skipIf(!onWindows)('reads the foreground title through the real GetWindowTextW binding, without changing it', () => {
+    // Only reads. On a locked screen, or with an untitled window in front, the result is rightly
+    // `undefined`.
+    expect(isFastFocusAvailable()).toBe(true)
+    const before = foregroundWindow()
+    const read = readForegroundTitle()
+    if (read !== undefined) {
+      expect(read.hwnd).toBe(before)
+      expect(typeof read.pid).toBe('number')
+      expect(read.title.length).toBeGreaterThan(0)
+      expect(read.title).not.toContain('\u0000')
     }
     expect(foregroundWindow()).toBe(before)
   })

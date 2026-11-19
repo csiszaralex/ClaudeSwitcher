@@ -15,7 +15,8 @@ export type SeenFinishes = ReadonlyMap<string, number>
 
 /**
  * Records that the user has seen a session's finish: `main/index.ts` calls it whenever the user
- * opens the session from the overlay (`focusSession`), whether or not a window came to the front.
+ * opens the session from the overlay (`focusSession`), whether or not a window came to the front,
+ * and when the session's VS Code tab stayed in front (`main/seen-elsewhere.ts` `createSeenWatch`).
  * Per session and `stoppedAt`: the next finish of the session has a new `stoppedAt`, so it counts as
  * unseen again. A new turn clears the finish anyway, since `stoppedAt` goes. A `stoppedAt` that
  * disappears while a subagent runs comes back with the same value, which stays seen, so entries are

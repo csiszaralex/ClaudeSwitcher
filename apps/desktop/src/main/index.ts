@@ -21,6 +21,7 @@ import {
   focusSessionWindow,
   giveBackForeground,
   isFastFocusAvailable,
+  readForegroundTitle,
   tabFocusUri,
 } from './focus-window.js'
 import { errorMessage } from '../shared/error-message.js'
@@ -51,6 +52,7 @@ import { createNotifier } from './notifier.js'
 import { createOverlayController } from './overlay-window.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { createQuitSequence } from './quit-sequence.js'
+import { SEEN_POLL_MS, createSeenWatch, watchesSeen } from './seen-elsewhere.js'
 import { createSettingsService } from './settings-service.js'
 import { parseSaveRequest, saveSetup, setupState, type SaveResult } from './setup-ipc.js'
 import { createSetupWindowController } from './setup-window.js'
@@ -404,9 +406,10 @@ async function startApp(): Promise<void> {
   }
   await running.refresh()
 
-  // The finishes the user has seen by jumping to the session (`acknowledgeFinish`); the tray tick
-  // and the overlay (`OVERLAY_CHANNELS.finishesSeen`) read them. In memory only, as the daemon's
-  // `stoppedAt` itself (`SessionStore`).
+  // The finishes the user has seen (`acknowledgeFinish`): by opening the session from the overlay
+  // (`focusSession`), or by keeping its VS Code tab in front (`watchSeen`). The tray tick and the
+  // overlay (`OVERLAY_CHANNELS.finishesSeen`) read them. In memory only, as the daemon's `stoppedAt`
+  // itself (`SessionStore`).
   const finishesSeen = new Map<string, number>()
 
   // Every handler first checks the sender (`handleFrom`). Where the reply has a failure shape, a
@@ -713,9 +716,46 @@ async function startApp(): Promise<void> {
   })
   const notifier = createNotifier()
 
+  // A finish counts as seen too when its VS Code tab stays in front (`main/seen-elsewhere.ts`). The
+  // foreground window is read every `SEEN_POLL_MS`, only while such a finish may be seen
+  // (`watchesSeen`): the tray tick starts the timer, and the timer stops itself when nothing is left.
+  // Its own timer, because the tray tick's second is too coarse for the dwell. Without the user32
+  // bindings it never starts.
+  const seenWatch = createSeenWatch()
+  let seenTimer: ReturnType<typeof setInterval> | undefined
+  let seenWatchOff = !isFastFocusAvailable()
+  const stopSeenWatch = (): void => {
+    if (seenTimer !== undefined) clearInterval(seenTimer)
+    seenTimer = undefined
+  }
+  const watchSeen = (): void => {
+    try {
+      const { sessions } = running.state()
+      const watching = watchesSeen(sessions, finishesSeen)
+      // While the overlay is up the user looks at the list, which reads the seen map only on `shown`
+      // (`useSeenFinishes`): a finish seen meanwhile would stay green there. The overlay hides on
+      // blur, so it is up without the focus only when Windows refused it the focus. No foreground
+      // also ends the dwell, so a stopped watch starts from nothing next time.
+      const foreground = !watching || overlay.isVisible() ? undefined : readForegroundTitle()
+      const seenNow = seenWatch.observe({ foreground, sessions, seen: finishesSeen, now: Date.now() })
+      // The tray shows it on its next tick: an extra `setState` would put the flash out of step.
+      if (seenNow !== undefined) acknowledgeFinish(finishesSeen, seenNow)
+      if (!watching) stopSeenWatch()
+    } catch (error) {
+      // Logged once, then off until the app restarts: a failure every half second would flood the log.
+      console.error('[seen] reading the foreground window failed; finishes count as seen only from the list', error)
+      seenWatchOff = true
+      stopSeenWatch()
+    }
+  }
+
   const syncTray = (): void => {
     const state = running.state()
     tray.setState(trayState({ ...state, acknowledged: finishesSeen, now: Date.now() }))
+    if (seenTimer === undefined && !seenWatchOff && watchesSeen(state.sessions, finishesSeen)) {
+      seenTimer = setInterval(watchSeen, SEEN_POLL_MS)
+      seenTimer.unref()
+    }
     // Never lets a failing toast stop the tray tick.
     try {
       const { notifyOnRequest, notifyOnFinish } = settings.snapshot().values
@@ -739,6 +779,7 @@ async function startApp(): Promise<void> {
   // a `syncTray` running meanwhile would reach a destroyed tray icon.
   quitSequence.setCleanup(() => {
     clearInterval(trayTimer)
+    stopSeenWatch()
     // Before the tray too: a download finishing during the quit must not reach the destroyed icon.
     updates?.stop()
     // A capture still running holds temporary shortcuts; end it before everything is released.
