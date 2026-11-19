@@ -741,7 +741,11 @@ async function startApp(): Promise<void> {
       const foreground = !watching || overlay.isVisible() ? undefined : readForegroundTitle()
       const seenNow = seenWatch.observe({ foreground, sessions, seen: finishesSeen, now: Date.now() })
       // The tray shows it on its next tick: an extra `setState` would put the flash out of step.
-      if (seenNow !== undefined) acknowledgeFinish(finishesSeen, seenNow, sessions)
+      if (seenNow !== undefined) {
+        acknowledgeFinish(finishesSeen, seenNow, sessions)
+        // So a finish that stays green can be told apart from one the app saw: the log shows each one it counted.
+        console.log(`[seen] session ${seenNow.sessionId} counts as seen: its tab was in front`)
+      }
       if (!watching) stopSeenWatch()
     } catch (error) {
       // Logged once, then off until the app restarts: a failure every half second would flood the log.

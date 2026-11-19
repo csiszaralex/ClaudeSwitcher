@@ -152,6 +152,11 @@ The app reads the tab title in core `tab-title.ts` (the record names and the pre
 Desktop `main/seen-elsewhere.ts` counts a finish as seen when the foreground window, a window of
 the session's VS Code process, shows the session's tab title for `SEEN_DWELL_MS`: as a whole piece
 of the title, or cut, by prefix, so it works with any template that contains `${activeEditorShort}`.
+The dwell was 1.5 s at first, read every 0.5 s. Measured with `scripts/measure/title-watch.ps1` on
+2026-11-19, the owner looked at a finished tab for 0.5, 0.85 and 1.6 s, so most glances never
+counted. It is 1 s now, read every 0.25 s (`SEEN_DWELL_MS`, `SEEN_POLL_MS`). The cost of one read,
+measured outside Electron with the same koffi bindings: 0.6 µs for the Win32 calls and 4.8 µs for
+the match over 12 sessions.
 
 #### Mapping to terminal windows (measured 2026-11-16, Claude Code 2.1.325)
 
