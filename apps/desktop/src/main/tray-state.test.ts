@@ -105,6 +105,15 @@ describe('trayState: working sessions', () => {
   it('does not count a waiting session as working', () => {
     expect(trayState(input([waiting], [])).workingCount).toBe(0)
   })
+
+  it('counts a finished session that waits on a session it prompted as working, not finished', () => {
+    // An invented pipe in the measured shape (design doc "Cross-session messages").
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const sender: TraySession = { ...finished(5_000), messagingSocketPath: pipe }
+    const recipient = (status: TraySession['status']): TraySession => ({ ...working, status, activity: { promptedBy: [{ pipe }] } })
+    expect(trayState(input([sender, recipient('working')], []))).toEqual({ ...IDLE_TRAY_STATE, workingCount: 2 })
+    expect(trayState(input([sender, recipient('idle')], []))).toEqual({ ...IDLE_TRAY_STATE, finishedCount: 1 })
+  })
 })
 
 describe('trayState: finished sessions', () => {
@@ -128,20 +137,20 @@ describe('trayState: finished sessions', () => {
 
   it('does not count an acknowledged finish', () => {
     const acknowledged = new Map<string, number>()
-    acknowledgeFinish(acknowledged, finished(5_000))
+    acknowledgeFinish(acknowledged, finished(5_000), [])
     expect(trayState(input([finished(5_000)], [], acknowledged)).finishedCount).toBe(0)
   })
 
   it('counts the next finish of an acknowledged session again: a new stoppedAt', () => {
     const acknowledged = new Map<string, number>()
-    acknowledgeFinish(acknowledged, finished(5_000))
+    acknowledgeFinish(acknowledged, finished(5_000), [])
     expect(trayState(input([finished(9_000)], [], acknowledged)).finishedCount).toBe(1)
   })
 
   it('counts only the unseen finish among a seen and an unseen one: the green ✓ rows of the list', () => {
     const other: TraySession = { ...finished(7_000), sessionId: '6f1c2a3e-0000-4000-8000-000000000004' }
     const acknowledged = new Map<string, number>()
-    acknowledgeFinish(acknowledged, finished(5_000))
+    acknowledgeFinish(acknowledged, finished(5_000), [])
     expect(trayState(input([finished(5_000), other], [], acknowledged)).finishedCount).toBe(1)
   })
 })

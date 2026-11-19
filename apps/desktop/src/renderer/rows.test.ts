@@ -129,6 +129,39 @@ describe('buildRows order', () => {
     expect(ids(rows)).toEqual(['yesno', 'choice', 'released', 'done', 'working', 'seen', 'limit', 'idle'])
   })
 
+  it('puts a session that waits on the sessions it prompted right after the working ones, naming them', () => {
+    // Invented pipes in the measured shape (design doc "Cross-session messages").
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const other = String.raw`\\.\pipe\LOCAL\cc-msg-f9e8d7c6b5a4938271605f4e3d2c1b0a`
+    const worksFor = (sessionId: string, name: string, status: Status, ...pipes: string[]) => ({
+      ...session(sessionId, status, undefined, { name }),
+      activity: { promptedBy: pipes.map((p) => ({ pipe: p })) },
+    })
+    const sessions = [
+      session('seen', 'idle', undefined, { stoppedAt: 50 }),
+      { ...session('hub', 'idle', undefined, { stoppedAt: 60, name: 'Orchestrator' }), messagingSocketPath: pipe },
+      { ...session('peer', 'idle', undefined, { stoppedAt: 61, name: 'Reviewer' }), messagingSocketPath: other },
+      worksFor('crm', 'CRM master', 'waiting', pipe),
+      worksFor('app', 'BohemApp', 'working', pipe, other),
+    ]
+    const rows = buildRows(sessions, [], new Map([['seen', 50]]))
+    expect(rows.map((r) => [r.sessionId, r.marker.tone])).toEqual([
+      ['crm', 'waiting'],
+      ['app', 'working'],
+      // Within the group the most recently touched first, as in the other finished groups.
+      ['peer', 'waits-on'],
+      ['hub', 'waits-on'],
+      ['seen', 'seen'],
+    ])
+    const byId = new Map(rows.map((r) => [r.sessionId, r]))
+    expect(byId.get('hub')!.waitsOn).toEqual(['BohemApp', 'CRM master'])
+    expect(byId.get('peer')!.waitsOn).toEqual(['BohemApp'])
+    expect(byId.get('app')!.promptedBy).toEqual(['Orchestrator', 'Reviewer'])
+    expect(byId.get('crm')!.promptedBy).toEqual(['Orchestrator'])
+    expect(byId.get('seen')!.waitsOn).toEqual([])
+    expect(byId.get('seen')!.promptedBy).toEqual([])
+  })
+
   it('counts a Notification wait without a request in the yes/no group', () => {
     const rows = buildRows([session('w', 'working'), session('n', 'waiting', 9)], [], NONE_SEEN)
     expect(ids(rows)).toEqual(['n', 'w'])

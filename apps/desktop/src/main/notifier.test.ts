@@ -7,6 +7,7 @@ const REQUESTS_ONLY = { notifyOnRequest: true, notifyOnFinish: false }
 const session = (sessionId: string, extra: Partial<NotifierSession> = {}): NotifierSession => ({
   sessionId,
   name: `proj-${sessionId}`,
+  status: 'idle',
   entrypoint: 'claude-vscode',
   ...extra,
 })
@@ -129,6 +130,25 @@ describe('createNotifier: finished sessions', () => {
     expect(notifier.observe(tick(state([session('a', { stoppedAt: 1000 })])))).toEqual([])
     notifier.observe(tick(state([])))
     expect(notifier.observe(tick(state([session('a', { stoppedAt: 1000 })])))).toEqual([])
+  })
+
+  it('waits with the toast while the session waits on a session it prompted, and notifies once when that one is idle', () => {
+    // An invented pipe in the measured shape (design doc "Cross-session messages").
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const sender = session('a', { stoppedAt: 1000, messagingSocketPath: pipe, activity: { lastAssistantText: 'Átadtam.' } })
+    const worker = (status: NotifierSession['status']): NotifierSession =>
+      session('w', { status, activity: { promptedBy: [{ pipe, name: 'proj-a' }] } })
+    const notifier = createNotifier()
+    notifier.observe(tick(state([session('a', { messagingSocketPath: pipe }), worker('working')])))
+    expect(notifier.observe(tick(state([sender, worker('working')])))).toEqual([])
+    expect(notifier.observe(tick(state([sender, worker('waiting')])))).toEqual([])
+    expect(notifier.observe(tick(state([sender, worker('idle')])))).toEqual([
+      { kind: 'finished', sessionId: 'a', title: 'proj-a végzett', body: 'Átadtam.' },
+    ])
+    expect(notifier.observe(tick(state([sender, worker('idle')])))).toEqual([])
+    // A finish notified before the wait began does not notify again after it.
+    notifier.observe(tick(state([sender, worker('working')])))
+    expect(notifier.observe(tick(state([sender, worker('idle')])))).toEqual([])
   })
 
   it('is off unless its setting is on, and the finish does not notify later when it turns on', () => {

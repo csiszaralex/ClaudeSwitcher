@@ -318,6 +318,17 @@ Replayed against a fold of each whole transcript at 654 sampled points (429 of t
 sender), it agreed at every point; the tail alone missed the sender at 185 of the 429. The lookback
 of the full 16 MB took 19 ms.
 
+The desktop app links the sessions with it (`shared/prompt-links.ts`): a session whose turn has
+ended **waits on** the other live sessions whose `promptedBy` names its `messagingSocketPath` and
+that work or wait (`shared/session-finished.ts` `waitsOn`). While it waits on any it is not
+finished: the list shows ◌ and "Vár: …" instead of the ✓, the tray counts it as working, and the
+"végzett" toast comes only when the last recipient is idle, once per `stoppedAt`. The check is one
+step deep. A recipient that finished and waits on others is idle, and its own turn that handled the
+message has ended, so its `promptedBy` no longer names the sender anyway. The rule therefore cannot
+loop in a mesh. A turn the user interrupts (see above) leaves its senders pending until the next turn
+end, but the recipient is idle then, so nobody waits on it; only its next turn's row note names
+them.
+
 ### 3.4 Hooks: measured in the VS Code extension
 
 The original text worked from the documentation. What follows is the **measured** behaviour

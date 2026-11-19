@@ -1,6 +1,7 @@
 import path from 'node:path'
 import type { SessionStatus } from '@claudeswitcher/core'
 import { VSCODE_ENTRYPOINT } from '../shared/entrypoint.js'
+import type { LinkedSession } from '../shared/prompt-links.js'
 import { finishState, type SeenFinishes } from '../shared/session-finished.js'
 import type { ForegroundTitle } from './focus-window.js'
 
@@ -14,15 +15,19 @@ export const SEEN_DWELL_MS = 1500
 /** How often `main/index.ts` reads the foreground window while a finish may be seen this way (`watchesSeen`). */
 export const SEEN_POLL_MS = 500
 
-/** The part of a session the match reads; the daemon's `SessionView` fits it. */
-export interface SeenSession {
+/**
+ * The part of a session the match reads; the daemon's `SessionView` fits it. The links
+ * (`LinkedSession`) tell whether a finished session still waits on the ones it prompted, which is
+ * no finish to see (`finishState`).
+ */
+export interface SeenSession extends LinkedSession {
   sessionId: string
   status: SessionStatus
   stoppedAt?: number | undefined
   entrypoint?: string | undefined
   windowPid?: number | undefined
   workspaceFolder?: string | undefined
-  activity: { tabTitle?: string | undefined }
+  activity: NonNullable<LinkedSession['activity']> & { tabTitle?: string | undefined }
 }
 
 /**
@@ -102,7 +107,7 @@ function tabTitleIn(session: SeenSession): string | undefined {
  * holds. A session outside VS Code (a CLI in a terminal) never counts: not measured.
  */
 export function watchesSeen(sessions: readonly SeenSession[], seen: SeenFinishes): boolean {
-  return sessions.some((s) => tabTitleIn(s) !== undefined && finishState(s, seen) === 'unseen')
+  return sessions.some((s) => tabTitleIn(s) !== undefined && finishState(s, seen, sessions) === 'unseen')
 }
 
 /**
@@ -131,7 +136,7 @@ export function sessionInFront(
     })
   }
   const [only] = candidates
-  return candidates.length === 1 && only !== undefined && finishState(only, seen) === 'unseen' ? only : undefined
+  return candidates.length === 1 && only !== undefined && finishState(only, seen, sessions) === 'unseen' ? only : undefined
 }
 
 export interface SeenWatchInput {

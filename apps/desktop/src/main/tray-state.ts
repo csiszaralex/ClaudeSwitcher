@@ -1,5 +1,6 @@
 import { PERMISSION_RELEASE_AFTER_MS, type DecisionKind, type SessionStatus } from '@claudeswitcher/core'
-import { finishState, type SeenFinishes } from '../shared/session-finished.js'
+import type { LinkedSession } from '../shared/prompt-links.js'
+import { finishState, waitsOn, type SeenFinishes } from '../shared/session-finished.js'
 import { sessionState, type SessionState } from '../shared/session-state.js'
 
 /**
@@ -8,8 +9,11 @@ import { sessionState, type SessionState } from '../shared/session-state.js'
  */
 export const PERMISSION_WARN_AFTER_MS = PERMISSION_RELEASE_AFTER_MS - 50_000
 
-/** The part of a session the tray reads; the daemon's `SessionView` fits it. */
-export interface TraySession {
+/**
+ * The part of a session the tray reads; the daemon's `SessionView` fits it. The links between the
+ * sessions (`LinkedSession`) tell whether a finished session still waits on the ones it prompted.
+ */
+export interface TraySession extends LinkedSession {
   sessionId: string
   status: SessionStatus
   /** The time of the session's last `Stop`, while it has shown no new activity (`SessionView.stoppedAt`). */
@@ -60,7 +64,10 @@ export interface TrayState {
    * rows, and its usage limit rows not opened since (the exception in `finishState`).
    */
   finishedCount: number
-  /** The sessions that work (`sessionState` `working`): the list's ◐ rows. */
+  /**
+   * The sessions that work (`sessionState` `working`), and those that wait on the sessions they
+   * prompted (`waits-on`): the list's ◐ and ◌ rows.
+   */
   workingCount: number
   /**
    * A request the app can still decide has been held longer than `PERMISSION_WARN_AFTER_MS`: the
@@ -86,6 +93,7 @@ function waitOf(state: SessionState): TrayWait {
     case 'released':
       return state
     case 'working':
+    case 'waits-on':
     case 'rest':
       return 'none'
   }
@@ -104,9 +112,11 @@ function rowStates(input: TrayInput): SessionState[] {
     else list.push(decision)
   }
   const known = new Set(input.sessions.map((session) => session.sessionId))
-  const states = input.sessions.map((session) => sessionState(session.status, bySession.get(session.sessionId) ?? []))
+  const states = input.sessions.map((session) =>
+    sessionState(session.status, bySession.get(session.sessionId) ?? [], waitsOn(session, input.sessions).length > 0),
+  )
   for (const [sessionId, list] of bySession) {
-    if (!known.has(sessionId)) states.push(sessionState('waiting', list))
+    if (!known.has(sessionId)) states.push(sessionState('waiting', list, false))
   }
   return states
 }
@@ -116,8 +126,11 @@ export function trayState(input: TrayInput): TrayState {
   const waitingCount = input.sessions.filter((session) => session.status === 'waiting').length
   const states = rowStates(input)
   const wait = states.map(waitOf).reduce<TrayWait>((a, b) => (WAIT_RANK[b] > WAIT_RANK[a] ? b : a), 'none')
-  const workingCount = states.filter((state) => state === 'working').length
-  const finishedCount = input.sessions.filter((session) => finishState(session, input.acknowledged) === 'unseen').length
+  // A session that waits on the sessions it prompted is not done: the icon shows it as working.
+  const workingCount = states.filter((state) => state === 'working' || state === 'waits-on').length
+  const finishedCount = input.sessions.filter(
+    (session) => finishState(session, input.acknowledged, input.sessions) === 'unseen',
+  ).length
   const flash = input.decisions.some(
     (decision) => !decision.released && input.now - decision.createdAt > PERMISSION_WARN_AFTER_MS,
   )

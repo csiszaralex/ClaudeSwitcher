@@ -101,6 +101,22 @@ export function summarize(
   return clip(raw)
 }
 
+/**
+ * The text of a row that waits on the sessions it prompted (`rows.ts` `Row.waitsOn`): their row
+ * names, for example `Vár: BohemApp, CRM master`.
+ */
+export function waitsOnText(names: readonly string[]): string {
+  return clip(`Vár: ${names.join(', ')}`)
+}
+
+/**
+ * The note on a row that works for other sessions (`rows.ts` `Row.promptedBy`): the senders' names
+ * after an arrow, for example `← Orchestrator`. `undefined` when it works for none.
+ */
+export function promptedByNote(names: readonly string[]): string | undefined {
+  return names.length === 0 ? undefined : `← ${names.join(', ')}`
+}
+
 /** How many segments a path may have before `shortenPath` cuts its middle out. */
 const PATH_SEGMENTS_KEPT = 4
 

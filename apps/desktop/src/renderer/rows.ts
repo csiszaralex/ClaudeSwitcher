@@ -1,6 +1,7 @@
-import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
+import type { DecisionKind, PromptSender, SessionStatus } from '@claudeswitcher/core'
 import { lastPathSegment } from '@claudeswitcher/core/browser'
-import type { SeenFinishes } from '../shared/session-finished.js'
+import { promptersOf } from '../shared/prompt-links.js'
+import { waitsOn, type SeenFinishes } from '../shared/session-finished.js'
 import { statusMarker, type MarkerTone, type StatusMarker } from './session-marker.js'
 
 interface DecisionLike {
@@ -22,7 +23,10 @@ interface SessionLike {
   waitingSince?: number | undefined
   stoppedAt?: number | undefined
   bridgeSessionId?: unknown
-  activity?: { lastEventAt?: number | undefined; usageLimit?: unknown } | undefined
+  messagingSocketPath?: string | undefined
+  activity?:
+    | { lastEventAt?: number | undefined; usageLimit?: unknown; promptedBy?: readonly PromptSender[] | undefined }
+    | undefined
 }
 
 /** A row of the list: a known session, or a pending request whose session is not seen yet. */
@@ -37,6 +41,13 @@ export interface Row<S extends SessionLike, D extends DecisionLike> {
   decisions: D[]
   /** The row's status marker (`statusMarker`); its tone decides the row's group in the list. */
   marker: StatusMarker
+  /**
+   * The row names of the sessions this one waits on (`session-finished.ts` `waitsOn`), in a stable
+   * order; empty when it waits on none. The row's text then names them (`format.ts` `waitsOnText`).
+   */
+  waitsOn: string[]
+  /** The names of the sessions this one works for (`prompt-links.ts` `promptersOf`), for the row's note. */
+  promptedBy: string[]
 }
 
 /**
@@ -98,11 +109,13 @@ const TONE_RANK: Readonly<Record<MarkerTone, number>> = {
   released: 2,
   done: 3,
   working: 4,
-  seen: 5,
+  // Not done yet: the sessions it prompted still work. Next to the working ones, after them.
+  'waits-on': 5,
+  seen: 6,
   // A session the usage limit stopped: nothing to do in it until the reset, so below every finish,
   // but above the plainly idle ones, because its text tells when it can go on.
-  limit: 6,
-  idle: 7,
+  limit: 7,
+  idle: 8,
 }
 
 /** The groups that wait for an answer in the app: in them the longest waiting row comes first. */
@@ -207,7 +220,9 @@ export function buildRows<S extends SessionLike, D extends DecisionLike>(
       waitingSince: session.waitingSince,
       session,
       decisions: own,
-      marker: statusMarker(session, own, seen),
+      marker: statusMarker(session, own, seen, sessions),
+      waitsOn: waitsOn(session, sessions).map((other) => other.name ?? ''),
+      promptedBy: promptersOf(session, sessions),
     }
   })
 
@@ -224,7 +239,9 @@ export function buildRows<S extends SessionLike, D extends DecisionLike>(
       waitingSince: first.createdAt,
       session: undefined,
       decisions: sorted,
-      marker: statusMarker({ sessionId, status: 'waiting' }, sorted, seen),
+      marker: statusMarker({ sessionId, status: 'waiting' }, sorted, seen, sessions),
+      waitsOn: [],
+      promptedBy: [],
     })
   }
   return rows.sort(compareRows)

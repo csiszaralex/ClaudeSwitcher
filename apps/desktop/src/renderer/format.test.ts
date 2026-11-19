@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize, toolLabel } from './format.js'
+import { formatDuration, promptedByNote, shortenPath, subagentLabel, subagentTooltip, summarize, toolLabel, waitsOnText } from './format.js'
 
 /** The overlay's clock for `summarize`; only the usage limit's text depends on it. */
 const NOW = Date.parse('2026-09-04T10:00:00.000Z')
@@ -192,5 +192,21 @@ describe('subagentLabel', () => {
   it('clips a long description to one line', () => {
     const label = subagentLabel({ agentId: 'a1' }, [{ agentId: 'a1', description: 'x'.repeat(200), updatedAt: 1 }])
     expect(label).toHaveLength(80)
+  })
+})
+
+describe('waitsOnText and promptedByNote', () => {
+  it('names the sessions a row waits on', () => {
+    expect(waitsOnText(['BohemApp', 'CRM master'])).toBe('Vár: BohemApp, CRM master')
+  })
+
+  it('clips a long list to the row text length', () => {
+    expect(waitsOnText(Array.from({ length: 20 }, (_, i) => `worker-${String(i)}`)).length).toBeLessThanOrEqual(80)
+  })
+
+  it('notes the sessions a row works for, and nothing for none', () => {
+    expect(promptedByNote(['Orchestrator'])).toBe('← Orchestrator')
+    expect(promptedByNote(['Orchestrator', 'Reviewer'])).toBe('← Orchestrator, Reviewer')
+    expect(promptedByNote([])).toBeUndefined()
   })
 })
