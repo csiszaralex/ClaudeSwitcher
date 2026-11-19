@@ -1,19 +1,20 @@
 import type { PromptSender, SessionStatus } from '@claudeswitcher/core'
+import { sessionName, type NamedSession } from './session-name.js'
 
 /** The part of a session the links read; the daemon's `SessionView` fits it. */
-export interface LinkedSession {
+export interface LinkedSession extends NamedSession {
   sessionId: string
   name?: string | undefined
   status: SessionStatus
   /** The session's pipe (`SessionView.messagingSocketPath`): how a recipient names this session as its sender. */
   messagingSocketPath?: string | undefined
   /** The senders this session works for (`SessionActivity.promptedBy`, core `cross-session.ts`). */
-  activity?: { promptedBy?: readonly PromptSender[] | undefined } | undefined
+  activity?: { promptedBy?: readonly PromptSender[] | undefined; tabTitle?: unknown } | undefined
 }
 
-/** A stable order of sessions by their row name, then by session id. */
+/** A stable order of sessions by their shown name (`sessionName`), then by session id. */
 function byName(a: LinkedSession, b: LinkedSession): number {
-  return (a.name ?? '').localeCompare(b.name ?? '') || a.sessionId.localeCompare(b.sessionId)
+  return sessionName(a).localeCompare(sessionName(b)) || a.sessionId.localeCompare(b.sessionId)
 }
 
 /**
@@ -44,8 +45,8 @@ export function recipientsOf<S extends LinkedSession>(
 }
 
 /**
- * The names of the sessions `session` works for now, for the note on its row: each sender's row
- * name when a live session has its pipe, else the name its message gave; a sender with neither is
+ * The names of the sessions `session` works for now, for the note on its row: each sender's shown
+ * name (`sessionName`) when a live session has its pipe, else the name its message gave; a sender with neither is
  * left out. Empty while the session is idle, the same condition `recipientsOf` puts on the
  * recipient. Each name once, in a stable order.
  */
@@ -53,7 +54,8 @@ export function promptersOf(session: LinkedSession, sessions: readonly LinkedSes
   if (session.status === 'idle') return []
   const names = (session.activity?.promptedBy ?? []).flatMap((sender) => {
     const live = sessions.find((other) => other.sessionId !== session.sessionId && other.messagingSocketPath === sender.pipe)
-    const name = live?.name !== undefined && live.name !== '' ? live.name : sender.name
+    const liveName = live === undefined ? '' : sessionName(live)
+    const name = liveName !== '' ? liveName : sender.name
     return name === undefined || name === '' ? [] : [name]
   })
   return [...new Set(names)].sort((a, b) => a.localeCompare(b))

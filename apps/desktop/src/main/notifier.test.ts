@@ -109,6 +109,18 @@ describe('createNotifier: finished sessions', () => {
     expect(notifier.observe(tick(again))).toHaveLength(1)
   })
 
+  it('names the session by its tab title in both toasts, the name the row shows', () => {
+    const notifier = createNotifier()
+    const titled = (extra: Partial<NotifierSession> = {}) =>
+      session('a', { activity: { tabTitle: 'Számlázás átírása' }, ...extra })
+    notifier.observe(tick(state([titled()])))
+    const next = state([titled({ stoppedAt: 1000 })], [decision('d1', 'a')])
+    expect(notifier.observe(tick(next)).map((notice) => notice.title)).toEqual([
+      'Számlázás átírása engedélyt kér',
+      'Számlázás átírása végzett',
+    ])
+  })
+
   it('has an empty body without an answer text', () => {
     const notifier = createNotifier()
     notifier.observe(tick(state([session('a')])))

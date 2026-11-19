@@ -24,6 +24,12 @@ describe('recipientsOf', () => {
     ])
   })
 
+  it('orders the recipients by their tab title, the name the rows show', () => {
+    const first = { ...worker('working', { pipe: PIPE_A }), sessionId: 'w1', name: 'aaa', activity: { promptedBy: [{ pipe: PIPE_A }], tabTitle: 'Zárás' } }
+    const second = { ...worker('working', { pipe: PIPE_A }), sessionId: 'w2', name: 'zzz', activity: { promptedBy: [{ pipe: PIPE_A }], tabTitle: 'Ajánlat' } }
+    expect(recipientsOf(orchestrator, [first, second]).map((s) => s.sessionId)).toEqual(['w2', 'w1'])
+  })
+
   it('leaves out an idle recipient and one that works for another pipe', () => {
     expect(recipientsOf(orchestrator, [worker('idle', { pipe: PIPE_A })])).toEqual([])
     expect(recipientsOf(orchestrator, [worker('working', { pipe: PIPE_B })])).toEqual([])
@@ -48,6 +54,11 @@ describe('promptersOf', () => {
       'Orchestrator',
       'Reviewer',
     ])
+  })
+
+  it('names a live sender by its tab title, the name the row shows', () => {
+    const titled = { ...orchestrator, activity: { tabTitle: 'Kiadás koordinálása' } }
+    expect(promptersOf(worker('working', { pipe: PIPE_A }), [titled])).toEqual(['Kiadás koordinálása'])
   })
 
   it('names nobody while the session is idle', () => {

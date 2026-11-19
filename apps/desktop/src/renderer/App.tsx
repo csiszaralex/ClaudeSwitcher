@@ -24,6 +24,7 @@ import { usageLimitStatusText } from './usage-limit.js'
 import { useAppVersion, withAppVersion } from './useAppVersion.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
+import { nameTooltip } from '../shared/session-name.js'
 import './styles.css'
 
 /**
@@ -251,8 +252,11 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
                 {marker.glyph}
               </span>
               <span className="name">
-                {/* Only the text is truncated (…), never the dot: it must show with a long name too. */}
-                <span className="name-text" title={row.name}>
+                {/*
+                  Only the text is truncated (…), never the dot: it must show with a long name too.
+                  The tooltip also names the registry name when the row shows the tab title.
+                */}
+                <span className="name-text" title={row.session === undefined ? row.name : nameTooltip(row.session)}>
                   {row.name}
                 </span>
                 {row.session !== undefined && hasRemoteControl(row.session) && (
