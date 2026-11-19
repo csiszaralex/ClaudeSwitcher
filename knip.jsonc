@@ -12,6 +12,11 @@
   // daemon's in their package.json (`exports`, `main`), and its own plugins find the electron-vite
   // main and preload entry points and the vitest configs; what is listed here, they do not find.
   "workspaces": {
+    // The measurement scripts are run by hand (`node scripts/measure/<name>.mjs`); no package.json
+    // script names them, so knip would report them as unused files.
+    ".": {
+      "entry": ["scripts/measure/*.mjs"]
+    },
     "apps/desktop": {
       // The renderer's entry point is the HTML, and `window-api.ts` is a global type declaration
       // that nothing imports: the tsconfig `include` brings it in.

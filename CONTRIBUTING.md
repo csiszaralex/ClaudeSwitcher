@@ -104,6 +104,8 @@ To find out which process shows a window that flashes up (a console during a tes
 
 To see what a window title shows while you switch tabs and windows, `scripts/measure/title-watch.ps1` logs, read only, every foreground change and every title change of a top-level window of one process (`Code` by default), with whether that window is in the foreground. The usage is at the top of the script; the log goes to `%TEMP%` by default.
 
+To see how the sessions message each other, `node scripts/measure/cross-session.mjs [days]` links, read only, every `SendMessage` of the last days' transcripts to its arrival in the recipient's transcript, and prints per sender and recipient how many messages went, how many got a reply, and how long the sender showed finished while the recipient still worked. It prints session names and counts, never message text.
+
 ### Code
 
 - **No synchronous child processes** (`execSync`, `execFileSync`, `spawnSync`) outside tests. They stop the Electron main thread, and with it the daemon and every session's hooks. ESLint enforces this.
