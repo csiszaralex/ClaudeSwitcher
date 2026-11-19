@@ -19,6 +19,7 @@ import {
   parseSubagentMeta,
   pickRecentSubagentFiles,
   readActivityFromLines,
+  readTranscriptActivity,
   resolveLiveSessions,
   sessionsDir,
   subagentIdFromFile,
@@ -219,8 +220,13 @@ export async function scanSessions(
       try {
         const transcript = await findTranscriptPath(claudeDir, record.sessionId)
         if (transcript === undefined) return [record.sessionId, { activity: {}, subagents: [] }]
-        const [lines, subagents] = await Promise.all([tailLines(transcript), readSubagents(transcript, now, heldAgents)])
-        return [record.sessionId, { activity: readActivityFromLines(lines), subagents }]
+        // The tail, and for the senders of a turn that outgrew it, the lines back to its start
+        // (`readTranscriptActivity`).
+        const [activity, subagents] = await Promise.all([
+          readTranscriptActivity(transcript),
+          readSubagents(transcript, now, heldAgents),
+        ])
+        return [record.sessionId, { activity, subagents }]
       } catch (error) {
         // Defence in depth. `Promise.all` would drop the whole scan on a single rejection, so EVERY
         // session would vanish from the list because of one unreadable transcript. The callees are

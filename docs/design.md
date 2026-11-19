@@ -260,6 +260,75 @@ The app reads it in core `usage-limit.ts` `usageLimitOf` (the field names) and `
 non-error `assistant` record). The limit record's text does not become the row's text; the text of
 the other error records still does.
 
+#### Cross-session messages (measured 2026-11-19, Claude Code 2.1.325)
+
+One session can prompt another with Claude Code's `SendMessage` tool. The owner talks to one
+orchestrator session, which hands work over to others this way, and its own turn ends right after
+the send. Measured on the owner's transcripts of the last 7 days with
+`node scripts/measure/cross-session.mjs 7`:
+
+- 14 sessions sent or got messages; 486 of 500 `SendMessage` calls were linked to their arrival.
+- One hub talked to 6 sessions, but the others talked to each other too: a mesh, not a tree.
+- 472 of the 486 messages got a message back from the recipient (p50 5.4 min, p90 47.8 min).
+- In 382 of the 486, the sender's turn had ended while the recipient still worked on the message
+  (p50 1.7 min, p90 11.7 min): the sender's row showed a finished ✓ meanwhile. The hub had up to 6
+  recipients working at once.
+- The `hop-chain` attribute is no task id (114 chains, median 2 messages, some lasting days; counted
+  separately, the script does not count chains).
+
+A rerun a few hours later, with the 7-day window moved on, gave 490 of 504 linked, 386 finished
+senders and 475 replies, and the same times within 0.1 min.
+
+The records, read from 611 arrivals in 25 transcripts (2026-10-18 to 2026-11-19, Claude Code
+2.1.301 to 2.1.328, most of them 2.1.325); invented values:
+
+- **The sender's pipe.** The registry (§3.1) has `messagingSocketPath`, for example the JSON string
+  `"\\\\.\\pipe\\LOCAL\\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9"`.
+- **The arrival.** In the recipient's transcript a message arrives as
+  `{"type":"queue-operation","operation":"enqueue","content":"<cross-session-message from=\"uds:\\\\.\\pipe\\LOCAL\\cc-msg-…\" hop-chain=\"…\" from-name=\"Orchestrator\" from-mode=\"prompting\">\n…"}`,
+  `hop-chain` optional. `from` is `uds:` and the sender's `messagingSocketPath`, character for
+  character: of the 734 `from` values in `enqueue` and `remove` records, 576 matched a pipe in that
+  day's registry, the others no current entry.
+- **The delivery.** Every arrival was taken up in one of two ways:
+  - mostly when the recipient was idle (488): a `queue-operation` `dequeue`, then a `user` record
+    with `isMeta: true` and `origin: {"kind":"peer","from":"uds:…","msg_id":…,"name":"Orchestrator","fromMode":"prompting","body":…}`.
+    It starts a turn.
+  - mostly when the recipient was busy (123): an `attachment` of type `queued_command` with the
+    same `origin`, and a `queue-operation` `remove` with `reason: "absorbed_mid_turn"`. The message
+    joins the running turn. A message that arrives during a turn that then ends without absorbing
+    it is dequeued right after that turn's end and starts the next one.
+- **The end of the turn that handles it.** The app knows a turn's end from the `Stop` hook
+  (`SessionView.stoppedAt`); in the transcript it is an `assistant` record with
+  `message.stop_reason: "end_turn"`, or a synthetic one (`message.model: "<synthetic>"`, an API error
+  or the usage limit, §"The usage limit record"). Every delivery was followed by one. A turn the user
+  interrupts ends without either (2 of 611 deliveries).
+- **Not a cross-session message.** A `peer` origin whose `from` has no `uds:` prefix (a 17-hex id,
+  with `senderTaskId` and `handback`) is a subagent handing its result back inside the same
+  session.
+- **The transcript tail is not enough.** Between a delivery and the end of its turn the transcript
+  grew by 53 KB at the median, 748 KB at p90, 4.7 MB at p99 and 9.0 MB at most; 138 of the 611
+  outgrew the 256 KB tail the activity is read from.
+
+The app reads it in core `cross-session.ts` (the record format, `createPromptTracker`) and
+`transcript.ts` (`readActivityFromLines`, `SessionActivity.promptedBy`): a sender is pending from
+its arrival until the end of the turn that handles it, one entry per sender, its pipe without
+`uds:`. When the tail holds no turn end, `readTranscriptActivity` reads back to the last one, at
+most `PROMPT_LOOKBACK_BYTES` (16 MB), and keeps only the lines that may be one of these records.
+Replayed against a fold of each whole transcript at 654 sampled points (429 of them with a pending
+sender), it agreed at every point; the tail alone missed the sender at 185 of the 429. The lookback
+of the full 16 MB took 19 ms.
+
+The desktop app links the sessions with it (`shared/prompt-links.ts`): a session whose turn has
+ended **waits on** the other live sessions whose `promptedBy` names its `messagingSocketPath` and
+that work or wait (`shared/session-finished.ts` `waitsOn`). While it waits on any it is not
+finished: the list shows ◌ and "Vár: …" instead of the ✓, the tray counts it as working, and the
+"végzett" toast comes only when the last recipient is idle, once per `stoppedAt`. The check is one
+step deep. A recipient that finished and waits on others is idle, and its own turn that handled the
+message has ended, so its `promptedBy` no longer names the sender anyway. The rule therefore cannot
+loop in a mesh. A turn the user interrupts (see above) leaves its senders pending until the next turn
+end, but the recipient is idle then, so nobody waits on it; only its next turn's row note names
+them.
+
 ### 3.4 Hooks: measured in the VS Code extension
 
 The original text worked from the documentation. What follows is the **measured** behaviour

@@ -2,7 +2,8 @@ import type { DecisionKind, SessionStatus } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS, UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import { capitalized } from '../shared/hungarian-text.js'
 import { sessionHost, type SessionHost } from '../shared/request-source.js'
-import { finishState, type SeenFinishes } from '../shared/session-finished.js'
+import type { LinkedSession } from '../shared/prompt-links.js'
+import { finishState, waitsOn, type SeenFinishes } from '../shared/session-finished.js'
 import { sessionState } from '../shared/session-state.js'
 import { sessionUsageLimit } from './usage-limit.js'
 
@@ -11,9 +12,19 @@ import { sessionUsageLimit } from './usage-limit.js'
  * is a yes/no request (or a Notification wait), `choice` a request that asks for more
  * (`isChoiceKind`): the same dot in another color. `done` is a finish the user has not seen yet,
  * `seen` one they have (`finishState`): the same ✓ in another color. `limit` is a session whose turn
- * ended at the account's usage limit (`sessionUsageLimit`).
+ * ended at the account's usage limit (`sessionUsageLimit`). `waits-on` is a session whose turn
+ * ended while sessions it prompted still work on its message (`waitsOn`).
  */
-export type MarkerTone = 'waiting' | 'choice' | 'released' | 'working' | 'done' | 'seen' | 'limit' | 'idle'
+export type MarkerTone =
+  | 'waiting'
+  | 'choice'
+  | 'released'
+  | 'working'
+  | 'waits-on'
+  | 'done'
+  | 'seen'
+  | 'limit'
+  | 'idle'
 
 export interface StatusMarker {
   tone: MarkerTone
@@ -30,6 +41,8 @@ const MARKERS: Readonly<Record<MarkerTone, StatusMarker>> = {
   // Its tooltip depends on Remote Control, so `statusMarker` builds it (`releasedMarker`).
   released: { tone: 'released', glyph: '◆', title: '' },
   working: { tone: 'working', glyph: '◐', title: 'Dolgozik' },
+  // The row's text names the sessions it waits on (`format.ts` `waitsOnText`).
+  'waits-on': { tone: 'waits-on', glyph: '◌', title: 'Végzett, de vár a sessionökre, amelyeket megkért' },
   done: { tone: 'done', glyph: '✓', title: 'Épp végzett' },
   // The same ✓: whether the finish was seen is told by the color and the tooltip, not the shape.
   seen: { tone: 'seen', glyph: '✓', title: 'Végzett, már megnyitottad' },
@@ -78,7 +91,8 @@ function releasedMarker(remoteControl: boolean, host: SessionHost): StatusMarker
  * Order: first the steps the tray icon shows too (`sessionState`, their one home): a request the
  * app can still decide (not released) is the strongest sign, in the choice color if one of them asks
  * for more than a yes or a no; if there are only released ones, that is a state of its own, because
- * from there the app can no longer decide; then the Notification wait, and running.
+ * from there the app can no longer decide; then the Notification wait, running, and waiting on the
+ * sessions it prompted (`waitsOn`; `sessions` are all the live sessions).
  * Then come the usage limit (`sessionUsageLimit`: a turn the limit
  * ended has a `stoppedAt` too, from the `StopFailure` hook, and the limit says more than the ✓), and
  * "just finished" (`finishState`, the rule the tray's done mark follows too): green while unseen,
@@ -91,12 +105,14 @@ export function statusMarker(
     stoppedAt?: number | undefined
     bridgeSessionId?: unknown
     entrypoint?: string | undefined
+    messagingSocketPath?: string | undefined
     activity?: { usageLimit?: unknown } | undefined
   },
   decisions: readonly { released: boolean; kind: DecisionKind }[],
   seen: SeenFinishes,
+  sessions: readonly LinkedSession[],
 ): StatusMarker {
-  switch (sessionState(view.status, decisions)) {
+  switch (sessionState(view.status, decisions, waitsOn(view, sessions).length > 0)) {
     case 'choice':
       return MARKERS.choice
     case 'yes-no':
@@ -105,11 +121,13 @@ export function statusMarker(
       return releasedMarker(hasRemoteControl(view), sessionHost(view.entrypoint))
     case 'working':
       return MARKERS.working
+    case 'waits-on':
+      return MARKERS['waits-on']
     case 'rest':
       break
   }
   if (sessionUsageLimit(view) !== undefined) return MARKERS.limit
-  switch (finishState(view, seen)) {
+  switch (finishState(view, seen, sessions)) {
     case 'unseen':
       return MARKERS.done
     case 'seen':

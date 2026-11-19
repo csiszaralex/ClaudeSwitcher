@@ -118,7 +118,7 @@ describe('sessionInFront', () => {
   it('skips a seen finish, a working session, and a session without a finish', () => {
     const one = session('1', 'CRM master')
     const seen = new Map<string, number>()
-    acknowledgeFinish(seen, one)
+    acknowledgeFinish(seen, one, [])
     const title = window(custom('alpha', 'CRM master'))
     expect(sessionInFront(title, [one], seen)).toBeUndefined()
     expect(sessionInFront(title, [session('1', 'CRM master', { status: 'working' })], NONE_SEEN)).toBeUndefined()
@@ -164,12 +164,24 @@ describe('watchesSeen', () => {
     const one = session('1', 'CRM master')
     expect(watchesSeen([one], NONE_SEEN)).toBe(true)
     const seen = new Map<string, number>()
-    acknowledgeFinish(seen, one)
+    acknowledgeFinish(seen, one, [])
     expect(watchesSeen([one], seen)).toBe(false)
     expect(watchesSeen([session('1', 'CRM master', { entrypoint: CLI_ENTRYPOINT })], NONE_SEEN)).toBe(false)
     expect(watchesSeen([session('1', undefined)], NONE_SEEN)).toBe(false)
     expect(watchesSeen([session('1', 'CRM master', { status: 'working' })], NONE_SEEN)).toBe(false)
     expect(watchesSeen([], NONE_SEEN)).toBe(false)
+  })
+
+  it('does not watch or match a session that waits on a session it prompted: no finish to see yet', () => {
+    // An invented pipe in the measured shape (design doc "Cross-session messages").
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const sender = session('1', 'CRM master', { messagingSocketPath: pipe })
+    const recipient = session('2', undefined, { status: 'working', stoppedAt: undefined, activity: { promptedBy: [{ pipe }] } })
+    expect(watchesSeen([sender, recipient], NONE_SEEN)).toBe(false)
+    expect(sessionInFront(window(custom('alpha', 'CRM master')), [sender, recipient], NONE_SEEN)).toBeUndefined()
+    const idleAgain = { ...recipient, status: 'idle' as const }
+    expect(watchesSeen([sender, idleAgain], NONE_SEEN)).toBe(true)
+    expect(sessionInFront(window(custom('alpha', 'CRM master')), [sender, idleAgain], NONE_SEEN)).toBe(sender)
   })
 })
 
@@ -223,7 +235,7 @@ describe('createSeenWatch', () => {
     const later = { ...one, stoppedAt: STOPPED_AT + 1 }
     expect(watch.observe({ foreground: onOne, sessions: [later, other], seen, now: 3000 })).toBeUndefined()
     expect(watch.observe({ foreground: onOne, sessions: [later, other], seen, now: 3000 + SEEN_DWELL_MS })).toBe(later)
-    acknowledgeFinish(seen, later)
+    acknowledgeFinish(seen, later, [])
     expect(watch.observe({ foreground: onOne, sessions: [later, other], seen, now: 9000 })).toBeUndefined()
     expect(watch.observe({ foreground: onOne, sessions: [later, other], seen, now: 9000 + SEEN_DWELL_MS })).toBeUndefined()
   })

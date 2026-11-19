@@ -443,7 +443,8 @@ async function startApp(): Promise<void> {
     async (sessionId: unknown) => {
       // IPC input: the renderer may send anything, hence `unknown`, checked here.
       if (typeof sessionId !== 'string') return false
-      const view = running.state().sessions.find((s) => s.sessionId === sessionId)
+      const { sessions } = running.state()
+      const view = sessions.find((s) => s.sessionId === sessionId)
       if (view === undefined) return false
       // Focus first, hide the overlay only afterwards. Windows allows SetForegroundWindow only to
       // the process currently in the foreground: hiding the overlay would take that right away, and
@@ -455,8 +456,9 @@ async function startApp(): Promise<void> {
       // (a session whose window cannot be brought forward, such as a terminal the console search
       // does not recognise, fails every time and would otherwise stay green). The tray's done mark
       // goes and the list's ✓ turns blue (`finishState`). Recorded only after `overlay.hide()`: the
-      // overlay reads the map on `shown` (`useSeenFinishes`), so its next pull has this finish.
-      acknowledgeFinish(finishesSeen, view)
+      // overlay reads the map on `shown` (`useSeenFinishes`), so its next pull has this finish. A
+      // session that waits on the sessions it prompted records nothing (`acknowledgeFinish`).
+      acknowledgeFinish(finishesSeen, view, sessions)
       // The exact tab only AFTER the window, and only if every condition of `tabFocusUri` holds.
       // The decisions are read AFTER the focus: a file-write request may have arrived during the
       // wait. Not awaited: the renderer gets the result of the window focus, as before.
@@ -739,7 +741,7 @@ async function startApp(): Promise<void> {
       const foreground = !watching || overlay.isVisible() ? undefined : readForegroundTitle()
       const seenNow = seenWatch.observe({ foreground, sessions, seen: finishesSeen, now: Date.now() })
       // The tray shows it on its next tick: an extra `setState` would put the flash out of step.
-      if (seenNow !== undefined) acknowledgeFinish(finishesSeen, seenNow)
+      if (seenNow !== undefined) acknowledgeFinish(finishesSeen, seenNow, sessions)
       if (!watching) stopSeenWatch()
     } catch (error) {
       // Logged once, then off until the app restarts: a failure every half second would flood the log.

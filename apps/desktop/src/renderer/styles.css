@@ -24,6 +24,7 @@
   --success-tint: #8fbf7a1a; /* added diff lines */
   --link: #5fa8e8; /* Remote Control dot, setup link */
   --limit: #a98fd8; /* usage limit marker and status bar note */
+  --waits-on: #6cb6b0; /* the marker of a session that waits on the sessions it prompted, and the prompted-by note */
 }
 
 body {
@@ -55,6 +56,7 @@ body {
 .marker.tone-choice { color: var(--choice); }
 .marker.tone-released { color: var(--warning); }
 .marker.tone-working { color: var(--info); }
+.marker.tone-waits-on { color: var(--waits-on); }
 .marker.tone-done { color: var(--success); }
 .marker.tone-seen { color: var(--info); }
 .marker.tone-limit { color: var(--limit); }
@@ -89,6 +91,8 @@ body {
   cursor: default;
 }
 .summary { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The sessions a working row works for (rows.ts `Row.promptedBy`), at the start of its text. */
+.prompted-by { color: var(--waits-on); cursor: default; }
 .age { color: var(--text-faint); text-align: right; font-variant-numeric: tabular-nums; }
 .empty { padding: 24px; text-align: center; color: var(--text-faint); }
 

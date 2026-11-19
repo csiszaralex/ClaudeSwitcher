@@ -1,15 +1,19 @@
+import type { SessionStatus } from '@claudeswitcher/core'
+import type { LinkedSession } from '../shared/prompt-links.js'
 import { requestSource } from '../shared/request-source.js'
 import { clip, pendingRowText } from '../shared/row-text.js'
+import { waitsOn } from '../shared/session-finished.js'
 
 /** The part of a session the notifier reads; the daemon's `SessionView` fits it. */
-export interface NotifierSession {
+export interface NotifierSession extends LinkedSession {
   sessionId: string
   name: string
+  status: SessionStatus
   /** The registry `entrypoint`, for the source label of a request (`requestSource`). */
   entrypoint?: string | undefined
   /** The time of the session's last `Stop`, while it has shown no new activity (`SessionView.stoppedAt`). */
   stoppedAt?: number | undefined
-  activity?: { lastAssistantText?: string | undefined } | undefined
+  activity?: (LinkedSession['activity'] & { lastAssistantText?: string | undefined }) | undefined
 }
 
 /** The part of a pending request the notifier reads; the daemon's `PendingDecisionView` fits it. */
@@ -75,7 +79,10 @@ function finishedNotice(session: NotifierSession): Notice {
  *   update) and a stop that already happened notify nothing, the tray count shows them.
  * - A request notifies once, by its decision `id`, so a second request of the same session notifies
  *   again. A released request is no news.
- * - A session notifies once per new `stoppedAt`. `stoppedAt` disappears while a subagent runs and
+ * - A session notifies once per new `stoppedAt`, and only once it waits on no session it prompted
+ *   (`waitsOn`): while it waits, its `stoppedAt` is neither shown nor remembered, so the toast comes
+ *   when the last recipient goes idle, with the same `stoppedAt`. A finish already notified before
+ *   the wait began does not notify again. `stoppedAt` disappears while a subagent runs and
  *   comes back with the same value, which is not a new finish, so the last value is kept, also for a
  *   session that drops out of the list for a moment (one number per session id, never pruned).
  * - The memory is updated on every call, also when a toast is held back (a setting off, the overlay
@@ -102,7 +109,7 @@ export function createNotifier(): { observe: (input: NotifierInput) => Notice[] 
       const finished: Notice[] = []
       for (const session of state.sessions) {
         const { stoppedAt } = session
-        if (stoppedAt === undefined) continue
+        if (stoppedAt === undefined || waitsOn(session, state.sessions).length > 0) continue
         if (started && lastStoppedAt.get(session.sessionId) !== stoppedAt) finished.push(finishedNotice(session))
         lastStoppedAt.set(session.sessionId, stoppedAt)
       }

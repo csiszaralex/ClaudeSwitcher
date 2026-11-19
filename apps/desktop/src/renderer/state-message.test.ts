@@ -56,6 +56,27 @@ describe('parseDaemonMessage state messages', () => {
     expect(sessionsOf(message)).toEqual([{ sessionId: 'a', stoppedAt: 5_000 }, { sessionId: 'c' }])
   })
 
+  it('keeps a session with a string pipe and well-formed senders, and drops one whose pipe or senders are malformed', () => {
+    // An invented pipe in the measured shape (design doc "Cross-session messages").
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const good = { sessionId: 'a', messagingSocketPath: pipe, activity: { promptedBy: [{ pipe, name: 'Orchestrator' }, { pipe }] } }
+    const message = JSON.stringify({
+      type: 'state',
+      protocol: DAEMON_PROTOCOL,
+      payload: {
+        sessions: [
+          good,
+          { sessionId: 'b', messagingSocketPath: 42 },
+          { sessionId: 'c', activity: { promptedBy: 'Orchestrator' } },
+          { sessionId: 'd', activity: { promptedBy: [{ name: 'no pipe' }] } },
+          { sessionId: 'e', activity: { promptedBy: [{ pipe, name: 7 }] } },
+          { sessionId: 'f', activity: {} },
+        ],
+      },
+    })
+    expect(sessionsOf(message)).toEqual([good, { sessionId: 'f', activity: {} }])
+  })
+
   it('keeps a session carrying an entrypoint string, and drops one whose entrypoint is not a string', () => {
     // Optional in `SessionView` (it comes from the registry record when there is one). If present it must be a string.
     const message = JSON.stringify({

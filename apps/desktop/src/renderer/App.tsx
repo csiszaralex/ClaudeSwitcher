@@ -4,7 +4,15 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
-import { formatDuration, shortenPath, subagentLabel, subagentTooltip, summarize } from './format.js'
+import {
+  formatDuration,
+  promptedByNote,
+  shortenPath,
+  subagentLabel,
+  subagentTooltip,
+  summarize,
+  waitsOnText,
+} from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
@@ -226,6 +234,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
           // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
           const source = requestSource(row.session?.entrypoint)
           const flagged = source.standsOut && row.decisions.length > 0
+          const note = promptedByNote(row.promptedBy)
           return (
             <li
               key={row.sessionId}
@@ -267,11 +276,19 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
                 // A pending decision overrides the row; the tooltip still lists every active subagent.
                 title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
               >
+                {/* The sessions this one works for, first, so the end of a long text is what CSS cuts. */}
+                {note !== undefined && (
+                  <span className="prompted-by" title={`Megkérte: ${row.promptedBy.join(', ')}`}>
+                    {note}{' '}
+                  </span>
+                )}
                 {pending !== undefined
                   ? pendingRowText(pending)
-                  : row.session !== undefined
-                    ? summarize(row.session, now)
-                    : ''}
+                  : row.waitsOn.length > 0
+                    ? waitsOnText(row.waitsOn)
+                    : row.session !== undefined
+                      ? summarize(row.session, now)
+                      : ''}
               </span>
               <span className="age">
                 {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}

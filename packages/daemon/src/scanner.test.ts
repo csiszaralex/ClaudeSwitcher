@@ -48,6 +48,26 @@ describe('scanSessions', () => {
     expect(activities.get('sid-100')?.runningTool).toBe('Bash')
   })
 
+  it('reads the sender of a turn that outgrew the transcript tail', async () => {
+    // An invented delivery in the measured shape (design doc "Cross-session messages"), then more
+    // than the 256 KB tail of tool results in the same turn.
+    const dir = await fixture()
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const delivery = JSON.stringify({
+      type: 'user',
+      isMeta: true,
+      message: { role: 'user', content: `<cross-session-message from="uds:${pipe}" from-name="beta-02" from-mode="prompting">\nszia` },
+      origin: { kind: 'peer', from: `uds:${pipe}`, name: 'beta-02', fromMode: 'prompting' },
+    })
+    const result = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ok '.repeat(700) }] } })
+    const running = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } })
+    const lines = [delivery, ...Array.from({ length: 200 }, () => result), running]
+    await writeFile(path.join(dir, 'projects', 'encoded-alpha', 'sid-100.jsonl'), `${lines.join('\n')}\n`)
+    const { activities } = await scanSessions(dir, aliveProbe)
+    expect(activities.get('sid-100')?.promptedBy).toEqual([{ pipe, name: 'beta-02' }])
+    expect(activities.get('sid-100')?.runningTool).toBe('Bash')
+  })
+
   it('refreshes the probe once, before resolving sessions', async () => {
     // The probe's synchronous answers come from its latest snapshot; the scan must refresh it first,
     // or it would work from a list that is no longer current.

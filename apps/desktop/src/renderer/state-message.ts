@@ -68,6 +68,19 @@ function isSubagent(value: unknown): value is SubagentView {
 }
 
 /**
+ * Whether a session's `activity.promptedBy` is absent or a list of senders the links can read: a
+ * string `pipe` and, if present, a string `name`. A bad one drops the session, like a bad subagent.
+ */
+function hasValidSenders(activity: unknown): boolean {
+  const senders = isRecord(activity) ? activity['promptedBy'] : undefined
+  return (
+    senders === undefined ||
+    (Array.isArray(senders) &&
+      senders.every((sender: unknown) => isRecord(sender) && typeof sender['pipe'] === 'string' && optionalString(sender['name'])))
+  )
+}
+
+/**
  * Cleans a state payload, or returns `undefined`. Never throws.
  *
  * BOTH transport paths go through this: the WebSocket message and the initial state requested over
@@ -97,6 +110,11 @@ export function sanitizeState(payload: unknown): DaemonState | undefined {
         // Optional: comes from the registry record when it is there. If present, a string, the raw
         // `entrypoint` value.
         optionalString(view['entrypoint']) &&
+        // Optional: the registry's pipe. If present, a string: the links between the sessions
+        // (`shared/prompt-links.ts`) compare it with the senders' pipes.
+        optionalString(view['messagingSocketPath']) &&
+        // Optional: the senders the session works for. If present, a list of senders with a string pipe.
+        hasValidSenders(view['activity']) &&
         // Optional: present only with an active subagent. If present, every element has the shape
         // the row summary reads.
         (view['subagents'] === undefined || (Array.isArray(view['subagents']) && view['subagents'].every(isSubagent))),

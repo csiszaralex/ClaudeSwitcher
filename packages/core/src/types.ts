@@ -18,6 +18,12 @@ export interface SessionRecord {
   waitingFor?: string | null | undefined
   /** When `status` last changed (epoch ms). */
   statusUpdatedAt?: number | undefined
+  /**
+   * The named pipe other sessions send their cross-session messages to, as raw text, for example
+   * `\\.\pipe\LOCAL\cc-msg-<32 hex>`. A message that arrives names its sender by this pipe
+   * (`cross-session.ts`), so it links a recipient to the session that prompted it.
+   */
+  messagingSocketPath?: string | undefined
 }
 
 /** A raw record from the `~/.claude/ide/<port>.lock` file. An undocumented format. */
@@ -61,6 +67,23 @@ export interface SessionActivity {
    * record.
    */
   tabTitle?: string | undefined
+  /**
+   * The sessions this session works for now: one entry per sender of a cross-session message that
+   * is still pending, from its arrival until the end of the turn that handles it
+   * (`cross-session.ts`). Absent when there is none.
+   */
+  promptedBy?: PromptSender[] | undefined
+}
+
+/** The sender of a cross-session message, as the recipient's transcript names it (`cross-session.ts`). */
+export interface PromptSender {
+  /**
+   * The sender's pipe without the `uds:` prefix of the message, so it equals the sender's registry
+   * `messagingSocketPath` (`SessionRecord`).
+   */
+  pipe: string
+  /** The name the message gave for its sender; absent when it gave none. */
+  name?: string | undefined
 }
 
 /** An active subagent as the UI gets it: what the session's background worker is doing now. */
@@ -101,6 +124,11 @@ export interface SessionView {
    * session the extension's URI would open a NEW tab.
    */
   entrypoint?: string | undefined
+  /**
+   * The registry's `messagingSocketPath` (`SessionRecord`), raw. Another session's
+   * `activity.promptedBy` names this session by it while it works on this session's message.
+   */
+  messagingSocketPath?: string | undefined
   waitingSince?: number | undefined
   notificationText?: string | undefined
   /**
