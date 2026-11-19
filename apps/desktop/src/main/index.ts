@@ -1,8 +1,16 @@
 import { spawn } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DAEMON_HOST, createWin32ProcessProbe, parseUserDecision, resolveClaudeDir } from '@claudeswitcher/core'
+import {
+  DAEMON_HOST,
+  createWin32ProcessProbe,
+  findTranscriptPath,
+  parseUserDecision,
+  readTranscriptConversation,
+  resolveClaudeDir,
+} from '@claudeswitcher/core'
 import { startDaemon } from '@claudeswitcher/daemon'
 import {
   app,
@@ -13,6 +21,7 @@ import {
 } from 'electron'
 import { APP_USER_MODEL_ID } from './app-id.js'
 import { createAutostart, type LoginItems } from './autostart.js'
+import { createConversationReader } from './conversation-reader.js'
 import { loadConfig, saveSettings, saveSkippedVersion } from './config.js'
 import { createFocusReturn } from './focus-return.js'
 import {
@@ -26,7 +35,7 @@ import {
 } from './focus-window.js'
 import { errorMessage } from '../shared/error-message.js'
 import { acknowledgeFinish } from '../shared/session-finished.js'
-import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
+import { OVERLAY_CHANNELS, type ConversationReply } from '../shared/overlay-channels.js'
 import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
 import { hotkeyLogText } from './hotkey.js'
@@ -467,6 +476,29 @@ async function startApp(): Promise<void> {
       return outcome !== 'failed'
     },
     () => false,
+  )
+
+  // The peek (Space on a row): the session's recent conversation, read from its transcript by core,
+  // only for a session the daemon lists, so the renderer cannot name any other file.
+  const readConversation = createConversationReader({
+    isLiveSession: (sessionId) => running.state().sessions.some((s) => s.sessionId === sessionId),
+    findPath: (sessionId) => findTranscriptPath(resolveClaudeDir(), sessionId),
+    stat: (file) =>
+      stat(file).then(
+        (info) => ({ size: info.size, mtimeMs: info.mtimeMs }),
+        () => undefined,
+      ),
+    read: (file) => readTranscriptConversation(file),
+  })
+  handleFrom(
+    RENDERER,
+    OVERLAY_CHANNELS.conversation,
+    (sessionId: unknown): ConversationReply | Promise<ConversationReply> => {
+      // IPC input: the renderer may send anything, hence `unknown`, checked here.
+      if (typeof sessionId !== 'string') return { ok: false, reason: 'unknown-session' }
+      return readConversation(sessionId)
+    },
+    (): ConversationReply => ({ ok: false, reason: 'unknown-session' }),
   )
 
   // Esc, and the hide after the last decision: the user is done with the list, so the focus goes

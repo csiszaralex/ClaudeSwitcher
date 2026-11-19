@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { tempDir } from './testing.js'
-import { findTranscriptPath, readActivityFromLines, readTranscriptActivity, tailLines } from './transcript.js'
+import { CONVERSATION_TURNS, conversationFromLines } from './conversation.js'
+import {
+  findTranscriptPath,
+  readActivityFromLines,
+  readTranscriptActivity,
+  readTranscriptConversation,
+  tailLines,
+} from './transcript.js'
 
 const assistantText = JSON.stringify({
   type: 'assistant',
@@ -484,6 +491,54 @@ describe('readTranscriptActivity', () => {
 
   it('returns nothing for a file that does not exist', async () => {
     expect(await readTranscriptActivity(path.join(tmpdir(), 'cs-nope', 'missing.jsonl'))).toEqual({})
+  })
+})
+
+describe('readTranscriptConversation', () => {
+  const ask = (text: string): string =>
+    JSON.stringify({ ...prompting, type: 'user', message: { role: 'user', content: text }, origin: { kind: 'human' } })
+  // A tool result of about 2 KB: no conversation entry, kept out by the line pre-filter.
+  const filler = JSON.stringify({ ...prompting, type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'ok '.repeat(700) }] }, toolUseResult: {} })
+  const fillerOf = (bytes: number): string[] => Array.from({ length: Math.ceil(bytes / (filler.length + 1)) }, () => filler)
+
+  async function transcriptOf(lines: string[]): Promise<string> {
+    const file = path.join(await tempDir('cs-conversation-'), 'transcript.jsonl')
+    await writeFile(file, `${lines.join('\n')}\n`, 'utf8')
+    return file
+  }
+
+  it('reads a small transcript as conversationFromLines does', async () => {
+    const lines = [ask('Szia.'), endTurn, delivered(PIPE_A, 'Orchestrator'), toolTurn]
+    const entries = await readTranscriptConversation(await transcriptOf(lines))
+    expect(entries).toEqual(conversationFromLines(lines))
+    expect(entries?.map((entry) => entry.kind)).toEqual(['prompt', 'answer', 'message', 'tool'])
+  })
+
+  it('reads back across pieces until the last turns start, with every line intact', async () => {
+    // More turns than shown, each with about 300 KB of tool results, so the read spans several 1 MB
+    // pieces and many lines run across a piece's border. The texts are non-ASCII on purpose.
+    const lines = Array.from({ length: CONVERSATION_TURNS + 5 }, (_, i) => [ask(`Kérés ${String(i)}: árvíztűrő tükörfúrógép.`), ...fillerOf(300 * 1024)]).flat()
+    const entries = await readTranscriptConversation(await transcriptOf(lines))
+    expect(entries).toHaveLength(CONVERSATION_TURNS)
+    expect(entries?.[0]).toMatchObject({ kind: 'prompt', text: 'Kérés 5: árvíztűrő tükörfúrógép.' })
+    expect(entries?.at(-1)).toMatchObject({ kind: 'prompt', text: `Kérés ${String(CONVERSATION_TURNS + 4)}: árvíztűrő tükörfúrógép.` })
+  })
+
+  it('stops at the byte limit and drops the partial line there', async () => {
+    const lines = [ask('Régi.'), ...fillerOf(64 * 1024), ask('Új.')]
+    const entries = await readTranscriptConversation(await transcriptOf(lines), 32 * 1024)
+    expect(entries).toEqual([{ kind: 'prompt', text: 'Új.', images: 0, truncated: false }])
+  })
+
+  it('skips a last line that is still being written', async () => {
+    const file = path.join(await tempDir('cs-conversation-'), 'transcript.jsonl')
+    await writeFile(file, `${ask('Kész sor.')}\n{"type":"assistant","message":{"content":[{"type":"te`, 'utf8')
+    expect(await readTranscriptConversation(file)).toEqual([{ kind: 'prompt', text: 'Kész sor.', images: 0, truncated: false }])
+  })
+
+  it('returns an empty conversation for an empty file, and undefined for a missing one', async () => {
+    expect(await readTranscriptConversation(await transcriptOf([]))).toEqual([])
+    expect(await readTranscriptConversation(path.join(tmpdir(), 'cs-nope', 'missing.jsonl'))).toBeUndefined()
   })
 })
 

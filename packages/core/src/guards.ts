@@ -8,6 +8,18 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** A JSON line (a transcript line) as a record, or `undefined` for an empty, broken or non-object line. Never throws. */
+export function parseRecordLine(line: string): Record<string, unknown> | undefined {
+  const trimmed = line.trim()
+  if (trimmed === '') return undefined
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** The string if it is not empty, otherwise `undefined`. A whitespace-only string passes. */
 export function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined

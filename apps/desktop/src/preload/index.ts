@@ -12,6 +12,7 @@ const api: ClaudeSwitcherApi = {
   state: () => ipcRenderer.invoke(OVERLAY_CHANNELS.state),
   finishesSeen: () => ipcRenderer.invoke(OVERLAY_CHANNELS.finishesSeen),
   focusSession: (sessionId) => ipcRenderer.invoke(OVERLAY_CHANNELS.focusSession, sessionId),
+  conversation: (sessionId) => ipcRenderer.invoke(OVERLAY_CHANNELS.conversation, sessionId),
   hide: () => ipcRenderer.invoke(OVERLAY_CHANNELS.hide),
   decide: (id, decision) => ipcRenderer.invoke(OVERLAY_CHANNELS.decide, id, decision),
   settings: () => ipcRenderer.invoke(OVERLAY_CHANNELS.settings),

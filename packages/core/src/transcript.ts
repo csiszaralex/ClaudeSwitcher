@@ -1,7 +1,14 @@
 import { open, readdir, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  conversationFromLines,
+  countTurnStarts,
+  CONVERSATION_TURNS,
+  mayBeConversation,
+  type ConversationEntry,
+} from './conversation.js'
 import { createPromptTracker, isTurnEnd, mayConcernPrompts } from './cross-session.js'
-import { isRecord } from './guards.js'
+import { isRecord, parseRecordLine } from './guards.js'
 import { projectsDir } from './paths.js'
 import { toolDetail } from './tool-detail.js'
 import { shownTabTitle, titleRecordOf, type TitlesSeen } from './tab-title.js'
@@ -25,22 +32,10 @@ function blocks(rec: Record<string, unknown>): ContentBlock[] {
   return content.filter(isRecord)
 }
 
-/** A transcript line as a record, or `undefined` for an empty, broken or non-object line. Never throws. */
-function parseLine(line: string): Record<string, unknown> | undefined {
-  const trimmed = line.trim()
-  if (trimmed === '') return undefined
-  try {
-    const parsed: unknown = JSON.parse(trimmed)
-    return isRecord(parsed) ? parsed : undefined
-  } catch {
-    return undefined
-  }
-}
-
 /** Whether a raw line ends a turn (`cross-session.ts` `isTurnEnd`), parsing only a line that may (`mayConcernPrompts`). */
 function isTurnEndLine(line: string): boolean {
   if (!mayConcernPrompts(line)) return false
-  const rec = parseLine(line)
+  const rec = parseRecordLine(line)
   return rec !== undefined && isTurnEnd(rec)
 }
 
@@ -57,12 +52,12 @@ export function readActivityFromLines(lines: readonly string[], earlierLines: re
   const prompts = createPromptTracker()
 
   for (const line of earlierLines) {
-    const rec = parseLine(line)
+    const rec = parseRecordLine(line)
     if (rec !== undefined) prompts.see(rec)
   }
 
   for (const line of lines) {
-    const rec = parseLine(line)
+    const rec = parseRecordLine(line)
     if (rec === undefined) continue
     prompts.see(rec)
 
@@ -193,11 +188,19 @@ async function readTail(handle: FileHandle, maxBytes: number): Promise<Tail> {
 }
 
 /**
- * The lines before `end` that may concern a cross-session message (`mayConcernPrompts`), in file
- * order, back to the last turn end (`isTurnEndLine`) or at most `limit` bytes. `head` is the end of
- * the line that runs across `end`. Reads `LOOKBACK_CHUNK_BYTES` at a time, from the end backwards.
+ * The lines before `end` that `keep` accepts, in file order, read back until `done` says so for a
+ * piece's kept lines or at most `limit` bytes. `head` is the end of the line that runs across `end`.
+ * Reads `LOOKBACK_CHUNK_BYTES` at a time, from the end backwards; the partial line at the limit is
+ * dropped.
  */
-async function promptLinesBefore(handle: FileHandle, end: number, head: Buffer, limit: number): Promise<string[]> {
+async function linesBefore(
+  handle: FileHandle,
+  end: number,
+  head: Buffer,
+  limit: number,
+  keep: (line: string) => boolean,
+  done: (lines: readonly string[]) => boolean,
+): Promise<string[]> {
   const floor = Math.max(0, end - limit)
   const chunks: string[][] = []
   let carry = head
@@ -219,11 +222,19 @@ async function promptLinesBefore(handle: FileHandle, end: number, head: Buffer, 
       carry = joined.subarray(0, newline)
       from = newline + 1
     }
-    const lines = joined.subarray(from).toString('utf8').split('\n').filter(mayConcernPrompts)
+    const lines = joined.subarray(from).toString('utf8').split('\n').filter(keep)
     chunks.unshift(lines)
-    if (lines.some(isTurnEndLine)) break
+    if (done(lines)) break
   }
   return chunks.flat()
+}
+
+/**
+ * The lines before `end` that may concern a cross-session message (`mayConcernPrompts`), in file
+ * order, back to the last turn end (`isTurnEndLine`) or at most `limit` bytes (`linesBefore`).
+ */
+function promptLinesBefore(handle: FileHandle, end: number, head: Buffer, limit: number): Promise<string[]> {
+  return linesBefore(handle, end, head, limit, mayConcernPrompts, (lines) => lines.some(isTurnEndLine))
 }
 
 /**
@@ -273,6 +284,46 @@ export async function tailLines(filePath: string, maxBytes = TAIL_BYTES): Promis
     // works best-effort. The allocation failure can only be triggered by a synthetic test.
     console.error(`[transcript] tailLines failed for ${filePath}`, error)
     return []
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * How far back from a transcript's end `readTranscriptConversation` reads at most. Measured
+ * 2026-11-19 on the owner's transcripts of 7 days (design doc "The conversation"): of the 16 with at
+ * least 20 turns, the last 20 took 6.6 MB at the median, 10.7 MB at p90 and 24.9 MB at most (tool
+ * results and API request records are most of it). The same 16 MB as `PROMPT_LOOKBACK_BYTES`.
+ */
+const CONVERSATION_LOOKBACK_BYTES = 16 * 1024 * 1024
+
+/**
+ * The session's recent conversation from its transcript (`conversation.ts` `conversationFromLines`):
+ * read back from the end until the last `CONVERSATION_TURNS` turns start, or at most `lookbackBytes`;
+ * only the lines that may hold an entry (`mayBeConversation`) are kept. `undefined` when the file
+ * cannot be read. Never throws.
+ */
+export async function readTranscriptConversation(
+  filePath: string,
+  lookbackBytes: number = CONVERSATION_LOOKBACK_BYTES,
+): Promise<ConversationEntry[] | undefined> {
+  let handle
+  try {
+    handle = await open(filePath, 'r')
+  } catch {
+    return undefined
+  }
+  try {
+    const { size } = await handle.stat()
+    let turns = 0
+    const lines = await linesBefore(handle, size, Buffer.alloc(0), lookbackBytes, mayBeConversation, (chunk) => {
+      turns += countTurnStarts(chunk)
+      return turns >= CONVERSATION_TURNS
+    })
+    return conversationFromLines(lines)
+  } catch (error) {
+    console.error(`[transcript] readTranscriptConversation failed for ${filePath}`, error)
+    return undefined
   } finally {
     await handle.close()
   }
