@@ -35,6 +35,19 @@ body {
 }
 
 .overlay { display: flex; flex-direction: column; height: 100vh; }
+/* The search field (Ctrl+K) above the list, its input styled as the panel's inputs. */
+.search { flex: none; padding: 6px 6px 0; }
+.search-field {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.search-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sessions { flex: 1; margin: 0; padding: 6px; list-style: none; overflow-y: auto; }
 
 .session {
@@ -107,7 +120,7 @@ body {
 /* Left: the selected session's source and folder; it gives way on a narrow window, the folder truncated. */
 .status-session { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; }
 .status-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); }
-/* Right: the usage limit note, the app version with the check time, and the reconnect note, never wrapped; on its own it still sits on the right. */
+/* Right: the search's key hint, the usage limit note, the app version with the check time, and the reconnect note, never wrapped; on its own it still sits on the right. */
 .status-checks { flex: none; display: flex; gap: 16px; margin-left: auto; white-space: nowrap; }
 .status-limit { color: var(--limit); }
 

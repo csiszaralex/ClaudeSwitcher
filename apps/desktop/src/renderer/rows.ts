@@ -1,6 +1,7 @@
 import type { DecisionKind, PromptSender, SessionStatus } from '@claudeswitcher/core'
 import { lastPathSegment } from '@claudeswitcher/core/browser'
 import { promptersOf } from '../shared/prompt-links.js'
+import { sessionName } from '../shared/session-name.js'
 import { waitsOn, type SeenFinishes } from '../shared/session-finished.js'
 import { statusMarker, type MarkerTone, type StatusMarker } from './session-marker.js'
 
@@ -19,13 +20,19 @@ interface SessionLike {
   // `name` and `activity` are required in `SessionView`, but at runtime the daemon's message can
   // lack them (`state-message.ts` `sanitizeState` checks neither), so the types say so, as in
   // `format.ts` `summarize`: a missing one must not throw in `buildRows` and take down the overlay.
+  // The row's name is read through `sessionName`, which checks the types too.
   name?: string | undefined
   waitingSince?: number | undefined
   stoppedAt?: number | undefined
   bridgeSessionId?: unknown
   messagingSocketPath?: string | undefined
   activity?:
-    | { lastEventAt?: number | undefined; usageLimit?: unknown; promptedBy?: readonly PromptSender[] | undefined }
+    | {
+        lastEventAt?: number | undefined
+        usageLimit?: unknown
+        promptedBy?: readonly PromptSender[] | undefined
+        tabTitle?: unknown
+      }
     | undefined
 }
 
@@ -33,6 +40,10 @@ interface SessionLike {
 export interface Row<S extends SessionLike, D extends DecisionLike> {
   sessionId: string
   status: SessionStatus
+  /**
+   * The row's name: the session's shown name (`shared/session-name.ts` `sessionName`, its tab title
+   * first), or for a row without a session the last segment of its request's `cwd`.
+   */
   name: string
   waitingSince?: number | undefined
   /** The session known from the registry; `undefined` if the row is only the pending request. */
@@ -42,7 +53,7 @@ export interface Row<S extends SessionLike, D extends DecisionLike> {
   /** The row's status marker (`statusMarker`); its tone decides the row's group in the list. */
   marker: StatusMarker
   /**
-   * The row names of the sessions this one waits on (`session-finished.ts` `waitsOn`), in a stable
+   * The shown names (`sessionName`) of the sessions this one waits on (`session-finished.ts` `waitsOn`), in a stable
    * order; empty when it waits on none. The row's text then names them (`format.ts` `waitsOnText`).
    */
   waitsOn: string[]
@@ -216,12 +227,12 @@ export function buildRows<S extends SessionLike, D extends DecisionLike>(
     return {
       sessionId: session.sessionId,
       status: session.status,
-      name: session.name ?? '',
+      name: sessionName(session),
       waitingSince: session.waitingSince,
       session,
       decisions: own,
       marker: statusMarker(session, own, seen, sessions),
-      waitsOn: waitsOn(session, sessions).map((other) => other.name ?? ''),
+      waitsOn: waitsOn(session, sessions).map(sessionName),
       promptedBy: promptersOf(session, sessions),
     }
   })

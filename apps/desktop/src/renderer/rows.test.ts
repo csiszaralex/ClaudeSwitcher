@@ -235,6 +235,29 @@ describe('buildRows order', () => {
     expect(selectOnShow(rows, decisions, undefined)).toBe('steady')
   })
 
+  it('names a row by its tab title, and sorts and names the sessions it waits on by it too', () => {
+    const pipe = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
+    const titled = (sessionId: string, name: string, tabTitle: string | undefined, status: Status) => ({
+      ...session(sessionId, status, undefined, { name }),
+      activity: { tabTitle, promptedBy: [{ pipe }] },
+    })
+    const sessions = [
+      // By the daemon names the order would be zeta-1a, then alpha-2b; by the tab titles it turns.
+      titled('w1', 'alpha-2b', 'Zárás előkészítése', 'working'),
+      titled('w2', 'zeta-1a', 'Ajánlatok átnézése', 'working'),
+      titled('w3', 'mid-3c', undefined, 'working'),
+      { ...session('hub', 'idle', undefined, { stoppedAt: 60, name: 'hub-4d' }), messagingSocketPath: pipe },
+    ]
+    const rows = buildRows(sessions, [], NONE_SEEN)
+    expect(rows.map((r) => r.name)).toEqual(['Ajánlatok átnézése', 'mid-3c', 'Zárás előkészítése', 'hub-4d'])
+    expect(rows.find((r) => r.sessionId === 'hub')?.waitsOn).toEqual(['Ajánlatok átnézése', 'mid-3c', 'Zárás előkészítése'])
+  })
+
+  it('ignores a tab title of the wrong type, which the daemon message may carry unchecked', () => {
+    const odd = { ...session('o', 'idle', undefined, { name: 'omega-5e' }), activity: { tabTitle: 12 } }
+    expect(buildRows([odd], [], NONE_SEEN)[0]?.name).toBe('omega-5e')
+  })
+
   it('does not throw on a session without a name or an activity, which the daemon message may lack', () => {
     const bare = { sessionId: 'bare', status: 'working' as const }
     const rows = buildRows([bare, session('k', 'working', undefined, { name: 'kappa' })], [], NONE_SEEN)

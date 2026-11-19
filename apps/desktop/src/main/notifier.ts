@@ -3,6 +3,7 @@ import type { LinkedSession } from '../shared/prompt-links.js'
 import { requestSource } from '../shared/request-source.js'
 import { clip, pendingRowText } from '../shared/row-text.js'
 import { waitsOn } from '../shared/session-finished.js'
+import { sessionName } from '../shared/session-name.js'
 
 /** The part of a session the notifier reads; the daemon's `SessionView` fits it. */
 export interface NotifierSession extends LinkedSession {
@@ -13,7 +14,7 @@ export interface NotifierSession extends LinkedSession {
   entrypoint?: string | undefined
   /** The time of the session's last `Stop`, while it has shown no new activity (`SessionView.stoppedAt`). */
   stoppedAt?: number | undefined
-  activity?: (LinkedSession['activity'] & { lastAssistantText?: string | undefined }) | undefined
+  activity?: (LinkedSession['activity'] & { lastAssistantText?: string | undefined; tabTitle?: string | undefined }) | undefined
 }
 
 /** The part of a pending request the notifier reads; the daemon's `PendingDecisionView` fits it. */
@@ -49,24 +50,27 @@ export interface Notice {
 /** The title name of a request whose session is not in the list (it ended in the same moment). */
 const UNKNOWN_SESSION_NAME = 'Egy session'
 
-/** The toast of a new permission request: the row's text, with the source label first when it stands out. */
+/**
+ * The toast of a new permission request: the session's shown name (`sessionName`) in the title, the
+ * row's text, with the source label first when it stands out.
+ */
 function requestNotice(decision: NotifierDecision, session: NotifierSession | undefined): Notice {
   const source = requestSource(session?.entrypoint)
   const text = pendingRowText(decision)
   return {
     kind: 'request',
     sessionId: decision.sessionId,
-    title: `${session?.name ?? UNKNOWN_SESSION_NAME} engedélyt kér`,
+    title: `${session === undefined ? UNKNOWN_SESSION_NAME : sessionName(session)} engedélyt kér`,
     body: source.standsOut ? `${source.label} · ${text}` : text,
   }
 }
 
-/** The toast of a session that finished its turn: the start of its last answer. */
+/** The toast of a session that finished its turn: its shown name (`sessionName`), the start of its last answer. */
 function finishedNotice(session: NotifierSession): Notice {
   return {
     kind: 'finished',
     sessionId: session.sessionId,
-    title: `${session.name} végzett`,
+    title: `${sessionName(session)} végzett`,
     body: clip(session.activity?.lastAssistantText ?? ''),
   }
 }
