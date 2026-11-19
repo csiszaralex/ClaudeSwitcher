@@ -28,6 +28,7 @@ interface User32 {
   SetForegroundWindow(hWnd: number): number
   IsIconic(hWnd: number): number
   ShowWindowAsync(hWnd: number, nCmdShow: number): number
+  IsWindow(hWnd: number): number
 }
 
 /** `undefined`: not tried yet. `null`: loading failed. */
@@ -61,6 +62,7 @@ function loadUser32(): User32 | null {
       SetForegroundWindow: lib.func('int SetForegroundWindow(intptr hWnd)'),
       IsIconic: lib.func('int IsIconic(intptr hWnd)'),
       ShowWindowAsync: lib.func('int ShowWindowAsync(intptr hWnd, int nCmdShow)'),
+      IsWindow: lib.func('int IsWindow(intptr hWnd)'),
     }
   } catch (error) {
     console.error('[focus] user32 bindings unavailable; only the code CLI fallback is left', error)
@@ -330,13 +332,15 @@ function consoleTarget(api: TerminalWindowScanner, hwnd: number): number | undef
   return undefined
 }
 
-/** The real scanner: user32 plus a class name reader over one reused buffer. */
-function terminalScanner(api: User32): TerminalWindowScanner {
+/** A window class name reader over `GetClassNameW` and one reused buffer. */
+function classNameReader(api: User32): (hWnd: number) => string {
   const buffer = Buffer.alloc(CLASS_NAME_CHARS * 2)
-  return {
-    ...api,
-    className: (hWnd) => buffer.toString('utf16le', 0, api.GetClassNameW(hWnd, buffer, CLASS_NAME_CHARS) * 2),
-  }
+  return (hWnd) => buffer.toString('utf16le', 0, api.GetClassNameW(hWnd, buffer, CLASS_NAME_CHARS) * 2)
+}
+
+/** The real scanner: user32 plus a class name reader. */
+function terminalScanner(api: User32): TerminalWindowScanner {
+  return { ...api, className: classNameReader(api) }
 }
 
 /** The real terminal window scanner, or `undefined` if the user32 bindings did not load. */
@@ -355,6 +359,80 @@ export function terminalWindowOf(pid: number): number {
   const tree = takeProcessTree()
   if (tree === undefined) return 0
   return findTerminalWindow(scanner, ancestorChain(tree, pid))
+}
+
+/**
+ * The window that was in the foreground before the overlay took the focus, to give the focus back to
+ * on Esc (`main/focus-return.ts`). With its process: a window handle can be reused by a later window,
+ * and then the process tells them apart.
+ */
+export interface PreviousWindow {
+  hwnd: number
+  pid: number
+}
+
+/**
+ * The classes of the shell's own windows: the desktop (`Progman`, the class of `GetShellWindow`, and
+ * `WorkerW`, which holds the wallpaper and the icons) and the taskbars (`Shell_TrayWnd`, and
+ * `Shell_SecondaryTrayWnd` on another display). Read-only check on Windows 11 (2026-11-19):
+ * `GetShellWindow` has the class `Progman`, and `FindWindowW` finds a window of each. Giving the focus
+ * back to one of them is nothing worth doing: after a click on the tray icon the taskbar is the
+ * foreground window, not the one the user worked in.
+ */
+export const SHELL_WINDOW_CLASSES: ReadonlySet<string> = new Set([
+  'Progman',
+  'WorkerW',
+  'Shell_TrayWnd',
+  'Shell_SecondaryTrayWnd',
+])
+
+/** The user32 subset reading the foreground window needs, so it can be tested with a fake. */
+export interface ForegroundReader extends Pick<User32, 'GetForegroundWindow' | 'GetWindowThreadProcessId'> {
+  className(hWnd: number): string
+}
+
+/**
+ * The foreground window as one to give the focus back to later, or `undefined`: no foreground window
+ * (0), or one of the shell's own (`SHELL_WINDOW_CLASSES`). Only reads.
+ */
+export function previousWindowOf(api: ForegroundReader): PreviousWindow | undefined {
+  const hwnd = Number(api.GetForegroundWindow())
+  if (hwnd === 0 || SHELL_WINDOW_CLASSES.has(api.className(hwnd))) return undefined
+  const pidOut: [number] = [0]
+  api.GetWindowThreadProcessId(hwnd, pidOut)
+  return { hwnd, pid: pidOut[0] }
+}
+
+/** The user32 subset `canGiveBack` needs. */
+export type GiveBackCheck = Pick<User32, 'IsWindow' | 'IsWindowVisible' | 'IsIconic' | 'GetWindowThreadProcessId'>
+
+/**
+ * True if the focus may go back to the window: it still exists, is visible and not minimised (a
+ * window the user minimised meanwhile stays so), and still belongs to the same process (its handle
+ * was not reused). Only reads.
+ */
+export function canGiveBack(api: GiveBackCheck, window: PreviousWindow): boolean {
+  if (api.IsWindow(window.hwnd) === 0) return false
+  if (api.IsWindowVisible(window.hwnd) === 0 || api.IsIconic(window.hwnd) !== 0) return false
+  const pidOut: [number] = [0]
+  api.GetWindowThreadProcessId(window.hwnd, pidOut)
+  return pidOut[0] === window.pid
+}
+
+/** The foreground window now (`previousWindowOf`), or `undefined`, also without the user32 bindings. */
+export function captureForeground(): PreviousWindow | undefined {
+  const api = loadUser32()
+  return api === null ? undefined : previousWindowOf({ ...api, className: classNameReader(api) })
+}
+
+/**
+ * Gives the focus back to the window (`canGiveBack`), through `bringToFront`, the same path and the
+ * same check of what came to the front as the jump. True if it is in the foreground then.
+ */
+export async function giveBackForeground(window: PreviousWindow): Promise<boolean> {
+  const api = loadUser32()
+  if (api === null || !canGiveBack(api, window)) return false
+  return bringToFront(api, window.hwnd)
 }
 
 /** Brings up the window that shows the terminal of the session's process (`SessionView.pid`). */

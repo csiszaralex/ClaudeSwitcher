@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron'
 import { OVERLAY_CHANNELS } from '../shared/overlay-channels.js'
+import type { FocusReturn } from './focus-return.js'
 import { hardenWindow, loadPage, secureWebPreferences } from './harden-window.js'
 import type { RendererLocation } from './ipc-sender.js'
 import { OVERLAY_HEIGHT, OVERLAY_WIDTH, overlayBounds } from './overlay-placement.js'
@@ -16,10 +17,18 @@ export interface OverlayController {
    * longest. Its parameter is optional, so it still fits `() => void` where it is passed on.
    */
   readonly show: (selectSessionId?: string) => void
-  /** Hides a visible overlay, otherwise shows it (`show`). */
+  /** Dismisses a visible overlay (`dismiss`), otherwise shows it (`show`). The hotkey calls it. */
   readonly toggle: () => void
-  /** Hides the overlay if it still exists. */
+  /**
+   * Hides the overlay if it still exists, and gives the focus to nothing. For the jump (`main/index.ts`
+   * `focusSession`), which has just brought up the session's window on purpose.
+   */
   readonly hide: () => void
+  /**
+   * Hides a visible overlay the user dismissed (Esc, the hide after the last decision, the hotkey
+   * again), giving the focus back to the window that was in front when it opened (`FocusReturn`).
+   */
+  readonly dismiss: () => Promise<void>
   /** Whether the overlay is visible now. */
   readonly isVisible: () => boolean
   /** Registers a listener for the overlay being hidden (its window's `hide` event, a re-created window included). */
@@ -34,6 +43,8 @@ export function createOverlayController(options: {
   page: RendererLocation
   preload: string
   isQuitting: () => boolean
+  /** Remembers the foreground window on opening and gives the focus back on `dismiss`. */
+  focusReturn: FocusReturn
 }): OverlayController {
   /**
    * True when Windows ends the session (shutdown, restart, sign-out). Electron's documentation says
@@ -143,21 +154,32 @@ export function createOverlayController(options: {
     // overlay does not stick out on a low display either; a `setPosition` that only sets the
     // position can break the size too between displays with different scaling.
     window.setBounds(overlayBounds(display.workArea))
+    // Before `show` and `focus`: after them the overlay is the foreground window. A visible overlay
+    // keeps the window it remembered when it opened.
+    if (!alreadyVisible) options.focusReturn.remember()
     window.show()
     window.focus()
     if (alreadyVisible) sendShown(window)
   }
 
+  // `hide()` on a destroyed window would throw.
+  const hide = (): void => {
+    if (!overlay.isDestroyed()) overlay.hide()
+  }
+
+  const dismiss = async (): Promise<void> => {
+    if (overlay.isDestroyed() || !overlay.isVisible()) return
+    await options.focusReturn.dismiss(overlay.isFocused(), hide)
+  }
+
   return {
     show,
     toggle: () => {
-      if (!overlay.isDestroyed() && overlay.isVisible()) overlay.hide()
+      if (!overlay.isDestroyed() && overlay.isVisible()) void dismiss()
       else show()
     },
-    // `hide()` on a destroyed window would throw.
-    hide: () => {
-      if (!overlay.isDestroyed()) overlay.hide()
-    },
+    hide,
+    dismiss,
     isVisible: () => !overlay.isDestroyed() && overlay.isVisible(),
     onHidden: (listener) => {
       hiddenListeners.push(listener)
