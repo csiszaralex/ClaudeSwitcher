@@ -18,6 +18,7 @@ import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waits
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
+import { filterRows, isSearchChord, SEARCH_CHORD_LABEL } from './session-search.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
 import { usageLimitStatusText } from './usage-limit.js'
@@ -71,6 +72,9 @@ function JumpNotice({
   )
 }
 
+/** The keys of the search field that act on the list (App's `onKey`); every other key is the query's. */
+const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Escape'])
+
 /**
  * @param overlay The daemon's live state. It comes from outside (`main.tsx` `Root`) and is not read
  * here: so the connection lives on after a render error, and the next state can restore the UI.
@@ -83,11 +87,16 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const [now, setNow] = useState(Date.now())
   const appVersion = useAppVersion()
+  // The search (Ctrl+K, session-search.ts): `undefined` while it is closed, else the query typed.
+  const [query, setQuery] = useState<string | undefined>()
+  const searchField = useRef<HTMLInputElement | null>(null)
 
-  // The rows: the sessions, plus a row of its own for each pending request whose session the
-  // snapshot does not know yet, in the list's order (rows.ts). All selection and stepping works on
-  // this list.
-  const rows = buildRows(sessions, decisions, seenFinishes)
+  // All rows: the sessions, plus a row of its own for each pending request whose session the
+  // snapshot does not know yet, in the list's order (rows.ts).
+  const allRows = buildRows(sessions, decisions, seenFinishes)
+  // The rows the list shows: all of them, or while the search is open its matches, in the same
+  // order. The selection and the stepping work on these.
+  const rows = query === undefined ? allRows : filterRows(allRows, query)
   const ids = rows.map((row) => row.sessionId)
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedRowView = selected === -1 ? undefined : rows[selected]
@@ -102,12 +111,13 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // The account's usage limit for the status bar, on the overlay's one-second clock (`now`).
   const limitNote = usageLimitStatusText(sessions, now)
 
-  // The latest state for the async handlers (show, the step after a decision). A closure from
-  // render time can go stale before the decision's reply or the show: the step has to be computed
-  // on the freshest list, else it could jump to a session that has disappeared meanwhile.
-  const latest = useRef({ rows, decisions })
+  // The latest state for the async handlers (show, the step after a decision, the search's typing).
+  // A closure from render time can go stale before the decision's reply or the show: the step has
+  // to be computed on the freshest list, else it could jump to a session that has disappeared
+  // meanwhile. All rows, not only the search's matches: the search closes on show.
+  const latest = useRef({ rows: allRows, decisions })
   useEffect(() => {
-    latest.current = { rows, decisions }
+    latest.current = { rows: allRows, decisions }
   })
 
   // For the guard on the panel's key letters (key-guard.ts): when the overlay appeared, and when
@@ -122,7 +132,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   const arrivals = useRef(trackArrivals())
   useEffect(() => {
     const next = arrivals.current({
-      sessions: rows,
+      sessions: allRows,
       decisions,
       selectedId: selectedRowView?.sessionId,
       lastTypedAt: keyHistory.current.lastTypedAt,
@@ -141,6 +151,8 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         const armedAt = armUntil(Date.now())
         keyHistory.current.shownArmedAt = armedAt
         rerenderOnShow(armedAt)
+        // The search starts closed on every show.
+        setQuery(undefined)
         setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current, preferred))
       }),
     [],
@@ -190,22 +202,51 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
     selectedRow.current?.scrollIntoView({ block: 'nearest' })
   }, [selected])
 
+  /** Typing in the search: the list shows the matches, and the first match is selected. */
+  function onQuery(next: string): void {
+    setQuery(next)
+    const first = filterRows(latest.current.rows, next)[0]
+    if (next.trim() !== '' && first !== undefined) setSelectedId(first.sessionId)
+  }
+
+  /** Opens the search; when it is open already, puts the focus back into its field. */
+  function openSearch(): void {
+    if (query === undefined) setQuery('')
+    else searchField.current?.focus()
+  }
+
   // No dependency list: the row list is a new array on every render, so the handler would be
   // replaced on every render anyway, and this way it surely sees the freshest rows.
   useEffect(() => {
     function onKey(event: KeyboardEvent): void {
-      // In a text field the typing belongs to the field: neither the arrows nor Enter nor Esc
-      // control the list.
-      if (isTypingTarget(event.target)) return
+      const inSearch = searchField.current !== null && event.target === searchField.current
+      // Ctrl+K opens the search, also from the search field itself (the focus stays there), but not
+      // from another text field, whose keys are its own.
+      if (isSearchChord(event)) {
+        if (isTypingTarget(event.target) && !inSearch) return
+        event.preventDefault()
+        openSearch()
+        return
+      }
+      // In another text field the typing belongs to the field: neither the arrows nor Enter nor
+      // Esc control the list. In the search field only the arrows, Enter and Esc do; the rest is
+      // the query (the panel's key letters skip a text field too, `isTypingTarget`).
+      if (isTypingTarget(event.target) && !inSearch) return
+      if (inSearch && !SEARCH_FIELD_KEYS.has(event.key)) return
       // On a focused button or <summary>, Enter belongs to the element (presses or opens it), not a jump.
       if (event.key === 'Enter' && isActivationTarget(event.target)) return
-      if (event.key === 'Escape') void window.claudeswitcher.hide()
+      if (event.key === 'Escape') {
+        // The first Esc closes the search, with the full list back and the selection kept.
+        if (query === undefined) void window.claudeswitcher.hide()
+        else setQuery(undefined)
+      }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         // Without this the arrow would also scroll the list besides moving the selection.
         event.preventDefault()
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
-      // With the decision panel open, Tab moves between the buttons there, not a jump.
+      // With the decision panel open, Tab moves between the buttons there, not a jump. In the
+      // search, Enter opens the selected match; without a match there is nothing to open.
       if (event.key === 'Enter' || (event.key === 'Tab' && panel === undefined)) {
         event.preventDefault()
         const id = ids[resolveSelectedIndex(ids, selectedId)]
@@ -220,12 +261,30 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
 
   return (
     <div className="overlay">
+      {query !== undefined && (
+        <div className="search">
+          {/* Its arrows, Enter and Esc are handled by App's window handler (`onKey`), as the list's. */}
+          <input
+            ref={searchField}
+            className="search-field"
+            type="text"
+            value={query}
+            placeholder="Session keresése…"
+            aria-label="Session keresése név vagy mappa szerint"
+            spellCheck={false}
+            autoFocus
+            onChange={(event) => {
+              onQuery(event.target.value)
+            }}
+          />
+        </div>
+      )}
       <ul className="sessions">
         {rows.length === 0 && (
-          // "No session" and "the daemon cannot be reached" are not the same: the user has to see
-          // which one it is.
+          // "No session", "the daemon cannot be reached" and "the search finds none" are not the
+          // same: the user has to see which one it is.
           <li className="empty">
-            {connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
+            {allRows.length > 0 ? 'Nincs találat' : connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
           </li>
         )}
         {rows.map((row, index) => {
@@ -369,12 +428,16 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         )}
         <span className="status-checks">
           {/*
-            The account's usage limit while one runs (`usageLimitStatusText`), the app's version,
-            then the time of the heartbeat. The heartbeat is the only sign that
+            The hint of the search's key (`SEARCH_CHORD_LABEL`), the account's usage limit while
+            one runs (`usageLimitStatusText`), the app's version, then the time of the heartbeat.
+            The heartbeat is the only sign that
             the list is ALIVE and just has no change. The daemon does not resend an identical
             snapshot, so on an idle machine a still list and a stopped poll would otherwise look
             exactly the same.
           */}
+          <span className="muted" title="Session keresése">
+            {SEARCH_CHORD_LABEL}: keresés
+          </span>
           {limitNote !== undefined && (
             <span className="status-limit" title="Egy munkamenet elérte a használati limitet">
               {limitNote}
