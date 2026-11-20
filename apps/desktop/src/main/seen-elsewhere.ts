@@ -113,20 +113,15 @@ export function watchesSeen(sessions: readonly SeenSession[], seen: SeenFinishes
 }
 
 /**
- * The session whose tab the foreground window shows now, if its finish is unseen, else `undefined`.
+ * The session whose tab the foreground window shows now, whatever its state, or `undefined` when
+ * no single session's does.
  *
  * The candidates are the extension sessions of the foreground window's process (`windowPid`; every
  * VS Code window belongs to one process, measured, so the pid only says "this VS Code") whose tab
- * title the window title shows (`showsTabTitle`), whatever their state: a working or seen session
- * with the same title competes too, so the user looking at it does not acknowledge another one.
- * With several, only those whose workspace folder's base name the title also shows as a whole
- * piece stay (`${rootName}`). The match needs exactly one, and that one's finish unseen.
+ * title the window title shows (`showsTabTitle`). With several, only those whose workspace folder's
+ * base name the title also shows as a whole piece stay (`${rootName}`). The match needs exactly one.
  */
-export function sessionInFront(
-  foreground: ForegroundTitle,
-  sessions: readonly SeenSession[],
-  seen: SeenFinishes,
-): SeenSession | undefined {
+function sessionShownIn(foreground: ForegroundTitle, sessions: readonly SeenSession[]): SeenSession | undefined {
   let candidates = sessions.filter((s) => {
     const tabTitle = tabTitleIn(s)
     return tabTitle !== undefined && s.windowPid === foreground.pid && showsTabTitle(foreground.title, tabTitle)
@@ -138,7 +133,34 @@ export function sessionInFront(
     })
   }
   const [only] = candidates
-  return candidates.length === 1 && only !== undefined && finishState(only, seen, sessions) === 'unseen' ? only : undefined
+  return candidates.length === 1 ? only : undefined
+}
+
+/**
+ * The session whose tab the foreground window shows now (`sessionShownIn`), if its finish is
+ * unseen, else `undefined`. A working or seen session with the same title competes too, so the user
+ * looking at it does not acknowledge another one.
+ */
+export function sessionInFront(
+  foreground: ForegroundTitle,
+  sessions: readonly SeenSession[],
+  seen: SeenFinishes,
+): SeenSession | undefined {
+  const shown = sessionShownIn(foreground, sessions)
+  return shown !== undefined && finishState(shown, seen, sessions) === 'unseen' ? shown : undefined
+}
+
+/**
+ * Whether the foreground window shows the tab of the session `sessionId` (`sessionShownIn`). The
+ * jump asks it before sending the tab focus URI (`main/index.ts` `openTabFocusUri`), and the watch
+ * asks it to end its hold (`createSeenWatch`).
+ */
+export function showsSessionTab(
+  foreground: ForegroundTitle | undefined,
+  sessions: readonly SeenSession[],
+  sessionId: string,
+): boolean {
+  return foreground !== undefined && sessionShownIn(foreground, sessions)?.sessionId === sessionId
 }
 
 export interface SeenWatchInput {
@@ -172,12 +194,6 @@ export function createSeenWatch(dwellMs: number = SEEN_DWELL_MS): {
 } {
   let current: { key: string; since: number } | undefined
   let hold: { sessionId: string; until: number } | undefined
-  /** Whether the foreground window shows the tab of the jump's session (`hold`). */
-  const showsJumpTarget = (foreground: ForegroundTitle, sessions: readonly SeenSession[], sessionId: string): boolean => {
-    const target = sessions.find((s) => s.sessionId === sessionId)
-    const tabTitle = target === undefined ? undefined : tabTitleIn(target)
-    return tabTitle !== undefined && target?.windowPid === foreground.pid && showsTabTitle(foreground.title, tabTitle)
-  }
   return {
     jumpedTo(sessionId, now) {
       hold = { sessionId, until: now + SEEN_JUMP_HOLD_MS }
@@ -185,8 +201,7 @@ export function createSeenWatch(dwellMs: number = SEEN_DWELL_MS): {
     },
     observe({ foreground, sessions, seen, now }) {
       if (hold !== undefined) {
-        const arrived = foreground !== undefined && showsJumpTarget(foreground, sessions, hold.sessionId)
-        if (arrived || now >= hold.until) {
+        if (showsSessionTab(foreground, sessions, hold.sessionId) || now >= hold.until) {
           hold = undefined
         } else {
           current = undefined
