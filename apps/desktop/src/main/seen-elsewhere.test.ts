@@ -4,6 +4,7 @@ import { CLI_ENTRYPOINT, VSCODE_ENTRYPOINT } from '../shared/entrypoint.js'
 import type { ForegroundTitle } from './focus-window.js'
 import {
   SEEN_DWELL_MS,
+  SEEN_JUMP_HOLD_MS,
   SEEN_POLL_MS,
   createSeenWatch,
   sessionInFront,
@@ -238,5 +239,41 @@ describe('createSeenWatch', () => {
     acknowledgeFinish(seen, later, [])
     expect(watch.observe({ foreground: onOne, sessions: [later, other], seen, now: 9000 })).toBeUndefined()
     expect(watch.observe({ foreground: onOne, sessions: [later, other], seen, now: 9000 + SEEN_DWELL_MS })).toBeUndefined()
+  })
+
+  it('after a jump to one session, does not count the tab that was in front before (the owner’s bug)', () => {
+    // Both finished in one window; the list jumps to `other` while `one`'s tab is still active.
+    const watch = createSeenWatch()
+    const at = (offset: number, foreground: ForegroundTitle): SeenSession | undefined =>
+      watch.observe({ foreground, sessions, seen: NONE_SEEN, now: offset })
+    watch.jumpedTo(other.sessionId, 0)
+    expect(at(0, onOne)).toBeUndefined()
+    expect(at(SEEN_DWELL_MS, onOne)).toBeUndefined()
+    expect(at(2 * SEEN_DWELL_MS, onOne)).toBeUndefined()
+    // The jump's tab came up: the hold ends, and from now on a tab kept in front counts again.
+    at(2500, onOther)
+    expect(at(3000, onOne)).toBeUndefined()
+    expect(at(3000 + SEEN_DWELL_MS, onOne)).toBe(one)
+  })
+
+  it('ends the hold after SEEN_JUMP_HOLD_MS when the jump’s tab never shows', () => {
+    const watch = createSeenWatch()
+    const at = (offset: number): SeenSession | undefined =>
+      watch.observe({ foreground: onOne, sessions, seen: NONE_SEEN, now: offset })
+    watch.jumpedTo(other.sessionId, 0)
+    expect(at(SEEN_JUMP_HOLD_MS - 1)).toBeUndefined()
+    // The hold is over; the dwell starts only now.
+    expect(at(SEEN_JUMP_HOLD_MS)).toBeUndefined()
+    expect(at(SEEN_JUMP_HOLD_MS + SEEN_DWELL_MS - 1)).toBeUndefined()
+    expect(at(SEEN_JUMP_HOLD_MS + SEEN_DWELL_MS)).toBe(one)
+  })
+
+  it('drops a dwell already running when a jump starts', () => {
+    const watch = createSeenWatch()
+    const at = (offset: number, foreground: ForegroundTitle): SeenSession | undefined =>
+      watch.observe({ foreground, sessions, seen: NONE_SEEN, now: offset })
+    at(0, onOne)
+    watch.jumpedTo(other.sessionId, SEEN_DWELL_MS - 1)
+    expect(at(SEEN_DWELL_MS, onOne)).toBeUndefined()
   })
 })

@@ -150,16 +150,49 @@ export interface SeenWatchInput {
 }
 
 /**
+ * How long after a jump from the list (`jumpedTo`) the watch accepts no match at most. The jump
+ * brings the window up first and opens the exact tab after it, so for a moment the window shows
+ * the tab that was active before, which may be another unseen finish; without the hold that tab
+ * would count as seen although the user opened a different one. The hold ends sooner once the
+ * window shows the jump's own tab. The length is a bound, not a measurement: the time between the
+ * window and the tab coming up was not measured.
+ */
+export const SEEN_JUMP_HOLD_MS = 5000
+
+/**
  * The dwell over `sessionInFront`: `observe`, called every `SEEN_POLL_MS`, returns the session to
  * acknowledge (`acknowledgeFinish`) once the same match (the same window, session and finish) has
  * held for `SEEN_DWELL_MS`, and then only once. Any other match, or none, starts the dwell again.
+ * After `jumpedTo`, nothing matches until the window shows that session's tab, for at most
+ * `SEEN_JUMP_HOLD_MS`.
  */
 export function createSeenWatch(dwellMs: number = SEEN_DWELL_MS): {
   observe(input: SeenWatchInput): SeenSession | undefined
+  jumpedTo(sessionId: string, now: number): void
 } {
   let current: { key: string; since: number } | undefined
+  let hold: { sessionId: string; until: number } | undefined
+  /** Whether the foreground window shows the tab of the jump's session (`hold`). */
+  const showsJumpTarget = (foreground: ForegroundTitle, sessions: readonly SeenSession[], sessionId: string): boolean => {
+    const target = sessions.find((s) => s.sessionId === sessionId)
+    const tabTitle = target === undefined ? undefined : tabTitleIn(target)
+    return tabTitle !== undefined && target?.windowPid === foreground.pid && showsTabTitle(foreground.title, tabTitle)
+  }
   return {
+    jumpedTo(sessionId, now) {
+      hold = { sessionId, until: now + SEEN_JUMP_HOLD_MS }
+      current = undefined
+    },
     observe({ foreground, sessions, seen, now }) {
+      if (hold !== undefined) {
+        const arrived = foreground !== undefined && showsJumpTarget(foreground, sessions, hold.sessionId)
+        if (arrived || now >= hold.until) {
+          hold = undefined
+        } else {
+          current = undefined
+          return undefined
+        }
+      }
       const match = foreground === undefined ? undefined : sessionInFront(foreground, sessions, seen)
       if (foreground === undefined || match === undefined) {
         current = undefined
