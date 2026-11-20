@@ -157,6 +157,11 @@ The dwell was 1.5 s at first, read every 0.5 s. Measured with `scripts/measure/t
 counted. It is 1 s now, read every 0.25 s (`SEEN_DWELL_MS`, `SEEN_POLL_MS`). The cost of one read,
 measured outside Electron with the same koffi bindings: 0.6 µs for the Win32 calls and 4.8 µs for
 the match over 12 sessions.
+A jump from the list brings up the window first and opens the exact tab after it; in between, the
+window shows the tab that was active there before. Reported by the owner on 2026-11-20: with two
+unseen finishes in one window, a jump to one counted the other as seen. So after a jump the watch
+accepts no match until the window shows the jumped-to tab, for at most `SEEN_JUMP_HOLD_MS` (a bound;
+the time between the window and the tab was not measured).
 
 #### Mapping to terminal windows (measured 2026-11-16, Claude Code 2.1.325)
 

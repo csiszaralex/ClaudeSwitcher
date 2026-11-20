@@ -420,6 +420,9 @@ async function startApp(): Promise<void> {
   // overlay (`OVERLAY_CHANNELS.finishesSeen`) read them. In memory only, as the daemon's `stoppedAt`
   // itself (`SessionStore`).
   const finishesSeen = new Map<string, number>()
+  // The watch that counts a finish as seen when its VS Code tab stays in front (`watchSeen` below);
+  // here, before the jump handler, which holds it while a jump brings up a tab (`jumpedTo`).
+  const seenWatch = createSeenWatch()
 
   // Every handler first checks the sender (`handleFrom`). Where the reply has a failure shape, a
   // foreign sender gets that; the other handlers throw, which is a rejected promise in the renderer.
@@ -455,6 +458,9 @@ async function startApp(): Promise<void> {
       const { sessions } = running.state()
       const view = sessions.find((s) => s.sessionId === sessionId)
       if (view === undefined) return false
+      // Before the window comes up: until it shows this session's tab, the tab active before in that
+      // window must not count as seen by the watch (`SEEN_JUMP_HOLD_MS`).
+      seenWatch.jumpedTo(view.sessionId, Date.now())
       // Focus first, hide the overlay only afterwards. Windows allows SetForegroundWindow only to
       // the process currently in the foreground: hiding the overlay would take that right away, and
       // the call would silently just flash the taskbar button. If it fails anyway, the `code` CLI
@@ -755,7 +761,6 @@ async function startApp(): Promise<void> {
   // (`watchesSeen`): the tray tick starts the timer, and the timer stops itself when nothing is left.
   // Its own timer, because the tray tick's second is too coarse for the dwell. Without the user32
   // bindings it never starts.
-  const seenWatch = createSeenWatch()
   let seenTimer: ReturnType<typeof setInterval> | undefined
   let seenWatchOff = !isFastFocusAvailable()
   const stopSeenWatch = (): void => {
