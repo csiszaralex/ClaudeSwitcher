@@ -61,7 +61,7 @@ import { createNotifier } from './notifier.js'
 import { createOverlayController } from './overlay-window.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { createQuitSequence } from './quit-sequence.js'
-import { SEEN_POLL_MS, createSeenWatch, watchesSeen } from './seen-elsewhere.js'
+import { SEEN_JUMP_HOLD_MS, SEEN_POLL_MS, createSeenWatch, showsSessionTab, watchesSeen } from './seen-elsewhere.js'
 import { createSettingsService } from './settings-service.js'
 import { parseSaveRequest, saveSetup, setupState, type SaveResult } from './setup-ipc.js'
 import { createSetupWindowController } from './setup-window.js'
@@ -145,17 +145,49 @@ const LOGIN_ITEMS: LoginItems = {
  */
 const handleFrom = createHandleFrom(ipcMain)
 
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
 /**
- * Sends the tab focus URI to VSCode after waiting `TAB_FOCUS_SETTLE_MS`. Never throws: a failed
- * open is only logged, and the window is in front anyway, as it was before the tab focus existed.
+ * Sends the tab focus URI to VSCode after waiting `TAB_FOCUS_SETTLE_MS`, unless `skipReason`, read
+ * after the wait, names a reason not to (the tab is in front already, or the user opened the
+ * overlay again). VS Code takes the focus when it handles the URI, which hides an overlay opened in
+ * the meantime, so the URI goes only when it changes something. Never throws: a failed open is only
+ * logged, and the window is in front anyway, as it was before the tab focus existed.
  */
-async function openTabFocusUri(uri: string): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, TAB_FOCUS_SETTLE_MS))
+async function openTabFocusUri(uri: string, skipReason: () => string | undefined): Promise<void> {
+  await wait(TAB_FOCUS_SETTLE_MS)
+  const skip = skipReason()
+  if (skip !== undefined) {
+    console.log(`[focus] tab focus URI not sent: ${skip}`)
+    return
+  }
   try {
     await shell.openExternal(uri)
   } catch (error) {
     console.error('[focus] could not open the tab focus URI; the window stays focused', error)
   }
+}
+
+/** How often `logTabArrival` reads the foreground window, for at most `SEEN_JUMP_HOLD_MS` after a jump. */
+const TAB_ARRIVAL_POLL_MS = 50
+
+/**
+ * Logs how long after a jump (`jumpedAt`) the foreground window showed the session's tab (`shows`),
+ * or that it did not within `SEEN_JUMP_HOLD_MS`. Only a measurement: the time from the jump to the
+ * tab is not known (`docs/design.md`), and it bounds both the hold of the seen watch and how soon
+ * the overlay can be opened again without VS Code taking the focus.
+ */
+async function logTabArrival(sessionId: string, jumpedAt: number, shows: () => boolean): Promise<void> {
+  for (;;) {
+    const elapsed = Date.now() - jumpedAt
+    if (shows()) {
+      console.log(`[focus] the tab of session ${sessionId} was in front ${String(elapsed)} ms after the jump`)
+      return
+    }
+    if (elapsed >= SEEN_JUMP_HOLD_MS) break
+    await wait(TAB_ARRIVAL_POLL_MS)
+  }
+  console.log(`[focus] the tab of session ${sessionId} was not in front within ${String(SEEN_JUMP_HOLD_MS)} ms of the jump`)
 }
 
 /** Opens the log file with the default application; the file is created first, so there is always something to open. */
@@ -460,7 +492,8 @@ async function startApp(): Promise<void> {
       if (view === undefined) return false
       // Before the window comes up: until it shows this session's tab, the tab active before in that
       // window must not count as seen by the watch (`SEEN_JUMP_HOLD_MS`).
-      seenWatch.jumpedTo(view.sessionId, Date.now())
+      const jumpedAt = Date.now()
+      seenWatch.jumpedTo(view.sessionId, jumpedAt)
       // Focus first, hide the overlay only afterwards. Windows allows SetForegroundWindow only to
       // the process currently in the foreground: hiding the overlay would take that right away, and
       // the call would silently just flash the taskbar button. If it fails anyway, the `code` CLI
@@ -478,7 +511,15 @@ async function startApp(): Promise<void> {
       // The decisions are read AFTER the focus: a file-write request may have arrived during the
       // wait. Not awaited: the renderer gets the result of the window focus, as before.
       const uri = tabFocusUri(view, outcome, settings.snapshot().values.jumpToTab, running.state().decisions)
-      if (uri !== undefined) void openTabFocusUri(uri)
+      if (uri !== undefined) {
+        const showsTab = (): boolean => showsSessionTab(readForegroundTitle(), running.state().sessions, view.sessionId)
+        void openTabFocusUri(uri, () => {
+          if (overlay.isVisible()) return 'the overlay is open again'
+          if (showsTab()) return 'the tab is in front already'
+          return undefined
+        })
+        if (view.activity.tabTitle !== undefined) void logTabArrival(view.sessionId, jumpedAt, showsTab)
+      }
       return outcome !== 'failed'
     },
     () => false,

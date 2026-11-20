@@ -788,6 +788,16 @@ CLI runs without `-r`, and for a session known not to be `claude-vscode` it does
 Claude-tabra" tray checkbox on. If any condition is missing, the behaviour is the monitor
 milestone's: the window only.
 
+When VS Code handles the URI, its window takes the focus. Reported by the owner on 2026-11-20: after
+a jump to a tab that was in front already, they opened the overlay again, and it closed by itself a
+moment later. So after the wait the app reads the foreground window once more, and sends the URI
+only if it changes something: not when the window shows the session's tab already (the match of
+the seen watch, `seen-elsewhere.ts` `showsSessionTab`, so only where the user's `window.title` shows
+the active editor), and not when the overlay is open again. An overlay opened while a sent URI is
+still on its way still closes. How long VS Code takes is not measured yet: the app logs, after every
+jump to a tab, how many ms passed until the window showed it (`[focus] the tab of session …`, for at
+most `SEEN_JUMP_HOLD_MS`), which also bounds the hold of the seen watch.
+
 There is **no** decision surface in the VS Code window (decision of 2026-10-20): the native prompt
 is visible there anyway, and a second surface would only be a duplicate and a source of errors.
 

@@ -8,6 +8,7 @@ import {
   SEEN_POLL_MS,
   createSeenWatch,
   sessionInFront,
+  showsSessionTab,
   showsTabTitle,
   showsWhole,
   watchesSeen,
@@ -157,6 +158,24 @@ describe('sessionInFront', () => {
     const elsewhere = { ...working, workspaceFolder: 'p:\\proj\\beta' }
     expect(sessionInFront(window(custom('alpha', 'Fix the tests')), [unseen, elsewhere], NONE_SEEN)).toBe(unseen)
     expect(sessionInFront(window(custom('beta', 'Fix the tests')), [unseen, elsewhere], NONE_SEEN)).toBeUndefined()
+  })
+})
+
+describe('showsSessionTab', () => {
+  const one = session('1', 'CRM master')
+  const other = session('2', 'Parser munka')
+
+  it('tells whether the foreground window shows that session’s tab, whatever its state', () => {
+    const working = { ...one, status: 'working' as const, stoppedAt: undefined }
+    expect(showsSessionTab(window(custom('alpha', 'CRM master')), [working, other], one.sessionId)).toBe(true)
+    expect(showsSessionTab(window(custom('alpha', 'Parser munka')), [working, other], one.sessionId)).toBe(false)
+  })
+
+  it('says no without a foreground window, in another process, or when two sessions show the same title', () => {
+    expect(showsSessionTab(undefined, [one], one.sessionId)).toBe(false)
+    expect(showsSessionTab(window(custom('alpha', 'CRM master'), { pid: OTHER_PID }), [one], one.sessionId)).toBe(false)
+    const twin = session('3', 'CRM master')
+    expect(showsSessionTab(window(custom('alpha', 'CRM master')), [one, twin], one.sessionId)).toBe(false)
   })
 })
 
