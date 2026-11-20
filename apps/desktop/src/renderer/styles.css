@@ -117,6 +117,11 @@ body {
 .peek-state { flex: none; color: var(--text-dim); }
 .peek-folder { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); }
 .peek-history { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 14px 10px; }
+/* The bar under the history while the peeked session waits on a decision (`peekRequest`): one line, its text cut. */
+.peek-request { flex: none; display: flex; gap: 8px; align-items: baseline; padding: 6px 14px; border-top: 1px solid var(--raised); background: var(--panel); }
+.peek-request-label { flex: none; color: var(--accent); font-weight: 600; }
+.peek-request-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peek-request-hint { flex: none; margin-left: auto; color: var(--text-dim); }
 .peek-entry { margin: 8px 0; }
 /* The user's own prompts stand out from the answers, as a quote. */
 .peek-prompt { padding: 4px 10px; border-left: 2px solid var(--accent); border-radius: 0 4px 4px 0; background: var(--panel); }

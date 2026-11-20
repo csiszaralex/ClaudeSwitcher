@@ -5,6 +5,7 @@ import {
   isAtBottom,
   isPeekKey,
   peekNotice,
+  peekRequest,
   peekScrollTop,
   readConversationReply,
   senderLabel,
@@ -140,5 +141,33 @@ describe('the history scroll', () => {
     expect(isAtBottom({ ...box, scrollTop: 1597 })).toBe(true)
     expect(isAtBottom({ ...box, scrollTop: 1500 })).toBe(false)
     expect(isAtBottom({ scrollTop: 0, clientHeight: 400, scrollHeight: 300 })).toBe(true)
+  })
+})
+
+describe('peekRequest', () => {
+  const request = (summary: string, released = false): { toolName: string; summary: string; released: boolean } => ({
+    toolName: 'Bash',
+    summary,
+    released,
+  })
+
+  it('shows nothing while the session waits on no decision', () => {
+    expect(peekRequest([])).toBeUndefined()
+  })
+
+  it('describes the request the panel would show, in the row’s words', () => {
+    expect(peekRequest([request('pnpm verify')])).toEqual({ text: 'Bash: pnpm verify', badge: undefined, hint: PEEK_TEXT.decideHere })
+  })
+
+  it('skips a released request for the one behind it, and counts the ones the app can decide', () => {
+    expect(peekRequest([request('git status', true), request('pnpm verify'), request('pnpm build')])).toEqual({
+      text: 'Bash: pnpm verify',
+      badge: '2 vár',
+      hint: PEEK_TEXT.decideHere,
+    })
+  })
+
+  it('sends the user to VS Code when only released requests are left', () => {
+    expect(peekRequest([request('git status', true)])?.hint).toBe(PEEK_TEXT.decideInVSCode)
   })
 })

@@ -1,6 +1,8 @@
 import type { ConversationEntry, PromptSender } from '@claudeswitcher/core'
 import { isRecord } from '@claudeswitcher/core/browser'
 import type { ConversationReply } from '../shared/overlay-channels.js'
+import { pendingRowText } from '../shared/row-text.js'
+import { activeDecision, pendingBadge } from './rows.js'
 
 /**
  * The peek (Space on a row): the selected session's recent conversation, read only, in place of the
@@ -20,7 +22,40 @@ export const PEEK_TEXT = {
   keys: 'Vissza: Szóköz vagy Esc · Ugrás: Enter',
   /** The sender of an incoming message whose name nobody knows. */
   unknownSender: 'Egy másik session',
+  /** The label of the bar at the bottom while the peeked session waits on a decision (`peekRequest`). */
+  request: 'Döntésre vár:',
+  /** How to decide it: Space goes back to the list, where its decision panel shows. */
+  decideHere: 'Döntés: Szóköz',
+  /** A released request (`PERMISSION_RELEASE_AFTER_MS`): only VS Code can decide it now. */
+  decideInVSCode: 'Döntés: VS Code-ban',
 } as const
+
+/** The bar at the bottom of the peek (`peekRequest`). */
+export interface PeekRequest {
+  /** The request as the row shows it (`pendingRowText`). */
+  text: string
+  /** The row's "N vár" badge (`pendingBadge`), when more than one request can be decided in the app. */
+  badge: string | undefined
+  /** How to decide it (`PEEK_TEXT.decideHere`, `PEEK_TEXT.decideInVSCode`). */
+  hint: string
+}
+
+/**
+ * The bar at the bottom of the peek while the peeked session waits on a decision: the request the
+ * panel would show (`activeDecision`), in the row's words. Only a description: the peek decides
+ * nothing (its letter keys rest, App's `onKey`), so a key pressed while reading cannot approve.
+ */
+export function peekRequest(
+  decisions: readonly { toolName: string; summary: string; released: boolean }[],
+): PeekRequest | undefined {
+  const pending = activeDecision(decisions)
+  if (pending === undefined) return undefined
+  return {
+    text: pendingRowText(pending),
+    badge: pendingBadge(decisions),
+    hint: pending.released ? PEEK_TEXT.decideInVSCode : PEEK_TEXT.decideHere,
+  }
+}
 
 /** The key that opens and closes the peek: a plain Space, not held down. */
 export function isPeekKey(event: { key: string; repeat: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean; shiftKey: boolean }): boolean {

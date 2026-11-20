@@ -15,7 +15,7 @@ import {
   waitsOnText,
 } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
-import { isPeekKey, PEEK_TEXT, peekScrollTop } from './peek.js'
+import { isPeekKey, PEEK_TEXT, peekRequest, peekScrollTop } from './peek.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
@@ -346,6 +346,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
             folder={rowFolder(peekRow)}
             sessions={sessions}
             scrollRef={peekHistory}
+            request={peekRequest(peekRow.decisions)}
           />
         </ErrorBoundary>
       ) : (

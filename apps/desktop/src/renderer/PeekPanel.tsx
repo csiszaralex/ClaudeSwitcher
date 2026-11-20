@@ -13,6 +13,7 @@ import {
   senderLabel,
   textPieces,
   toolLine,
+  type PeekRequest,
 } from './peek.js'
 import type { StatusMarker } from './session-marker.js'
 
@@ -82,6 +83,8 @@ interface Props {
   sessions: readonly LinkedSession[]
   /** The history's scroll box: App's key handler scrolls it (`peek.ts` `peekScrollTop`). */
   scrollRef: RefObject<HTMLDivElement | null>
+  /** The session's pending request (`peek.ts` `peekRequest`), shown in a bar at the bottom; `undefined` when none waits. */
+  request: PeekRequest | undefined
 }
 
 /**
@@ -89,7 +92,7 @@ interface Props {
  * process every `PEEK_REFRESH_MS` and redraws only when the transcript changed (the reply's
  * `version`); it stays at the bottom only if the user was at the bottom.
  */
-export function PeekPanel({ sessionId, name, marker, folder, sessions, scrollRef }: Props): JSX.Element {
+export function PeekPanel({ sessionId, name, marker, folder, sessions, scrollRef, request }: Props): JSX.Element {
   const [reply, setReply] = useState<ConversationReply | undefined>()
   // Whether the next drawing scrolls to the bottom: on the first one, and when the user was there.
   const stick = useRef(true)
@@ -157,6 +160,17 @@ export function PeekPanel({ sessionId, name, marker, folder, sessions, scrollRef
           reply?.ok === true && reply.entries.map((entry, index) => <Entry key={index} entry={entry} name={messageName} />)
         )}
       </div>
+      {request !== undefined && (
+        // Only a description, below the history so it hides none of it; the decision is on the list.
+        <footer className="peek-request" role="status">
+          <span className="peek-request-label">{PEEK_TEXT.request}</span>
+          <span className="peek-request-text" title={request.text}>
+            {request.text}
+          </span>
+          {request.badge !== undefined && <span className="pending-count">{request.badge}</span>}
+          <span className="peek-request-hint">{request.hint}</span>
+        </footer>
+      )}
     </section>
   )
 }
