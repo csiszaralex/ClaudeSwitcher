@@ -863,7 +863,7 @@ process, which runs the daemon in process, used about 7.5% of one core all the t
   (`tray.ts` `setState`).
 
 About 2.3 s per minute were left unexplained, and the rest of the main process cannot be measured
-outside the running app.
+outside the running app: that is what the `[perf]` line (below) is for.
 
 **The transcript cache** (`transcript-cache.ts` `createTranscriptCache`, one per daemon). Per
 session it remembers the transcript's path, its size and last write (`mtimeMs`) and the activity
@@ -893,6 +893,26 @@ wall, so about 1.9 s down to 0.8 s CPU per minute. Nearly all that is left is th
 the same cached rounds without it took 1 ms. The CPU is above the wall time because
 `process.cpuUsage` counts every thread, the `stat` calls of the thread pool and the garbage
 collector's included.
+
+**The `[perf]` line** (`main/perf-log.ts`, a first piece of issue #11's counters). Every
+`PERF_LOG_INTERVAL_MS` (10 min) the main process logs one line of `key=value` fields
+(`formatPerfLine`) about the period since the last one:
+
+- `period`: its length. `cpu`, `user`, `system`: the process's CPU time (`process.cpuUsage`, every
+  thread of the main process, not the renderer's or the GPU's). `core`: `cpu` as a share of one
+  core. `loop`: the share of the time the main thread's event loop was busy
+  (`performance.eventLoopUtilization`); `cpu` well above `loop` means work off the main thread
+  (the thread pool's file system calls, the garbage collector).
+- Per periodic job `<name>=<runs>/<ms>ms`, the runs and their summed time (`performance.now()`):
+  `scan`, the daemon's `refresh` that scanned, its wall time (asynchronous, so it includes waiting
+  and other work in between); `broadcast`, the daemon's state broadcast (building the state,
+  `JSON.stringify`, the comparison with the last message and the send), counted also when the
+  message is the same as the last one and not sent, with the average message length in UTF-16 code
+  units (`/<chars>ch`); `tray`, the tray tick (`index.ts` `syncTray`) without its notifier part;
+  `notifier`, that part (`notifier.observe` and the toasts it shows); `seen`, the seen watch's poll
+  (`watchSeen`). The daemon reports its two through `startDaemon`'s `onTimed` option.
+
+The timing adds two `performance.now()` calls and a few additions per run.
 
 ## 8. Error handling
 
