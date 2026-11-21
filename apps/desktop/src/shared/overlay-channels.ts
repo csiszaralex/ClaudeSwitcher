@@ -21,6 +21,17 @@ export const OVERLAY_CHANNELS = {
    * redraws at once.
    */
   clearFinish: 'session:clear-finish',
+  /**
+   * The sessions the user moved out of the list (main `excluded-sessions.ts`), as an array of
+   * session ids; the renderer reads it with a check (`readExcludedSessions`).
+   */
+  excludedSessions: 'session:excluded',
+  /**
+   * Moves a session out of the list or brings it back (Delete on its row). The arguments are the
+   * session id and `true` to exclude, `false` to bring back; the direction is explicit, so a key
+   * pressed twice before the reply does the same thing twice. Answers like `excludedSessions`.
+   */
+  setExcluded: 'session:set-excluded',
   decide: 'decision:decide',
   focusSession: 'session:focus',
   /**

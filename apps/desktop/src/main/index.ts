@@ -22,7 +22,8 @@ import {
 import { APP_USER_MODEL_ID } from './app-id.js'
 import { createAutostart, type LoginItems } from './autostart.js'
 import { createConversationReader } from './conversation-reader.js'
-import { loadConfig, saveSettings, saveSkippedVersion } from './config.js'
+import { createExcludedSessions } from './excluded-sessions.js'
+import { loadConfig, saveExcludedSessions, saveSettings, saveSkippedVersion } from './config.js'
 import { createFocusReturn } from './focus-return.js'
 import {
   TAB_FOCUS_SETTLE_MS,
@@ -457,6 +458,14 @@ async function startApp(): Promise<void> {
   // The watch that counts a finish as seen when its VS Code tab stays in front (`watchSeen` below);
   // here, before the jump handler, which holds it while a jump brings up a tab (`jumpedTo`).
   const seenWatch = createSeenWatch()
+  // The sessions the user moved out of the list (Delete), kept in `config.json`. A failed write is
+  // logged there (`saveExcludedSessions`); the list then holds until the app quits.
+  const excludedSessions = createExcludedSessions({
+    initial: stored.excludedSessions,
+    persist: (ids) => {
+      void saveExcludedSessions(userData, ids)
+    },
+  })
   // Whether a jump is bringing up a window now (`OVERLAY_CHANNELS.focusSession`): one at a time.
   let jumpInFlight = false
 
@@ -482,6 +491,18 @@ async function startApp(): Promise<void> {
       if (view !== undefined) clearFinish(finishesSeen, view, sessions)
     }
     return seenFinishesReply(finishesSeen)
+  })
+  handleFrom(RENDERER, OVERLAY_CHANNELS.excludedSessions, () => excludedSessions.ids())
+  handleFrom(RENDERER, OVERLAY_CHANNELS.setExcluded, (sessionId: unknown, exclude: unknown) => {
+    // IPC input: the renderer may send anything, hence `unknown`, checked here. Only a session the
+    // daemon lists now can be excluded (`exclude`), and both directions are idempotent, so a key
+    // pressed twice, or a session that ended since the key, does no harm. The tray and the toasts
+    // follow on the next tick.
+    if (typeof sessionId === 'string' && typeof exclude === 'boolean') {
+      if (exclude) excludedSessions.exclude(sessionId, running.state().sessions)
+      else excludedSessions.include(sessionId)
+    }
+    return excludedSessions.ids()
   })
   handleFrom(
     RENDERER,
@@ -865,7 +886,12 @@ async function startApp(): Promise<void> {
 
   const syncTray = (): void => {
     const state = running.state()
-    tray.setState(trayState({ ...state, acknowledged: finishesSeen, now: Date.now() }))
+    const now = Date.now()
+    // Drops the ids of the excluded sessions that are gone (`EXCLUDED_GONE_AFTER_MS`). The overlay
+    // reads the list again on its next `shown`; a gone session has no row meanwhile anyway.
+    excludedSessions.observe(state.sessions, now)
+    const excluded = excludedSessions.set()
+    tray.setState(trayState({ ...state, acknowledged: finishesSeen, excluded, now }))
     if (seenTimer === undefined && !seenWatchOff && watchesSeen(state.sessions, finishesSeen)) {
       seenTimer = setInterval(watchSeen, SEEN_POLL_MS)
       seenTimer.unref()
@@ -877,6 +903,7 @@ async function startApp(): Promise<void> {
         state,
         settings: { notifyOnRequest, notifyOnFinish },
         overlayVisible: overlay.isVisible(),
+        excluded,
       })) {
         showToast(notice)
       }

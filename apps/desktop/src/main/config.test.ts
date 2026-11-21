@@ -3,7 +3,7 @@ import path from 'node:path'
 import { tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_HOTKEY, settingsToAsk } from '../shared/settings.js'
-import { configPath, loadConfig, saveSettings, saveSkippedVersion } from './config.js'
+import { configPath, loadConfig, saveExcludedSessions, saveSettings, saveSkippedVersion } from './config.js'
 
 const freshDir = (): Promise<string> => tempDir('cs-config-')
 
@@ -216,6 +216,71 @@ describe('skipped update version', () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), '{ broken')
     expect(await saveSkippedVersion(dir, '0.2.0')).toBe(false)
+    expect(await readFile(configPath(dir), 'utf8')).toBe('{ broken')
+  })
+})
+
+describe('excluded sessions', () => {
+  // Invented session ids in the registry's UUID shape.
+  const ALPHA = '6f1c2a3e-0000-4000-8000-000000000051'
+  const BETA = '6f1c2a3e-0000-4000-8000-000000000052'
+
+  it('an older config without the key excludes nothing, and loads without a rewrite', async () => {
+    const dir = await freshDir()
+    const older = JSON.stringify({ hotkey: 'F9' })
+    await writeFile(configPath(dir), older)
+    expect((await loadConfig(dir)).excludedSessions).toEqual([])
+    expect(await readFile(configPath(dir), 'utf8')).toBe(older)
+  })
+
+  it('a missing file excludes nothing', async () => {
+    expect((await loadConfig(await freshDir())).excludedSessions).toEqual([])
+  })
+
+  it('keeps the non-empty strings of an array, each once, and drops anything else', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [ALPHA, 42, '', null, BETA, ALPHA, { id: BETA }] }))
+    expect((await loadConfig(dir)).excludedSessions).toEqual([ALPHA, BETA])
+    for (const bad of [ALPHA, 42, null, { 0: ALPHA }, true]) {
+      await writeFile(configPath(dir), JSON.stringify({ excludedSessions: bad }))
+      expect((await loadConfig(dir)).excludedSessions).toEqual([])
+    }
+  })
+
+  it('is not a setting: it is never confirmed and does not change the values', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [ALPHA], confirmed: ['excludedSessions'] }))
+    const config = await loadConfig(dir)
+    expect(config.values).toEqual(DEFAULTS)
+    expect(config.confirmed.size).toBe(0)
+  })
+
+  it('saveExcludedSessions changes only that key, and a later settings save keeps it', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', note: 'kézzel', skippedVersion: '0.2.0' }))
+    expect(await saveExcludedSessions(dir, [ALPHA, BETA])).toBe(true)
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual({
+      hotkey: 'F9',
+      note: 'kézzel',
+      skippedVersion: '0.2.0',
+      excludedSessions: [ALPHA, BETA],
+    })
+
+    // The setup window's save goes through `saveSettings`.
+    expect(await saveSettings(dir, { jumpToTab: false }, ['jumpToTab'])).toBe(true)
+    expect((await loadConfig(dir)).excludedSessions).toEqual([ALPHA, BETA])
+  })
+
+  it('keeps the list of the last of two saves started without waiting', async () => {
+    const dir = await freshDir()
+    await Promise.all([saveExcludedSessions(dir, [ALPHA, BETA]), saveExcludedSessions(dir, [BETA])])
+    expect((await loadConfig(dir)).excludedSessions).toEqual([BETA])
+  })
+
+  it('saveExcludedSessions never writes into a broken file and never throws', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), '{ broken')
+    expect(await saveExcludedSessions(dir, [ALPHA])).toBe(false)
     expect(await readFile(configPath(dir), 'utf8')).toBe('{ broken')
   })
 })

@@ -769,6 +769,23 @@ compares the hooks in `settings.json` with `HOOK_CONTRACT` (`claude-integration.
 it also warns when `env.CLAUDESWITCHER_TOKEN` is not the daemon's token, since every hook would
 then get a 401; the notice names the reason.)
 
+**Excluded sessions** (issue #62). Delete moves a session into a collapsed group at the bottom of
+the list; the ids are stored in `config.json`. Two decisions:
+
+- *A wait is never hidden.* A session with a pending request, or with a wait the app holds no
+  request for (`status` `waiting`), stays in the list with a `kizárt` tag while it waits, and the
+  tray and the request toast count it as any session's (`renderer/list-cleanup.ts`
+  `inExcludedGroup`). Excluding hides only what is noise: the finish in the tray, the finish toast
+  and the search. Otherwise an excluded session could block on a permission prompt nobody sees.
+- *An id is dropped only from a complete enough picture.* The daemon's state lists only live
+  sessions and does not say whether its picture is complete: it is empty before the first successful
+  scan and while the process probe has no snapshot yet (every session counts as dead then), and a scan
+  drops a session whose registry file it cannot read at that moment. So an id is dropped only
+  after its session has been missing for `EXCLUDED_GONE_AFTER_MS` (10 min) without a break, and an
+  empty list counts as no picture and restarts every count (`main/excluded-sessions.ts`
+  `createExcludedSessions`). A wrong drop only brings a session back into the list; a stale id
+  could hide a later session that reuses the id.
+
 ### Tab focus (tab focus milestone): without an extension of our own
 
 The Claude Code extension's URI handler (2.1.304, read from its code):

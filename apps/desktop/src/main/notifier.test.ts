@@ -28,6 +28,7 @@ const tick = (next: NotifierState, rest: Partial<Omit<NotifierInput, 'state'>> =
   state: next,
   settings: BOTH,
   overlayVisible: false,
+  excluded: new Set(),
   ...rest,
 })
 
@@ -93,6 +94,27 @@ describe('createNotifier: permission requests', () => {
     const pending = state([session('a')], [decision('d1', 'a')])
     expect(notifier.observe(tick(pending, { settings: { notifyOnRequest: false, notifyOnFinish: true } }))).toEqual([])
     expect(notifier.observe(tick(pending))).toEqual([])
+  })
+})
+
+describe('createNotifier: excluded sessions', () => {
+  it('shows no finish toast for an excluded session, and none later when it is brought back', () => {
+    const notifier = createNotifier()
+    const excluded = new Set(['a'])
+    notifier.observe(tick(state([session('a')]), { excluded }))
+    const stopped = state([session('a', { stoppedAt: 1000 })])
+    expect(notifier.observe(tick(stopped, { excluded }))).toEqual([])
+    expect(notifier.observe(tick(stopped))).toEqual([])
+    expect(notifier.observe(tick(state([session('a', { stoppedAt: 2000 })])))).toHaveLength(1)
+  })
+
+  it('still shows the request toast of an excluded session', () => {
+    const notifier = createNotifier()
+    const excluded = new Set(['a'])
+    notifier.observe(tick(state([session('a')]), { excluded }))
+    expect(notifier.observe(tick(state([session('a')], [decision('d1', 'a')]), { excluded })).map((n) => n.kind)).toEqual([
+      'request',
+    ])
   })
 })
 

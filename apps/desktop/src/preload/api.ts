@@ -23,6 +23,10 @@ export interface ClaudeSwitcherApi {
   finishesSeen: () => Promise<unknown>
   /** Clears the ✓ of the session's finish; answers like `finishesSeen`. */
   clearFinish: (sessionId: string) => Promise<unknown>
+  /** The ids of the sessions moved out of the list; the renderer reads them with `readExcludedSessions`. */
+  excludedSessions: () => Promise<unknown>
+  /** Moves the session out of the list (`true`) or brings it back (`false`); answers like `excludedSessions`. */
+  setExcluded: (sessionId: string, excluded: boolean) => Promise<unknown>
   focusSession: (sessionId: string) => Promise<boolean>
   /**
    * The session's recent conversation; the main process gives a `ConversationReply`, the renderer

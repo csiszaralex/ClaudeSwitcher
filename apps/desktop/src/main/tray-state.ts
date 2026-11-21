@@ -36,6 +36,11 @@ export interface TrayInput {
   decisions: readonly TrayDecision[]
   /** The finishes the user has seen (`shared/session-finished.ts` `acknowledgeFinish`). */
   acknowledged: SeenFinishes
+  /**
+   * The sessions the user moved out of the list (`main/excluded-sessions.ts`): their finishes do not
+   * count. Their requests and waits do, as any session's.
+   */
+  excluded: ReadonlySet<string>
   /** The current time (ms, `Date.now()`), for the age of the held requests. */
   now: number
 }
@@ -61,7 +66,8 @@ export interface TrayState {
   wait: TrayWait
   /**
    * The sessions whose finish the user has not seen yet (`finishState` `unseen`): the list's green ✓
-   * rows, and its usage limit rows not opened since (the exception in `finishState`).
+   * rows, and its usage limit rows not opened since (the exception in `finishState`). Not an
+   * excluded session's (`TrayInput.excluded`).
    */
   finishedCount: number
   /**
@@ -129,7 +135,8 @@ export function trayState(input: TrayInput): TrayState {
   // A session that waits on the sessions it prompted is not done: the icon shows it as working.
   const workingCount = states.filter((state) => state === 'working' || state === 'waits-on').length
   const finishedCount = input.sessions.filter(
-    (session) => finishState(session, input.acknowledged, input.sessions) === 'unseen',
+    (session) =>
+      !input.excluded.has(session.sessionId) && finishState(session, input.acknowledged, input.sessions) === 'unseen',
   ).length
   const flash = input.decisions.some(
     (decision) => !decision.released && input.now - decision.createdAt > PERMISSION_WARN_AFTER_MS,

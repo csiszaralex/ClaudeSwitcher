@@ -22,27 +22,31 @@ export function createReplyOrder(): { issue: () => number; accept: (request: num
 /**
  * A value the main process keeps and the overlay shows: `fetch` reads it when the page loads and on
  * every `shown`, and `track` takes the reply of any other request that answers with the same value
- * (a change the user made from the list), so the list redraws at once. Every reply goes through
- * `read`, because anything can come over the IPC. A failed request is only logged with `label`; the
- * value stays as it was.
+ * (a change the user made from the list), so the list redraws at once, and then calls its
+ * `onApplied` with the new value, in the same React update. Every reply goes through `read`,
+ * because anything can come over the IPC. A failed request is only logged with `label`; the value
+ * stays as it was.
  */
 export function useShownValue<T>(
   fetch: () => Promise<unknown>,
   read: (raw: unknown) => T,
   initial: T,
   label: string,
-): [T, (reply: Promise<unknown>) => void] {
+): [T, (reply: Promise<unknown>, onApplied?: (value: T) => void) => void] {
   const [value, setValue] = useState<T>(initial)
   const order = useRef(createReplyOrder())
   const closed = useRef(false)
 
   // Stable for the page's life: `fetch`, `read` and `label` are module-level functions and texts at
   // every call site, so the first ones are the only ones.
-  const track = useRef((reply: Promise<unknown>): void => {
+  const track = useRef((reply: Promise<unknown>, onApplied?: (value: T) => void): void => {
     const request = order.current.issue()
     reply
       .then((raw) => {
-        if (!closed.current && order.current.accept(request)) setValue(read(raw))
+        if (closed.current || !order.current.accept(request)) return
+        const next = read(raw)
+        setValue(next)
+        onApplied?.(next)
       })
       .catch((error: unknown) => {
         console.error(`[overlay] could not read ${label}`, error)

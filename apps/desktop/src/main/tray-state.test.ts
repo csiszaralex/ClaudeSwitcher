@@ -33,9 +33,14 @@ const released = (kind: TrayDecision['kind'], sessionId = waiting.sessionId): Tr
 })
 const working: TraySession = { sessionId: '6f1c2a3e-0000-4000-8000-000000000005', status: 'working' }
 
-/** The input at `NOW`, with nothing acknowledged unless given. */
-function input(sessions: TraySession[], decisions: TrayDecision[], acknowledged = new Map<string, SeenFinish>()): TrayInput {
-  return { sessions, decisions, acknowledged, now: NOW }
+/** The input at `NOW`, with nothing acknowledged or excluded unless given. */
+function input(
+  sessions: TraySession[],
+  decisions: TrayDecision[],
+  acknowledged = new Map<string, SeenFinish>(),
+  excluded: ReadonlySet<string> = new Set(),
+): TrayInput {
+  return { sessions, decisions, acknowledged, excluded, now: NOW }
 }
 
 describe('trayState', () => {
@@ -159,6 +164,26 @@ describe('trayState: finished sessions', () => {
     clearFinish(acknowledged, finished(5_000), [])
     expect(trayState(input([finished(5_000)], [], acknowledged)).finishedCount).toBe(0)
     expect(trayState(input([finished(9_000)], [], acknowledged)).finishedCount).toBe(1)
+  })
+})
+
+describe('trayState: excluded sessions', () => {
+  it('does not count the finish of an excluded session', () => {
+    const excluded = new Set([finished(5_000).sessionId])
+    expect(trayState(input([finished(5_000), idle], [], undefined, excluded))).toEqual(IDLE_TRAY_STATE)
+  })
+
+  it('counts the requests and the wait of an excluded session as those of any session', () => {
+    const excluded = new Set([waiting.sessionId])
+    expect(trayState(input([waiting], [held('question')], undefined, excluded))).toEqual({
+      ...IDLE_TRAY_STATE,
+      waitingCount: 1,
+      wait: 'choice',
+    })
+  })
+
+  it('counts an excluded session that works as working', () => {
+    expect(trayState(input([working], [], undefined, new Set([working.sessionId]))).workingCount).toBe(1)
   })
 })
 

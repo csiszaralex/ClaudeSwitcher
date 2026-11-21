@@ -37,6 +37,11 @@ export interface NotifierInput {
   settings: { notifyOnRequest: boolean; notifyOnFinish: boolean }
   /** The overlay is on screen: the user is looking at the list already, so nothing is shown. */
   overlayVisible: boolean
+  /**
+   * The sessions the user moved out of the list (`main/excluded-sessions.ts`): their finishes notify
+   * nothing. Their requests notify as any session's.
+   */
+  excluded: ReadonlySet<string>
 }
 
 /** One toast to show. A click opens the list with `sessionId` selected. */
@@ -89,9 +94,10 @@ function finishedNotice(session: NotifierSession): Notice {
  *   the wait began does not notify again. `stoppedAt` disappears while a subagent runs and
  *   comes back with the same value, which is not a new finish, so the last value is kept, also for a
  *   session that drops out of the list for a moment (one number per session id, never pruned).
+ * - An excluded session's finish notifies nothing (`NotifierInput.excluded`); its requests do.
  * - The memory is updated on every call, also when a toast is held back (a setting off, the overlay
- *   visible): a request or a finish that arrived then never notifies later, and turning a setting
- *   on does not replay the past.
+ *   visible, the session excluded): a request or a finish that arrived then never notifies later, and
+ *   turning a setting on or bringing a session back does not replay the past.
  */
 export function createNotifier(): { observe: (input: NotifierInput) => Notice[] } {
   let started = false
@@ -99,7 +105,7 @@ export function createNotifier(): { observe: (input: NotifierInput) => Notice[] 
   const lastStoppedAt = new Map<string, number>()
 
   return {
-    observe({ state, settings, overlayVisible }) {
+    observe({ state, settings, overlayVisible, excluded }) {
       const bySession = new Map(state.sessions.map((session) => [session.sessionId, session]))
 
       const requests: Notice[] = []
@@ -114,7 +120,8 @@ export function createNotifier(): { observe: (input: NotifierInput) => Notice[] 
       for (const session of state.sessions) {
         const { stoppedAt } = session
         if (stoppedAt === undefined || waitsOn(session, state.sessions).length > 0) continue
-        if (started && lastStoppedAt.get(session.sessionId) !== stoppedAt) finished.push(finishedNotice(session))
+        const fresh = started && lastStoppedAt.get(session.sessionId) !== stoppedAt
+        if (fresh && !excluded.has(session.sessionId)) finished.push(finishedNotice(session))
         lastStoppedAt.set(session.sessionId, stoppedAt)
       }
 
