@@ -11,7 +11,6 @@ import {
   SUBAGENT_META_LIMIT,
   SUBAGENT_SCAN_LIMIT,
   SUBAGENT_TAIL_BYTES,
-  findTranscriptPath,
   ideDir,
   isMissingPathError,
   parseIdeLock,
@@ -19,7 +18,6 @@ import {
   parseSubagentMeta,
   pickRecentSubagentFiles,
   readActivityFromLines,
-  readTranscriptActivity,
   resolveLiveSessions,
   sessionsDir,
   subagentIdFromFile,
@@ -27,6 +25,7 @@ import {
   subagentsDirOf,
   tailLines,
 } from '@claudeswitcher/core'
+import { type TranscriptReader, uncachedTranscripts } from './transcript-cache.js'
 
 async function readJson(filePath: string): Promise<unknown> {
   try {
@@ -198,12 +197,17 @@ interface SessionReading {
  *
  * @param heldAgents the `agentId` of the subagents that have a pending decision now (the daemon takes
  * them from the broker). They are included even when they wrote long ago; see `readSubagents`.
+ * @param transcripts where each session's transcript and activity come from: the daemon passes its
+ * `createTranscriptCache`, which skips the search and the read while the transcript is unchanged.
+ * The subagent listing is read on every scan either way: a subagent writes its own file, so the main
+ * transcript's size and time say nothing about it.
  */
 export async function scanSessions(
   claudeDir: string,
   probe: ProcessProbe,
   now: number = Date.now(),
   heldAgents: ReadonlySet<string> = new Set(),
+  transcripts: TranscriptReader = uncachedTranscripts,
 ): Promise<{
   sessions: LiveSession[]
   activities: Map<string, SessionActivity>
@@ -218,15 +222,12 @@ export async function scanSessions(
   const entries = await Promise.all(
     sessions.map(async ({ record }): Promise<[string, SessionReading]> => {
       try {
-        const transcript = await findTranscriptPath(claudeDir, record.sessionId)
-        if (transcript === undefined) return [record.sessionId, { activity: {}, subagents: [] }]
         // The tail, and for the senders of a turn that outgrew it, the lines back to its start
-        // (`readTranscriptActivity`).
-        const [activity, subagents] = await Promise.all([
-          readTranscriptActivity(transcript),
-          readSubagents(transcript, now, heldAgents),
-        ])
-        return [record.sessionId, { activity, subagents }]
+        // (core `readTranscriptActivity`), or the remembered reading of an unchanged transcript.
+        const reading = await transcripts.read(claudeDir, record.sessionId)
+        if (reading === undefined) return [record.sessionId, { activity: {}, subagents: [] }]
+        const subagents = await readSubagents(reading.transcript, now, heldAgents)
+        return [record.sessionId, { activity: reading.activity, subagents }]
       } catch (error) {
         // Defence in depth. `Promise.all` would drop the whole scan on a single rejection, so EVERY
         // session would vanish from the list because of one unreadable transcript. The callees are
@@ -236,6 +237,8 @@ export async function scanSessions(
       }
     }),
   )
+
+  transcripts.retain(new Set(sessions.map(({ record }) => record.sessionId)))
 
   return {
     sessions,

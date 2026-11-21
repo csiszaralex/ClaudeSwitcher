@@ -7,6 +7,7 @@ import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
 import { scanSessions } from './scanner.js'
 import { SessionStore } from './session-store.js'
+import { createTranscriptCache } from './transcript-cache.js'
 import { createToken } from './token.js'
 
 export type { PendingDecisionView } from './decision-broker.js'
@@ -130,6 +131,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     sessions.applyPending(pendingSince, Date.now(), resolvedSessionId, abortedByClient)
   })
 
+  // Per session, the transcript's path and reading while the file stays unchanged (`transcript-cache.ts`).
+  const transcripts = createTranscriptCache()
+
   let refreshing: Promise<void> | undefined
   async function refresh(): Promise<void> {
     // Only one scan at a time: the poll and the lifecycle hooks can start it overlapping.
@@ -143,7 +147,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         const heldAgents = new Set(
           decisions.views().flatMap((view) => (view.agentId === undefined ? [] : [view.agentId])),
         )
-        const snapshot = await scanSessions(claudeDir, probe, now, heldAgents)
+        const snapshot = await scanSessions(claudeDir, probe, now, heldAgents, transcripts)
         sessions.applySnapshot(snapshot.sessions, snapshot.activities, now, snapshot.subagents)
         // Only after a successful scan: a failed scan is not "every session vanished".
         decisions.pruneAbsent(new Set(snapshot.sessions.map((session) => session.record.sessionId)))

@@ -70,7 +70,7 @@ The daemon runs inside the Electron main process, not as a separate process; the
 
 The native prompt in VS Code is open the whole time, and the first decision wins. The broker learns about a decision made in VS Code from `PostToolUse` or `PostToolUseFailure` (matched through the `tool_use_id` of the preceding `PreToolUse`), from the hook connection being closed (the native "No" or Esc), or from the end of the turn (`Stop`, `SessionEnd`, `SubagentStop`). The still-pending request then gets an empty 200, which Claude Code ignores. A request nobody decides is released with an empty 200 after `PERMISSION_RELEASE_AFTER_MS`, and on quit `releaseAll` answers every held request before the server closes. Any error in this path is also an empty 200: Claude Code treats that as "no decision", never as a denial.
 
-Session discovery runs alongside: every `POLL_INTERVAL_MS`, and after every `Stop`, `StopFailure` and `SessionEnd`, `daemon.ts` `refresh` calls `scanner.ts` `scanSessions`, which reads the session registry, the IDE lock files and the transcript tails (core `transcript.ts` `readTranscriptActivity`: the last 256 KB, and for a turn that outgrew them, the lines that may concern a cross-session message back to the turn's start).
+Session discovery runs alongside: every `POLL_INTERVAL_MS`, and after every `Stop`, `StopFailure` and `SessionEnd`, `daemon.ts` `refresh` calls `scanner.ts` `scanSessions`, which reads the session registry, the IDE lock files and the transcript tails (core `transcript.ts` `readTranscriptActivity`: the last 256 KB, and for a turn that outgrew them, the lines that may concern a cross-session message back to the turn's start). A transcript whose size and last write did not change since the previous scan is neither searched for nor read again (`transcript-cache.ts` `createTranscriptCache`); the subagent folders are listed on every scan.
 
 ## Rules
 
@@ -103,6 +103,8 @@ For a change that should only touch comments (a translation, for example), `pnpm
 To find out which process shows a window that flashes up (a console during a test run, for example), `scripts/measure/window-watch.ps1` logs every top-level window shown, with its class, title, process, parent process and command line, read only. The usage is at the top of the script; the log goes to `%TEMP%` by default.
 
 To see what a window title shows while you switch tabs and windows, `scripts/measure/title-watch.ps1` logs, read only, every foreground change and every title change of a top-level window of one process (`Code` by default), with whether that window is in the foreground. The usage is at the top of the script; the log goes to `%TEMP%` by default.
+
+To see what a scan costs, `node scripts/measure/scan-cost.mjs [rounds] [both|plain|cached]` times, read only, the per-session work of a scan on the real `~/.claude` with the built packages (build them first): the search and the read of every running session's transcript and its subagent listing, then the same through the daemon's transcript cache. It prints the transcript sizes and the times, never their content. The numbers of 2026-11-21 are in `docs/design.md` "Idle CPU".
 
 To see how the sessions message each other, `node scripts/measure/cross-session.mjs [days]` links, read only, every `SendMessage` of the last days' transcripts to its arrival in the recipient's transcript, and prints per sender and recipient how many messages went, how many got a reply, and how long the sender showed finished while the recipient still worked. It prints session names and counts, never message text.
 
