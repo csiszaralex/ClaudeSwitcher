@@ -809,7 +809,8 @@ that process whose title shows the session's tab (`focus-window.ts` `byShownTab`
 `showsSessionTab`), brings it up, and sends no URI (`FocusOutcome` `tab`). It decides only when
 exactly one window matches; with a `window.title` that does not show the active editor nothing
 matches, and the jump goes on to the `code` CLI as before. The app logs each jump's path and time
-(`[focus] session …: window by <outcome> in N ms`).
+(`[focus] session …: window by <outcome> in N ms`). A held Enter started six jumps to one session
+within 0.4 s in the same log, so a jump requested while one runs is dropped.
 
 There is **no** decision surface in the VS Code window (decision of 2026-10-20): the native prompt
 is visible there anyway, and a second surface would only be a duplicate and a source of errors.

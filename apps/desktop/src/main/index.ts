@@ -32,6 +32,7 @@ import {
   isFastFocusAvailable,
   readForegroundTitle,
   tabFocusUri,
+  type FocusOutcome,
 } from './focus-window.js'
 import { errorMessage } from '../shared/error-message.js'
 import { acknowledgeFinish } from '../shared/session-finished.js'
@@ -455,6 +456,8 @@ async function startApp(): Promise<void> {
   // The watch that counts a finish as seen when its VS Code tab stays in front (`watchSeen` below);
   // here, before the jump handler, which holds it while a jump brings up a tab (`jumpedTo`).
   const seenWatch = createSeenWatch()
+  // Whether a jump is bringing up a window now (`OVERLAY_CHANNELS.focusSession`): one at a time.
+  let jumpInFlight = false
 
   // Every handler first checks the sender (`handleFrom`). Where the reply has a failure shape, a
   // foreign sender gets that; the other handlers throw, which is a rejected promise in the renderer.
@@ -490,6 +493,10 @@ async function startApp(): Promise<void> {
       const { sessions } = running.state()
       const view = sessions.find((s) => s.sessionId === sessionId)
       if (view === undefined) return false
+      // One jump at a time: a held Enter repeats its keydown, and each repeat started another jump
+      // while the first still brought the window up (the owner's log, 2026-11-21: six jumps to one
+      // session within 0.4 s). A request that arrives meanwhile is dropped.
+      if (jumpInFlight) return false
       // Before the window comes up: until it shows this session's tab, the tab active before in that
       // window must not count as seen by the watch (`SEEN_JUMP_HOLD_MS`).
       const jumpedAt = Date.now()
@@ -498,9 +505,15 @@ async function startApp(): Promise<void> {
       // the process currently in the foreground: hiding the overlay would take that right away, and
       // the call would silently just flash the taskbar button. If it fails anyway, the `code` CLI
       // fallback handles it.
-      const outcome = await focusSessionWindow(view, (window) =>
-        showsSessionTab(window, running.state().sessions, view.sessionId),
-      )
+      let outcome: FocusOutcome
+      jumpInFlight = true
+      try {
+        outcome = await focusSessionWindow(view, (window) =>
+          showsSessionTab(window, running.state().sessions, view.sessionId),
+        )
+      } finally {
+        jumpInFlight = false
+      }
       // So the jump's paths and their times can be measured (`focus-window.ts` `focusWith`).
       console.log(`[focus] session ${view.sessionId}: window by ${outcome} in ${String(Date.now() - jumpedAt)} ms`)
       overlay.hide()
