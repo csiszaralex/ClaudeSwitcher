@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
 import {
   DAEMON_HOST,
@@ -61,6 +62,7 @@ import { rendererLocation } from './ipc-sender.js'
 import { ensureLogFile, installFileLog } from './log-file.js'
 import { createNotifier } from './notifier.js'
 import { createOverlayController } from './overlay-window.js'
+import { PERF_LOG_INTERVAL_MS, createPerfCounters } from './perf-log.js'
 import { createNativeProcessProbe } from './process-probe.js'
 import { createQuitSequence } from './quit-sequence.js'
 import { SEEN_JUMP_HOLD_MS, SEEN_POLL_MS, createSeenWatch, showsSessionTab, watchesSeen } from './seen-elsewhere.js'
@@ -435,11 +437,17 @@ async function startApp(): Promise<void> {
   // gets it through `setDaemon`.
   // The native probe comes first; PowerShell is only the fallback when koffi cannot be loaded.
   const nativeProbe = createNativeProcessProbe()
+  // The counters of the `[perf]` line (`perf-log.ts`), from before the daemon starts, so its scans
+  // and broadcasts count from the first one.
+  const perf = createPerfCounters()
   const running = await startDaemon({
     claudeDir: resolveClaudeDir(),
     probe: nativeProbe ?? createWin32ProcessProbe(),
     port: DAEMON_PORT,
     token,
+    onTimed: (job, ms, chars) => {
+      perf.add(job, ms, chars)
+    },
   })
   quitSequence.setDaemon(running)
   // A quit began while the daemon started: `before-quit` saw no daemon then, so stop this one here.
@@ -860,6 +868,7 @@ async function startApp(): Promise<void> {
     seenTimer = undefined
   }
   const watchSeen = (): void => {
+    const started = performance.now()
     try {
       const { sessions } = running.state()
       const watching = watchesSeen(sessions, finishesSeen)
@@ -881,10 +890,13 @@ async function startApp(): Promise<void> {
       console.error('[seen] reading the foreground window failed; finishes count as seen only from the list', error)
       seenWatchOff = true
       stopSeenWatch()
+    } finally {
+      perf.add('seen', performance.now() - started)
     }
   }
 
   const syncTray = (): void => {
+    const started = performance.now()
     const state = running.state()
     const now = Date.now()
     // Drops the ids of the excluded sessions that are gone (`EXCLUDED_GONE_AFTER_MS`). The overlay
@@ -896,6 +908,8 @@ async function startApp(): Promise<void> {
       seenTimer = setInterval(watchSeen, SEEN_POLL_MS)
       seenTimer.unref()
     }
+    const notifierStarted = performance.now()
+    perf.add('tray', notifierStarted - started)
     // Never lets a failing toast stop the tray tick.
     try {
       const { notifyOnRequest, notifyOnFinish } = settings.snapshot().values
@@ -910,16 +924,25 @@ async function startApp(): Promise<void> {
     } catch (error) {
       console.error('[claudeswitcher] notification check failed', error)
     }
+    perf.add('notifier', performance.now() - notifierStarted)
   }
   syncTray()
   const trayTimer = setInterval(syncTray, 1000)
   trayTimer.unref()
+
+  // Where the main process's CPU goes while the app idles: one line per period (`perf-log.ts`
+  // `formatPerfLine`; how to read it: `CONTRIBUTING.md` "Environment notes").
+  const perfTimer = setInterval(() => {
+    console.log(perf.flush())
+  }, PERF_LOG_INTERVAL_MS)
+  perfTimer.unref()
 
   // The quit cleanup belongs to the quit sequence's single `before-quit` handler, which runs it once.
   // The timer stops BEFORE the tray: the quit still waits up to STOP_TIMEOUT_MS for the daemon, and
   // a `syncTray` running meanwhile would reach a destroyed tray icon.
   quitSequence.setCleanup(() => {
     clearInterval(trayTimer)
+    clearInterval(perfTimer)
     stopSeenWatch()
     // Before the tray too: a download finishing during the quit must not reach the destroyed icon.
     updates?.stop()

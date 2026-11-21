@@ -1,5 +1,6 @@
 import type { Server as HttpServer, IncomingMessage, ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
+import { performance } from 'node:perf_hooks'
 import { serve, type ServerType } from '@hono/node-server'
 import { DAEMON_HOST, DAEMON_PROTOCOL, POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
 import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
@@ -7,6 +8,7 @@ import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
 import { scanSessions } from './scanner.js'
 import { SessionStore } from './session-store.js'
+import { createTranscriptCache } from './transcript-cache.js'
 import { createToken } from './token.js'
 
 export type { PendingDecisionView } from './decision-broker.js'
@@ -27,6 +29,9 @@ export interface Daemon {
   stop(): Promise<void>
 }
 
+/** The daemon's periodic jobs that `DaemonOptions.onTimed` reports. */
+export type DaemonJob = 'scan' | 'broadcast'
+
 export interface DaemonOptions {
   claudeDir: string
   probe: ProcessProbe
@@ -39,10 +44,20 @@ export interface DaemonOptions {
   port?: number | undefined
   /** The daemon's token. Random when not given. The desktop app passes a persistent token, for the same reason. */
   token?: string | undefined
+  /**
+   * Called after every run of a periodic job with its time in ms (`performance.now()`), for the
+   * desktop app's performance log. `scan`: one `refresh` that ran a scan (a call that joined the
+   * running one is not counted), failed ones too, its wall time (the scan is asynchronous, so other
+   * work interleaves). `broadcast`: one state broadcast, the time of its
+   * synchronous body (building the state, `JSON.stringify`, the comparison with the last message and
+   * the send), and the serialised message's length in UTF-16 code units (`chars`), also when the
+   * message equals the last one and is not sent. Must not throw.
+   */
+  onTimed?: ((job: DaemonJob, ms: number, chars?: number) => void) | undefined
 }
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
-  const { claudeDir, probe, pollMs = POLL_INTERVAL_MS, port: requestedPort = 0 } = options
+  const { claudeDir, probe, pollMs = POLL_INTERVAL_MS, port: requestedPort = 0, onTimed } = options
   const token = options.token ?? createToken()
 
   const sessions = new SessionStore()
@@ -108,10 +123,13 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
   // Comparing the serialised form is exact, unlike a field-by-field diff, which can be got wrong.
   let lastBroadcast = ''
   function broadcast(): void {
+    const started = performance.now()
     const message = JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: state() })
-    if (message === lastBroadcast) return
-    lastBroadcast = message
-    hub.broadcastRaw(message)
+    if (message !== lastBroadcast) {
+      lastBroadcast = message
+      hub.broadcastRaw(message)
+    }
+    onTimed?.('broadcast', performance.now() - started, message.length)
   }
 
   sessions.onChange(broadcast)
@@ -130,11 +148,15 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
     sessions.applyPending(pendingSince, Date.now(), resolvedSessionId, abortedByClient)
   })
 
+  // Per session, the transcript's path and reading while the file stays unchanged (`transcript-cache.ts`).
+  const transcripts = createTranscriptCache()
+
   let refreshing: Promise<void> | undefined
   async function refresh(): Promise<void> {
     // Only one scan at a time: the poll and the lifecycle hooks can start it overlapping.
     if (refreshing !== undefined) return refreshing
     refreshing = (async () => {
+      const started = performance.now()
       try {
         const now = Date.now()
         // The label of a subagent with a pending decision is needed even when the subagent has not
@@ -143,7 +165,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         const heldAgents = new Set(
           decisions.views().flatMap((view) => (view.agentId === undefined ? [] : [view.agentId])),
         )
-        const snapshot = await scanSessions(claudeDir, probe, now, heldAgents)
+        const snapshot = await scanSessions(claudeDir, probe, now, heldAgents, transcripts)
         sessions.applySnapshot(snapshot.sessions, snapshot.activities, now, snapshot.subagents)
         // Only after a successful scan: a failed scan is not "every session vanished".
         decisions.pruneAbsent(new Set(snapshot.sessions.map((session) => session.record.sessionId)))
@@ -156,6 +178,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         console.error('[daemon] refresh failed', error)
       } finally {
         refreshing = undefined
+        onTimed?.('scan', performance.now() - started)
       }
     })()
     return refreshing

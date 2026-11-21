@@ -750,7 +750,8 @@ Not IO-free; the Node-free part is available through the `/browser` entry point 
 - ~~**`Watchers`**: file watchers with a debounce.~~ There is no file watcher: the daemon re-reads
   the registry, the locks and the transcripts every `POLL_INTERVAL_MS` (3 s), and also right
   after every `Stop`/`StopFailure`/`SessionEnd` hook (`daemon.ts` `refresh`, only one runs at a
-  time). After every successful scan a `tick` goes to the overlay.
+  time). After every successful scan a `tick` goes to the overlay. An unchanged transcript is not
+  searched for or read again (the transcript cache, see "Idle CPU" below).
 - **`Hub`**: WS towards the overlay (there is no extension). It checks the token before the
   handshake (`verifyClient`), and every message carries the `protocol` version
   (`DAEMON_PROTOCOL`).
@@ -843,6 +844,75 @@ within 0.4 s in the same log, so a jump requested while one runs is dropped.
 
 There is **no** decision surface in the VS Code window (decision of 2026-10-20): the native prompt
 is visible there anyway, and a second surface would only be a duplicate and a source of errors.
+
+### Idle CPU (measured 2026-11-21)
+
+The installed app's processes over 60 s, idle, the overlay closed (PowerShell `Get-Process`, the
+change of the CPU time): main 4.48 s, renderer 0.13 s, GPU 0.02 s, utility 0.02 s. So the main
+process, which runs the daemon in process, used about 7.5% of one core all the time. Explained:
+
+- **The scan** (`scanner.ts` `scanSessions`, every `POLL_INTERVAL_MS`, 3 s), measured with
+  `scripts/measure/scan-cost.mjs` over 16 running sessions: about 95 ms CPU per round. Per session
+  the search (`findTranscriptPath`) took 0.8 to 3.7 ms, the read (`readTranscriptActivity`) 0.9 to
+  3.6 ms on transcripts of up to 235 MB, and the subagent listing 0.2 to 7.5 ms on folders of up to
+  324 files, each of them `stat`ed. About 1.9 s per minute.
+- **The process snapshot** (`process-probe.measure.test.ts`): 16.5 to 19.0 ms for 759 processes, one
+  per scan (`PROBE_TTL_MS`, 2 s, is shorter than the poll), about 0.36 s per minute.
+- Besides the poll, only the start (`index.ts` `startApp`) and the lifecycle hooks (`daemon.ts`
+  `onLifecycle`) start a scan, and the tray tick sets its image and tooltip only when they change
+  (`tray.ts` `setState`).
+
+About 2.3 s per minute were left unexplained, and the rest of the main process cannot be measured
+outside the running app: that is what the `[perf]` line (below) is for.
+
+**The transcript cache** (`transcript-cache.ts` `createTranscriptCache`, one per daemon). Per
+session it remembers the transcript's path, its size and last write (`mtimeMs`) and the activity
+read from it. The next scan costs one `stat` of that path: the same size and last write give back
+the remembered activity, a change reads the file again, and a failed `stat` (moved or deleted)
+searches again. This is exact because `readActivityFromLines` depends only on the lines it gets: no
+clock, no other session. Decisions:
+
+- The `stat` comes before the read, so a write in between leaves an older version in the entry and
+  the next scan reads again.
+- An empty activity is not remembered: `readTranscriptActivity` returns `{}` on a read error too,
+  and a remembered failure would last until the next write.
+- A session the scan no longer lists is forgotten after the scan (`retain`), so the cache holds only
+  live sessions.
+- The subagent listing is not cached. A subagent appends to its own file, which changes neither the
+  main transcript nor the folder's last write (measured 2026-11-21 on `C:` and `P:`: an append left
+  the folder's `mtimeMs` unchanged, a new file changed it). Without a signal, every file is `stat`ed
+  on every scan, as before, so a running subagent shows within one scan.
+- A known difference: if a second file of the same session appeared in another project folder
+  while the remembered one still exists, the cache keeps the remembered one, where the search would
+  take the first folder in `readdir` order.
+
+After (2026-11-21, the same 16 sessions, `node scripts/measure/scan-cost.mjs 30 plain` and
+`node scripts/measure/scan-cost.mjs 30 cached`, three runs of each, the mean of rounds 2 to 30):
+without the cache 95 to 96 ms CPU and 59 to 63 ms wall per round, with it 39 to 43 ms CPU and 13 ms
+wall, so about 1.9 s down to 0.8 s CPU per minute. Nearly all that is left is the subagent listing:
+the same cached rounds without it took 1 ms. The CPU is above the wall time because
+`process.cpuUsage` counts every thread, the `stat` calls of the thread pool and the garbage
+collector's included.
+
+**The `[perf]` line** (`main/perf-log.ts`, a first piece of issue #11's counters). Every
+`PERF_LOG_INTERVAL_MS` (10 min) the main process logs one line of `key=value` fields
+(`formatPerfLine`) about the period since the last one:
+
+- `period`: its length. `cpu`, `user`, `system`: the process's CPU time (`process.cpuUsage`, every
+  thread of the main process, not the renderer's or the GPU's). `core`: `cpu` as a share of one
+  core. `loop`: the share of the time the main thread's event loop was busy
+  (`performance.eventLoopUtilization`); `cpu` well above `loop` means work off the main thread
+  (the thread pool's file system calls, the garbage collector).
+- Per periodic job `<name>=<runs>/<ms>ms`, the runs and their summed time (`performance.now()`):
+  `scan`, the daemon's `refresh` that scanned, its wall time (asynchronous, so it includes waiting
+  and other work in between); `broadcast`, the daemon's state broadcast (building the state,
+  `JSON.stringify`, the comparison with the last message and the send), counted also when the
+  message is the same as the last one and not sent, with the average message length in UTF-16 code
+  units (`/<chars>ch`); `tray`, the tray tick (`index.ts` `syncTray`) without its notifier part;
+  `notifier`, that part (`notifier.observe` and the toasts it shows); `seen`, the seen watch's poll
+  (`watchSeen`). The daemon reports its two through `startDaemon`'s `onTimed` option.
+
+The timing adds two `performance.now()` calls and a few additions per run.
 
 ## 8. Error handling
 
