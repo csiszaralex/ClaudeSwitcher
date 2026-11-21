@@ -108,9 +108,11 @@ To see how the sessions message each other, `node scripts/measure/cross-session.
 
 ### Tests
 
-Every test is a vitest file next to its module (`<module>.test.ts`), run by `pnpm verify` and by each package's `test` script; `pnpm --filter @claudeswitcher/desktop test <name>` runs the desktop files whose path contains `<name>`. They run in Node, except the overlay's component tests.
+Every test is a vitest file next to its module (`<module>.test.ts`), run by `pnpm verify` and by each package's `test` script; `pnpm --filter @claudeswitcher/desktop test <name>` runs the desktop files whose path contains `<name>`. They run in Node, except the overlay's component tests. One test sits in a folder of its own: the daemon to renderer contract (below).
 
 The component tests (`apps/desktop/src/renderer/*.test.tsx`) check the overlay's key paths end to end, the wiring that the pure helpers' tests cannot see. Each file starts with `// @vitest-environment happy-dom`, so only it runs in happy-dom. A test renders the real `App` with `renderOverlay` from `renderer/test-helpers.tsx` and states only its data (`session`, `bashRequest`, the excluded ids, the peek's reply); it presses keys with `user` (`@testing-library/user-event`), reads the list with `rowNames`, `selectedName` and `row`, and checks the calls the overlay made on `api` (every preload method is a vitest mock, `api.focusSession.mock.calls`). Only `Date` is faked: the decision panel's letters stay unarmed until the test calls `armKeys`. `App.test.tsx` is the example.
+
+The contract test between the daemon's state message and the renderer (`apps/desktop/src/contract/daemon-state.test.ts`) starts the real daemon (`startDaemon`) on an invented Claude directory, posts hook bodies to it (the measured fixtures, with invented sessions), takes its state message from its WebSocket, and checks that the renderer's `parseDaemonMessage` (and `sanitizeState` on the IPC path) keeps every session and request with every field unchanged. Its field lists are typed against `SessionView`, `PendingDecisionView` and the types inside them: a field added to one of them fails the type check until its list names it, and then the test until its state carries the field. It lives outside `renderer/` because it runs the daemon's code, which the renderer may not import (see [Code](#code)); `tsconfig.web.test.json` lists it (`files`), next to the renderer's tests.
 
 ### Code
 
