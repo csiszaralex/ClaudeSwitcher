@@ -152,6 +152,26 @@ describe('startDaemon', () => {
     expect(types.filter((t) => t === 'tick')).toHaveLength(2)
   })
 
+  it('reports the time of every scan and every broadcast, the unsent ones too, to onTimed', async () => {
+    const timed: { job: string; ms: number; chars: number | undefined }[] = []
+    running = await startDaemon({
+      claudeDir: await fixture(),
+      probe: aliveProbe,
+      pollMs: 0,
+      onTimed: (job, ms, chars) => timed.push({ job, ms, chars }),
+    })
+    await running.refresh()
+    await running.refresh()
+
+    expect(timed.filter(({ job }) => job === 'scan')).toHaveLength(2)
+    // The second scan's snapshot is identical: its broadcast is not sent, but it is still timed.
+    const broadcasts = timed.filter(({ job }) => job === 'broadcast')
+    expect(broadcasts.length).toBeGreaterThanOrEqual(2)
+    const message = JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: running.state() })
+    expect(broadcasts.at(-1)?.chars).toBe(message.length)
+    expect(timed.every(({ ms }) => ms >= 0)).toBe(true)
+  })
+
   it('stamps every state and tick message with the protocol version', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const socket = new WebSocket(`ws://127.0.0.1:${running.port}/ws?token=${running.token}`)
