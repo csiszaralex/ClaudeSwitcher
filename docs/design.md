@@ -630,7 +630,10 @@ is now `ACTION_BUTTONS`, read by `shortcutFor`):
   Backspace, Space, /, Ctrl+K, Esc) acts mid-answer. It is stopped there rather than filtered by
   the target in App's window handler: then the form alone decides what its keys do, and App needs
   to know nothing of its elements. A held key's auto-repeat picks nothing and moves on
-  nowhere, so one long press cannot answer several questions; nothing sends without Ctrl+Enter.
+  nowhere, so one long press cannot answer several questions. Ctrl+Enter sends; so does the Enter
+  that answers the last open question (asked by the owner, 2026-11-22): an Enter that would move on
+  but finds no unanswered question left sends instead. A digit, Space or a click never sends, so an
+  answer can be changed after everything is answered without sending it.
 
 ## 5. Data flow
 

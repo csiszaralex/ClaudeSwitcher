@@ -96,8 +96,9 @@ export function QuestionForm({ questions, busy, onSubmit, focus }: Props): JSX.E
     requestFocus()
   }
 
-  function send(): void {
-    if (complete && !busy) onSubmit(buildAnswers(questions, state))
+  /** Sends the answers of `answers` (the state as it is after the key), if every question is answered. */
+  function send(answers: FormState = state): void {
+    if (isComplete(questions, answers) && !busy) onSubmit(buildAnswers(questions, answers))
   }
 
   function run(command: QuestionCommand): void {
@@ -117,11 +118,13 @@ export function QuestionForm({ questions, busy, onSubmit, focus }: Props): JSX.E
         setState(nextState)
         setCursor(command.option)
         requestFocus()
-        if (command.moveOn) open(nextUnanswered(questions, nextState, active), nextState)
+        if (command.finish === true && isComplete(questions, nextState)) send(nextState)
+        else if (command.moveOn) open(nextUnanswered(questions, nextState, active), nextState)
         return
       }
       case 'move-on':
-        open(nextUnanswered(questions, state, active), state)
+        if (command.finish === true && isComplete(questions, state)) send()
+        else open(nextUnanswered(questions, state, active), state)
         return
       case 'submit':
         send()

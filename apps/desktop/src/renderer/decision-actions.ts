@@ -103,7 +103,8 @@ export function isActivationTarget(target: unknown): boolean {
 
 /**
  * The submit key of the multi-line fields, where a plain Enter starts a new line, and of the
- * question form, where a plain Enter picks an option or moves on (question-keys.ts): Ctrl+Enter.
+ * question form, where a plain Enter picks an option or moves on, and sends only on the last open
+ * question (question-keys.ts): Ctrl+Enter.
  */
 export function isSubmitChord(event: { key: string; ctrlKey: boolean }): boolean {
   return event.key === 'Enter' && event.ctrlKey

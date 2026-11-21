@@ -45,10 +45,14 @@ export type QuestionCommand =
   | { type: 'cursor'; to: number }
   /** The previous or the next question opens. */
   | { type: 'question'; step: -1 | 1 }
-  /** The option is picked (single choice) or toggled (multiple choice); with `moveOn` the next unanswered question opens. */
-  | { type: 'select'; option: number; moveOn: boolean }
-  /** The next unanswered question opens. */
-  | { type: 'move-on' }
+  /**
+   * The option is picked (single choice) or toggled (multiple choice); with `moveOn` the next
+   * unanswered question opens. With `finish` (Enter) the answers are sent instead when none is left
+   * unanswered (`QuestionForm`; asked by the owner, 2026-11-22: Enter on the last one sends).
+   */
+  | { type: 'select'; option: number; moveOn: boolean; finish?: true }
+  /** The next unanswered question opens; with `finish` (Enter), the answers are sent when none is left. */
+  | { type: 'move-on'; finish?: true }
   /** The answers are sent, if complete. */
   | { type: 'submit' }
   /** The focus leaves the form, back to the list. */
@@ -88,7 +92,8 @@ function digitOption(key: string, question: AskQuestion): number | undefined {
  * - ↑/↓ step through the options and the free text field; ↑ in the field goes back to the last option.
  * - ←/→ open the previous or next question, except in the field, where they move the caret.
  * - Space or Enter picks the option under the cursor; for single choice that moves on. For multiple
- *   choice Space toggles and Enter moves on. Enter in the field moves on.
+ *   choice Space toggles and Enter moves on. Enter in the field moves on. An Enter carries `finish`:
+ *   when it leaves no question unanswered, the form sends instead of moving on (`QuestionForm`).
  * - 1 to 9 pick that option directly, as Space would (not in the field, where they are text).
  *
  * A held key's auto-repeat picks nothing and moves on nowhere (`ignore`): one long press must not
@@ -107,7 +112,7 @@ export function questionKeyCommand(
 
   if (place === 'other') {
     if (event.key === 'ArrowUp') return question.options.length > 0 ? { type: 'cursor', to: question.options.length - 1 } : undefined
-    if (event.key === 'Enter') return acting({ type: 'move-on' })
+    if (event.key === 'Enter') return acting({ type: 'move-on', finish: true })
     return undefined
   }
 
@@ -125,7 +130,9 @@ export function questionKeyCommand(
   if (place === 'options' && cursor < otherCursor(question)) {
     if (event.key === ' ') return acting({ type: 'select', option: cursor, moveOn: !question.multiSelect })
     if (event.key === 'Enter') {
-      return acting(question.multiSelect ? { type: 'move-on' } : { type: 'select', option: cursor, moveOn: true })
+      return acting(
+        question.multiSelect ? { type: 'move-on', finish: true } : { type: 'select', option: cursor, moveOn: true, finish: true },
+      )
     }
   }
   const digit = digitOption(event.key, question)
