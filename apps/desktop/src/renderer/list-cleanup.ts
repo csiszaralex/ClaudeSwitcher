@@ -52,6 +52,25 @@ export function isExcludeKey(event: KeyLike): boolean {
   return isPlain(event, 'Delete')
 }
 
+/** What ←/→ do around the excluded group (`groupArrow`). */
+export type GroupArrow = 'open' | 'close' | 'to-header'
+
+/**
+ * ←/→ on the excluded group, as in a tree view (asked by the owner, 2026-11-22): → on the closed
+ * group's header opens it; ← on one of the open group's rows selects the header; ← on the open
+ * group's header closes it. `place` is where the selection is. Anything else: `undefined`, the
+ * arrow does nothing. Only a plain arrow (`isPlain`): a held arrow acts once, so a held ← on a row
+ * selects the header and does not go on to close the group.
+ */
+export function groupArrow(event: KeyLike, place: 'header' | 'group-row' | 'other', open: boolean): GroupArrow | undefined {
+  if (isPlain(event, 'ArrowRight')) return place === 'header' && !open ? 'open' : undefined
+  if (isPlain(event, 'ArrowLeft')) {
+    if (place === 'group-row') return 'to-header'
+    if (place === 'header' && open) return 'close'
+  }
+  return undefined
+}
+
 /** The excluded group's texts. */
 export const EXCLUDED_TEXT = {
   /** The group's header, with the number of its rows. */

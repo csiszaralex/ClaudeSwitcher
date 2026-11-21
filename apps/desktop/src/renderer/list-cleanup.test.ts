@@ -3,6 +3,7 @@ import type { SessionStatus } from '@claudeswitcher/core'
 import {
   EXCLUDED_GROUP_ID,
   EXCLUDED_TEXT,
+  groupArrow,
   inExcludedGroup,
   isClearFinishKey,
   isExcludeKey,
@@ -67,6 +68,33 @@ describe('isExcludeKey', () => {
       expect(isExcludeKey(key('Delete', { [modifier]: true }))).toBe(false)
     }
     for (const other of ['Backspace', 'd', 'Del', 'Enter']) expect(isExcludeKey(key(other))).toBe(false)
+  })
+})
+
+describe('groupArrow', () => {
+  it('opens the closed group from its header with →, and closes the open one with ←', () => {
+    expect(groupArrow(key('ArrowRight'), 'header', false)).toBe('open')
+    expect(groupArrow(key('ArrowLeft'), 'header', true)).toBe('close')
+  })
+
+  it('takes ← on a row of the open group to the header first', () => {
+    expect(groupArrow(key('ArrowLeft'), 'group-row', true)).toBe('to-header')
+  })
+
+  it('does nothing otherwise: → on an open header or a row, ← on a closed header or outside the group', () => {
+    expect(groupArrow(key('ArrowRight'), 'header', true)).toBeUndefined()
+    expect(groupArrow(key('ArrowRight'), 'group-row', true)).toBeUndefined()
+    expect(groupArrow(key('ArrowLeft'), 'header', false)).toBeUndefined()
+    expect(groupArrow(key('ArrowLeft'), 'other', true)).toBeUndefined()
+    expect(groupArrow(key('ArrowRight'), 'other', false)).toBeUndefined()
+  })
+
+  it('acts once on a held arrow, and not with a modifier', () => {
+    expect(groupArrow(key('ArrowLeft', { repeat: true }), 'group-row', true)).toBeUndefined()
+    expect(groupArrow(key('ArrowLeft', { repeat: true }), 'header', true)).toBeUndefined()
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey', 'shiftKey'] as const) {
+      expect(groupArrow(key('ArrowRight', { [modifier]: true }), 'header', false)).toBeUndefined()
+    }
   })
 })
 

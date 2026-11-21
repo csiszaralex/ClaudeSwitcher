@@ -4,6 +4,7 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
 import { PeekPanel } from './PeekPanel.js'
+import type { QuestionFocus } from './QuestionForm.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import {
   formatDuration,
@@ -18,6 +19,7 @@ import { armUntil, type KeyHistory } from './key-guard.js'
 import {
   EXCLUDED_GROUP_ID,
   EXCLUDED_TEXT,
+  groupArrow,
   isClearFinishKey,
   isExcludeKey,
   keptRows,
@@ -139,6 +141,8 @@ export function App({
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedItem = selected === -1 ? undefined : ids[selected]
   const headerSelected = selectedItem === EXCLUDED_GROUP_ID
+  /** Whether the item is a row of the open excluded group. */
+  const inGroup = (id: string | undefined): boolean => list.group.some((row) => row.sessionId === id) && list.groupOpen
   const selectedRowView =
     selectedItem === undefined || headerSelected
       ? undefined
@@ -172,6 +176,8 @@ export function App({
   // For the guard on the panel's key letters (key-guard.ts): when the overlay appeared, and when
   // the user last typed into a text field.
   const keyHistory = useRef<KeyHistory>({ shownArmedAt: 0, lastTypedAt: undefined })
+  // The question form's focus while one shows (`QuestionForm`): Tab enters it, a show leaves it.
+  const questionFocus = useRef<QuestionFocus | null>(null)
   // Only triggers a re-render on show: from it the panel dims the allowing buttons.
   const [, rerenderOnShow] = useState(0)
 
@@ -200,6 +206,8 @@ export function App({
         const armedAt = armUntil(Date.now())
         keyHistory.current.shownArmedAt = armedAt
         rerenderOnShow(armedAt)
+        // The keys act on the list again on every show, not on a question form left focused.
+        questionFocus.current?.leave()
         // The search, the peek and the excluded group start closed on every show.
         setQuery(undefined)
         setPeekId(undefined)
@@ -390,10 +398,31 @@ export function App({
         event.preventDefault()
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
-      // With the decision panel open, Tab moves between the buttons there, not a jump. In the
-      // search, Enter opens the selected match; without a match there is nothing to open. On the
-      // excluded group's header Enter opens or closes the group, and Tab does nothing.
-      if (event.key === 'Enter' || (event.key === 'Tab' && panel === undefined)) {
+      // ←/→ on the excluded group, as in a tree view (`groupArrow`). Not in the search field, whose
+      // arrows move the cursor (`SEARCH_FIELD_KEYS` returned above), and not in a question form,
+      // which keeps its own keys.
+      const arrow = groupArrow(event, headerSelected ? 'header' : inGroup(selectedItem) ? 'group-row' : 'other', list.groupOpen)
+      if (arrow !== undefined) {
+        event.preventDefault()
+        if (arrow === 'open') setGroupOpen(true)
+        else if (arrow === 'close') setGroupOpen(false)
+        else setSelectedId(EXCLUDED_GROUP_ID)
+        return
+      }
+      // With a question form open, Tab moves the focus onto its active question; from then on its
+      // keys are the form's own (`QuestionForm` `onKeyDown`), and the list's keys rest until Esc.
+      // With another decision panel open, Tab moves between the buttons there, not a jump.
+      if (event.key === 'Tab' && panel !== undefined) {
+        const form = questionFocus.current
+        if (form !== null) {
+          event.preventDefault()
+          form.enter()
+        }
+        return
+      }
+      // In the search, Enter opens the selected match; without a match there is nothing to open. On
+      // the excluded group's header Enter opens or closes the group, and Tab does nothing.
+      if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
         if (headerSelected) {
           if (event.key === 'Enter') setGroupOpen((open) => !open)
@@ -581,6 +610,7 @@ export function App({
                 agentLabel={subagentLabel(panel.decision, panel.row.session?.subagents)}
                 remoteControl={panel.row.session !== undefined && hasRemoteControl(panel.row.session)}
                 keyHistory={keyHistory}
+                questionFocus={questionFocus}
                 onDecided={() => {
                   afterDecision(panel.decision).catch((error: unknown) => {
                     console.error('[overlay] could not move on after the decision', error)

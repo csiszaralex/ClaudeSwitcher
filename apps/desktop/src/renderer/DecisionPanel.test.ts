@@ -35,6 +35,7 @@ function render(decision: PendingDecisionView, shownArmedAt = 0, entrypoint?: st
       agentLabel: undefined,
       remoteControl: false,
       keyHistory: { current: { shownArmedAt, lastTypedAt: undefined } },
+      questionFocus: { current: null },
       onDecided: () => undefined,
       onJump: () => undefined,
     }),
@@ -91,7 +92,7 @@ describe('question request', () => {
     options: [{ label: 'Alpha' }, { label: 'Beta' }],
   })
 
-  it('shows each question once, in its form, without the summary block or its line count', () => {
+  it('shows the first question once, in its form, with a tab per question, without the summary block or its line count', () => {
     const first = 'Which build\nshould run first?'
     const html = render(
       bashDecision({
@@ -105,8 +106,12 @@ describe('question request', () => {
     )
     expect(html).not.toContain('decision-summary')
     expect(html).not.toContain('decision-lines')
-    expect(html.split(first)).toHaveLength(2)
-    expect(html).toContain('Which target?')
+    // The question text once, besides its tab's tooltip (`title`, escaped by React).
+    expect(html.split(`>${first}</p>`)).toHaveLength(2)
+    // The second question shows only as its tab until it is opened.
+    expect(html).not.toContain('>Which target?</p>')
+    expect(html).toContain('Build</button>')
+    expect(html).toContain('Target</button>')
     // Nothing else goes into the scrolling area, so it is left out instead of showing an empty band.
     expect(html).not.toContain('decision-scroll')
   })
@@ -210,7 +215,7 @@ describe('Ctrl+Enter label', () => {
     expect(html).toContain(chordKbd)
   })
 
-  it('has no label in the question form, whose fields are single-line and submit on Enter', () => {
+  it('names Ctrl+Enter on the submit button of the question form, where Enter picks or moves on', () => {
     const html = render(
       bashDecision({
         kind: 'question',
@@ -219,8 +224,7 @@ describe('Ctrl+Enter label', () => {
         questions: [{ question: 'Which one?', multiSelect: false, options: [{ label: 'A' }, { label: 'B' }] }],
       }),
     )
-    expect(html).not.toContain('<textarea')
-    expect(html).not.toContain(SUBMIT_CHORD_LABEL)
+    expect(html).toContain(chordKbd)
   })
 })
 
