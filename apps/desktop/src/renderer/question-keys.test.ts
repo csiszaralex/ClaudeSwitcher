@@ -79,15 +79,14 @@ describe('the keys on the options', () => {
     expect(questionKeyCommand(key('ArrowRight'), 'options', single, 0)).toEqual({ type: 'question', step: 1 })
   })
 
-  it('picks and moves on with Space or Enter for single choice', () => {
-    const pick = { type: 'select', option: 1, moveOn: true }
-    expect(questionKeyCommand(key(' '), 'options', single, 1)).toEqual(pick)
-    expect(questionKeyCommand(key('Enter'), 'options', single, 1)).toEqual(pick)
+  it('picks and moves on with Space or Enter for single choice; Enter may also finish', () => {
+    expect(questionKeyCommand(key(' '), 'options', single, 1)).toEqual({ type: 'select', option: 1, moveOn: true })
+    expect(questionKeyCommand(key('Enter'), 'options', single, 1)).toEqual({ type: 'select', option: 1, moveOn: true, finish: true })
   })
 
   it('toggles on Space and moves on on Enter for multiple choice', () => {
     expect(questionKeyCommand(key(' '), 'options', multi, 1)).toEqual({ type: 'select', option: 1, moveOn: false })
-    expect(questionKeyCommand(key('Enter'), 'options', multi, 1)).toEqual({ type: 'move-on' })
+    expect(questionKeyCommand(key('Enter'), 'options', multi, 1)).toEqual({ type: 'move-on', finish: true })
   })
 
   it('picks the option of a digit directly, and ignores a digit past the last option', () => {
@@ -127,7 +126,7 @@ describe('a held key', () => {
 describe('the keys in the free text field', () => {
   it('goes back to the last option on ArrowUp and moves on on Enter', () => {
     expect(questionKeyCommand(key('ArrowUp'), 'other', single, 3)).toEqual({ type: 'cursor', to: 2 })
-    expect(questionKeyCommand(key('Enter'), 'other', single, 3)).toEqual({ type: 'move-on' })
+    expect(questionKeyCommand(key('Enter'), 'other', single, 3)).toEqual({ type: 'move-on', finish: true })
   })
 
   it('leaves the side arrows, Space and the digits to the text', () => {

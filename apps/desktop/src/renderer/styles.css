@@ -48,7 +48,9 @@ body {
   font: inherit;
 }
 .search-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.sessions { flex: 1; margin: 0; padding: 6px; list-style: none; overflow-y: auto; }
+.sessions { flex: 1; display: flex; flex-direction: column; margin: 0; padding: 6px; list-style: none; overflow-y: auto; }
+/* A column, so the excluded group's header can sit at the bottom (`margin-top: auto` below); no item shrinks. */
+.sessions > li { flex: none; }
 
 .session {
   display: grid;
@@ -121,12 +123,14 @@ body {
 .age { color: var(--text-faint); text-align: right; font-variant-numeric: tabular-nums; }
 .empty { padding: 24px; text-align: center; color: var(--text-faint); }
 /* The excluded group at the bottom of the list (list-cleanup.ts `listView`): a header selectable like
-   a row, and its rows dimmed, so they read as set aside. The selected one still shows its background. */
+   a row, and its rows dimmed, so they read as set aside. The selected one still shows its background.
+   The header is pushed to the bottom of the list's area (asked by the owner, 2026-11-22), with the
+   group's rows below it; the order of the items, and so the arrows, stays the same. */
 .excluded-header {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  margin-top: 6px;
+  margin-top: auto;
   padding: 6px 8px;
   border-top: 1px solid var(--border);
   border-radius: 5px;

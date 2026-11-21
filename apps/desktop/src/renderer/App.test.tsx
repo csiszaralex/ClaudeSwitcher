@@ -468,15 +468,16 @@ describe('the question form', () => {
     expect(shownQuestion()).toBe(branch.question)
   })
 
-  it('sends the exact answers on Ctrl+Enter only once every question is answered', async () => {
+  it('sends the exact answers on the Enter that answers the last open question, not before', async () => {
     const { api, user } = await renderOverlay(setup())
     await user.keyboard('{Tab}2')
     await user.keyboard('{Control>}{Enter}{/Control}')
     expect(api.decide).not.toHaveBeenCalled()
 
-    await user.keyboard('31{Enter}{ArrowDown}{ArrowDown}')
-    await user.keyboard('gamma{Enter}')
-    await user.keyboard('{Control>}{Enter}{/Control}')
+    // Enter on the multiple choice moves on while a question is still open: no send yet.
+    await user.keyboard('31{Enter}')
+    expect(api.decide).not.toHaveBeenCalled()
+    await user.keyboard('{ArrowDown}{ArrowDown}gamma{Enter}')
     expect(api.decide.mock.calls).toEqual([
       [
         request.id,
@@ -489,6 +490,24 @@ describe('the question form', () => {
           },
         },
       ],
+    ])
+  })
+
+  it('sends nothing on a digit or Space that completes the answers: then Enter or Ctrl+Enter sends', async () => {
+    const { api, user } = await renderOverlay(setup())
+    // Digits answer all three; the last digit completes the form but does not send.
+    await user.keyboard('{Tab}2')
+    await user.keyboard('1{Enter}1')
+    expect(tabTexts()).toEqual(['✓ Ág', '✓ Tesztek', '✓ 3. kérdés'])
+    expect(api.decide).not.toHaveBeenCalled()
+
+    // Going back to change an answer with a digit does not send either.
+    await user.keyboard('{ArrowLeft}{ArrowLeft}3')
+    expect(api.decide).not.toHaveBeenCalled()
+
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    expect(api.decide.mock.calls).toEqual([
+      [request.id, { type: 'answer', answers: { [branch.question]: 'kísérlet', [tests.question]: 'egység', [name.question]: 'alfa' } }],
     ])
   })
 
