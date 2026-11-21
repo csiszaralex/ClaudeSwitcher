@@ -103,11 +103,40 @@ body {
   font-weight: 400;
   cursor: default;
 }
+/* The tag of an excluded session's row that shows in the list while something of it waits (list-cleanup.ts `showsExcludedTag`). */
+.excluded-tag {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--raised);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 400;
+  cursor: default;
+}
 .summary { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The sessions a working row works for (rows.ts `Row.promptedBy`), at the start of its text. */
 .prompted-by { color: var(--waits-on); cursor: default; }
 .age { color: var(--text-faint); text-align: right; font-variant-numeric: tabular-nums; }
 .empty { padding: 24px; text-align: center; color: var(--text-faint); }
+/* The excluded group at the bottom of the list (list-cleanup.ts `listView`): a header selectable like
+   a row, and its rows dimmed, so they read as set aside. The selected one still shows its background. */
+.excluded-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.excluded-header.selected { background: var(--raised); color: var(--text-dim); }
+.excluded-toggle { width: 16px; }
+.session.excluded { opacity: 0.55; }
+.session.excluded.selected { opacity: 0.8; }
 
 /* The peek (Space, PeekPanel.tsx): the session's conversation in place of the list. The header
    stays, the history scrolls; App's keys scroll it. */

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { DecisionKind, SessionStatus as Status } from '@claudeswitcher/core'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { moveSelection, nextAfterDecision, selectOnShow } from './selection.js'
+import type { SeenFinish } from '../shared/session-finished.js'
 
 const session = (
   sessionId: string,
@@ -34,7 +35,7 @@ const decision = (
 })
 
 /** Nothing seen, unless a test says otherwise. */
-const NONE_SEEN = new Map<string, number>()
+const NONE_SEEN = new Map<string, SeenFinish>()
 
 describe('activeDecision', () => {
   it('prefers the oldest request the app can still decide over an older released one', () => {
@@ -96,7 +97,7 @@ describe('buildRows', () => {
   })
 
   it('gives each row the marker statusMarker gives it', () => {
-    const rows = buildRows([session('f', 'idle', undefined, { stoppedAt: 5 })], [decision('o', 'ghost', 1)], new Map([['f', 5]]))
+    const rows = buildRows([session('f', 'idle', undefined, { stoppedAt: 5 })], [decision('o', 'ghost', 1)], new Map([['f', { stoppedAt: 5, cleared: false }]]))
     expect(rows.map((r) => [r.sessionId, r.marker.tone])).toEqual([
       ['ghost', 'waiting'],
       ['f', 'seen'],
@@ -124,7 +125,7 @@ describe('buildRows order', () => {
       decision('dc', 'choice', 40, false, 'P:\\proj\\alpha', 'question'),
       decision('dy', 'yesno', 45),
     ]
-    const rows = buildRows(sessions, decisions, new Map([['seen', 50]]))
+    const rows = buildRows(sessions, decisions, new Map([['seen', { stoppedAt: 50, cleared: false }]]))
     expect(rows.map((r) => r.marker.tone)).toEqual(['waiting', 'choice', 'released', 'done', 'working', 'seen', 'limit', 'idle'])
     expect(ids(rows)).toEqual(['yesno', 'choice', 'released', 'done', 'working', 'seen', 'limit', 'idle'])
   })
@@ -144,7 +145,7 @@ describe('buildRows order', () => {
       worksFor('crm', 'CRM master', 'waiting', pipe),
       worksFor('app', 'BohemApp', 'working', pipe, other),
     ]
-    const rows = buildRows(sessions, [], new Map([['seen', 50]]))
+    const rows = buildRows(sessions, [], new Map([['seen', { stoppedAt: 50, cleared: false }]]))
     expect(rows.map((r) => [r.sessionId, r.marker.tone])).toEqual([
       ['crm', 'waiting'],
       ['app', 'working'],

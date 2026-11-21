@@ -1,4 +1,5 @@
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdirSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isNotFoundError, isRecord, transformSettingsFile } from '@claudeswitcher/core'
 import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isHotkeyValue, isSettingKey } from '../shared/settings.js'
@@ -16,6 +17,13 @@ export interface StoredConfig {
    * file without it, or a value that is not a version, skips nothing.
    */
   skippedVersion: string | undefined
+  /**
+   * The sessions the user moved out of the list (`saveExcludedSessions`, `main/excluded-sessions.ts`),
+   * by session id. Not a setting either, the same way as `skippedVersion`. An older file without it,
+   * or a value that is not an array, excludes nothing; an item that is not a non-empty string drops
+   * out.
+   */
+  excludedSessions: readonly string[]
 }
 
 const DEFAULT_VALUES: StoredValues = {
@@ -28,7 +36,7 @@ const DEFAULT_VALUES: StoredValues = {
 }
 
 function defaultConfig(): StoredConfig {
-  return { values: { ...DEFAULT_VALUES }, confirmed: new Set(), skippedVersion: undefined }
+  return { values: { ...DEFAULT_VALUES }, confirmed: new Set(), skippedVersion: undefined, excludedSessions: [] }
 }
 
 /** A release version as electron-updater reports it (`1.2.3`, with an optional pre-release or build). */
@@ -37,6 +45,12 @@ const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?
 /** The stored skipped version, or `undefined` if it is missing or not a version string. */
 function versionOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' && VERSION_PATTERN.test(value) ? value : undefined
+}
+
+/** The stored excluded session ids: the non-empty strings of an array, each once; anything else gives none. */
+function sessionIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set((value as unknown[]).filter((id): id is string => typeof id === 'string' && id !== ''))]
 }
 
 /** The value of a boolean key, or its default if it is missing or not a boolean. */
@@ -85,12 +99,15 @@ function parseObject(raw: string): Record<string, unknown> | undefined {
  * file. `change` gets the existing object; a missing file arrives as an empty object. Our own
  * config file needs no backup.
  */
-async function transformConfig(
+function transformConfig(
   dir: string,
   change: (existing: Record<string, unknown>) => Record<string, unknown>,
 ): Promise<void> {
-  await mkdir(dir, { recursive: true })
-  await transformSettingsFile(configPath(dir), change, { backup: false })
+  // Synchronous, so the write joins the file's queue (`transformSettingsFile`) within this call, in
+  // the order of the calls. Awaiting an async mkdir first let two saves started together (a quick
+  // Delete, Delete: `saveExcludedSessions`) enter the queue in either order, and the older list won.
+  mkdirSync(dir, { recursive: true })
+  return transformSettingsFile(configPath(dir), change, { backup: false })
 }
 
 /**
@@ -126,8 +143,17 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
   if (raw !== undefined) {
     const parsed = parseObject(raw)
     if (parsed === undefined) return defaultConfig()
-    const { hotkey, hideAfterLastDecision, jumpToTab, notifyOnRequest, notifyOnFinish, checkForUpdates, confirmed, skippedVersion } =
-      parsed
+    const {
+      hotkey,
+      hideAfterLastDecision,
+      jumpToTab,
+      notifyOnRequest,
+      notifyOnFinish,
+      checkForUpdates,
+      confirmed,
+      skippedVersion,
+      excludedSessions,
+    } = parsed
     return {
       values: {
         hotkey: isHotkeyValue(hotkey) ? hotkey : DEFAULT_HOTKEY,
@@ -139,6 +165,7 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
       },
       confirmed: confirmedKeys(confirmed),
       skippedVersion: versionOrUndefined(skippedVersion),
+      excludedSessions: sessionIds(excludedSessions),
     }
   }
 
@@ -194,6 +221,23 @@ export async function saveSkippedVersion(dir: string, version: string): Promise<
     return true
   } catch (error) {
     console.error('[claudeswitcher] could not save the skipped update version; not overwriting the config file', error)
+    return false
+  }
+}
+
+/**
+ * Persists the sessions the user excluded from the list (`excludedSessions`), the whole list, with
+ * the same guarantees as `saveSkippedVersion`: the file is read fresh, only this key changes (so a
+ * save from the setup window, which rewrites only its settings, keeps it), a broken or unreadable
+ * file is not written to, and the calls queue per file, so the last call's list is the one that
+ * stays. Never throws; true if it was written.
+ */
+export async function saveExcludedSessions(dir: string, ids: readonly string[]): Promise<boolean> {
+  try {
+    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), excludedSessions: [...ids] }))
+    return true
+  } catch (error) {
+    console.error('[claudeswitcher] could not save the excluded sessions; not overwriting the config file', error)
     return false
   }
 }

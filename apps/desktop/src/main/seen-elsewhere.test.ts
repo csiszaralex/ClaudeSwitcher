@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { acknowledgeFinish } from '../shared/session-finished.js'
+import { acknowledgeFinish, clearFinish, type SeenFinish } from '../shared/session-finished.js'
 import { CLI_ENTRYPOINT, VSCODE_ENTRYPOINT } from '../shared/entrypoint.js'
 import type { ForegroundTitle } from './focus-window.js'
 import {
@@ -19,7 +19,7 @@ import {
 const CODE_PID = 4242
 const OTHER_PID = 5151
 const STOPPED_AT = 1_800_000_000_000
-const NONE_SEEN = new Map<string, number>()
+const NONE_SEEN = new Map<string, SeenFinish>()
 
 const session = (id: string, tabTitle: string | undefined, over: Partial<SeenSession> = {}): SeenSession => ({
   sessionId: `7a1b2c3d-0000-4000-8000-00000000000${id}`,
@@ -119,7 +119,7 @@ describe('sessionInFront', () => {
 
   it('skips a seen finish, a working session, and a session without a finish', () => {
     const one = session('1', 'CRM master')
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     acknowledgeFinish(seen, one, [])
     const title = window(custom('alpha', 'CRM master'))
     expect(sessionInFront(title, [one], seen)).toBeUndefined()
@@ -183,9 +183,13 @@ describe('watchesSeen', () => {
   it('holds while an unseen VS Code finish with a tab title exists', () => {
     const one = session('1', 'CRM master')
     expect(watchesSeen([one], NONE_SEEN)).toBe(true)
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     acknowledgeFinish(seen, one, [])
     expect(watchesSeen([one], seen)).toBe(false)
+    const cleared = new Map<string, SeenFinish>()
+    clearFinish(cleared, one, [])
+    expect(watchesSeen([one], cleared)).toBe(false)
+    expect(sessionInFront(window(custom('alpha', 'CRM master')), [one], cleared)).toBeUndefined()
     expect(watchesSeen([session('1', 'CRM master', { entrypoint: CLI_ENTRYPOINT })], NONE_SEEN)).toBe(false)
     expect(watchesSeen([session('1', undefined)], NONE_SEEN)).toBe(false)
     expect(watchesSeen([session('1', 'CRM master', { status: 'working' })], NONE_SEEN)).toBe(false)
@@ -245,7 +249,7 @@ describe('createSeenWatch', () => {
 
   it('starts again when the candidate changes, and stops once the finish is seen', () => {
     const watch = createSeenWatch()
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     expect(watch.observe({ foreground: onOne, sessions, seen, now: 0 })).toBeUndefined()
     // A second session with the same title arrives in the same window: no single candidate.
     const twin = session('3', 'CRM master')

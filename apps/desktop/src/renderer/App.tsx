@@ -15,6 +15,17 @@ import {
   waitsOnText,
 } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
+import {
+  EXCLUDED_GROUP_ID,
+  EXCLUDED_TEXT,
+  isClearFinishKey,
+  isExcludeKey,
+  keptRows,
+  listView,
+  selectionAfterChange,
+  showsExcludedTag,
+  showsFinishMark,
+} from './list-cleanup.js'
 import { isPeekKey, PEEK_TEXT, peekRequest, peekScrollTop } from './peek.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
@@ -81,8 +92,25 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * @param overlay The daemon's live state. It comes from outside (`main.tsx` `Root`) and is not read
  * here: so the connection lives on after a render error, and the next state can restore the UI.
  * @param seenFinishes The finishes the user has seen (`useSeenFinishes`), for the ✓ marker's color.
+ * @param trackSeen Takes the reply of a request that answers with the seen finishes (a cleared ✓), so
+ * the list redraws at once (`useSeenFinishes`).
+ * @param excluded The sessions moved out of the list (`useExcludedSessions`), for the excluded group.
+ * @param trackExcluded Takes the reply of a Delete, which answers with the excluded sessions, and
+ * calls `onApplied` with them in the same update (`useExcludedSessions`).
  */
-export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFinishes: SeenFinishes }): JSX.Element {
+export function App({
+  overlay,
+  seenFinishes,
+  trackSeen,
+  excluded,
+  trackExcluded,
+}: {
+  overlay: OverlayState
+  seenFinishes: SeenFinishes
+  trackSeen: (reply: Promise<unknown>) => void
+  excluded: ReadonlySet<string>
+  trackExcluded: (reply: Promise<unknown>, onApplied: (excluded: ReadonlySet<string>) => void) => void
+}): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
   // A session id, not an index: when the list reorders, the selection moves with the session.
   // See the selection.ts documentation.
@@ -96,16 +124,25 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // `undefined`. Its history's scroll box, which the keys scroll.
   const [peekId, setPeekId] = useState<string | undefined>()
   const peekHistory = useRef<HTMLDivElement | null>(null)
+  // Whether the excluded group at the bottom of the list shows its rows (list-cleanup.ts).
+  const [groupOpen, setGroupOpen] = useState(false)
 
   // All rows: the sessions, plus a row of its own for each pending request whose session the
   // snapshot does not know yet, in the list's order (rows.ts).
   const allRows = buildRows(sessions, decisions, seenFinishes)
-  // The rows the list shows: all of them, or while the search is open its matches, in the same
-  // order. The selection and the stepping work on these.
-  const rows = query === undefined ? allRows : filterRows(allRows, query)
-  const ids = rows.map((row) => row.sessionId)
+  // What the list shows (list-cleanup.ts `listView`): the rows not in the excluded group, or while
+  // the search is open its matches among them, in the same order; then the group's header and,
+  // while it is open, its rows. The selection and the stepping work on its items (`ids`).
+  const list = listView(allRows, excluded, query, groupOpen)
+  const rows = list.rows
+  const ids = list.ids
   const selected = resolveSelectedIndex(ids, selectedId)
-  const selectedRowView = selected === -1 ? undefined : rows[selected]
+  const selectedItem = selected === -1 ? undefined : ids[selected]
+  const headerSelected = selectedItem === EXCLUDED_GROUP_ID
+  const selectedRowView =
+    selectedItem === undefined || headerSelected
+      ? undefined
+      : [...rows, ...list.group].find((row) => row.sessionId === selectedItem)
   // The peeked row, among all rows: the search does not hide it. Only a row with a session has a
   // conversation; a row that only holds requests opens nothing.
   const peekRow = peekId === undefined ? undefined : allRows.find((row) => row.sessionId === peekId && row.session !== undefined)
@@ -123,10 +160,13 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   // The latest state for the async handlers (show, the step after a decision, the search's typing).
   // A closure from render time can go stale before the decision's reply or the show: the step has
   // to be computed on the freshest list, else it could jump to a session that has disappeared
-  // meanwhile. All rows, not only the search's matches: the search closes on show.
-  const latest = useRef({ rows: allRows, decisions })
+  // meanwhile. All rows above the excluded group, not only the search's matches: the search and the
+  // group close on show, and a row in the group waits for nothing (list-cleanup.ts
+  // `inExcludedGroup`). `allRows`, `ids`, `query` and `groupOpen` are for the selection after a
+  // Delete's reply (`setExcluded`).
+  const latest = useRef({ rows: keptRows(allRows, excluded), decisions, allRows, ids, query, groupOpen })
   useEffect(() => {
-    latest.current = { rows: allRows, decisions }
+    latest.current = { rows: keptRows(allRows, excluded), decisions, allRows, ids, query, groupOpen }
   })
 
   // For the guard on the panel's key letters (key-guard.ts): when the overlay appeared, and when
@@ -141,7 +181,7 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
   const arrivals = useRef(trackArrivals())
   useEffect(() => {
     const next = arrivals.current({
-      sessions: allRows,
+      sessions: keptRows(allRows, excluded),
       decisions,
       selectedId: selectedRowView?.sessionId,
       lastTypedAt: keyHistory.current.lastTypedAt,
@@ -160,9 +200,10 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         const armedAt = armUntil(Date.now())
         keyHistory.current.shownArmedAt = armedAt
         rerenderOnShow(armedAt)
-        // The search and the peek start closed on every show.
+        // The search, the peek and the excluded group start closed on every show.
         setQuery(undefined)
         setPeekId(undefined)
+        setGroupOpen(false)
         setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current, preferred))
       }),
     [],
@@ -256,6 +297,20 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
     if (next.trim() !== '' && first !== undefined) setSelectedId(first.sessionId)
   }
 
+  /**
+   * Moves the session out of the list (`exclude`) or brings it back, by Delete. The direction is
+   * explicit, so a second Delete before the reply asks the same again, which the main process
+   * ignores. When the reply has moved the selected row out of the list's items, the selection goes
+   * to its neighbour (list-cleanup.ts `selectionAfterChange`), in the same update as the list.
+   */
+  function setExcluded(sessionId: string, exclude: boolean): void {
+    trackExcluded(window.claudeswitcher.setExcluded(sessionId, exclude), (next) => {
+      const { allRows: rowsNow, ids: before, query: queryNow, groupOpen: openNow } = latest.current
+      const after = listView(rowsNow, next, queryNow, openNow).ids
+      setSelectedId((current) => selectionAfterChange(before, after, current, sessionId))
+    })
+  }
+
   /** Opens the search; when it is open already, puts the focus back into its field. */
   function openSearch(): void {
     if (query === undefined) setQuery('')
@@ -297,11 +352,30 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
       // returns above).
       if (isPeekKey(event)) {
         event.preventDefault()
-        const row = rows[resolveSelectedIndex(ids, selectedId)]
+        const row = selectedRowView
         if (row?.session !== undefined) {
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
           setPeekId(row.sessionId)
         }
+        return
+      }
+      // Backspace clears the selected row's ✓ (list-cleanup.ts). Its default is prevented, so a
+      // focused button is not pressed (Chromium presses a button only on Enter and Space anyway). The
+      // main process checks the session's state when the request arrives (`clearFinish`), so a row
+      // whose session started a new turn meanwhile is left alone.
+      if (isClearFinishKey(event)) {
+        event.preventDefault()
+        const row = selectedRowView
+        if (row !== undefined && showsFinishMark(row)) trackSeen(window.claudeswitcher.clearFinish(row.sessionId))
+        return
+      }
+      // Delete moves the selected row's session into the excluded group, or an excluded one back
+      // (list-cleanup.ts). A row without a session and the group's header do nothing. As with
+      // Backspace, the main process checks the session's state when the request arrives.
+      if (isExcludeKey(event)) {
+        event.preventDefault()
+        const row = selectedRowView
+        if (row?.session !== undefined) setExcluded(row.sessionId, !excluded.has(row.sessionId))
         return
       }
       // On a focused button or <summary>, Enter belongs to the element (presses or opens it), not a jump.
@@ -317,11 +391,15 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
       // With the decision panel open, Tab moves between the buttons there, not a jump. In the
-      // search, Enter opens the selected match; without a match there is nothing to open.
+      // search, Enter opens the selected match; without a match there is nothing to open. On the
+      // excluded group's header Enter opens or closes the group, and Tab does nothing.
       if (event.key === 'Enter' || (event.key === 'Tab' && panel === undefined)) {
         event.preventDefault()
-        const id = ids[resolveSelectedIndex(ids, selectedId)]
-        if (id !== undefined) void window.claudeswitcher.focusSession(id)
+        if (headerSelected) {
+          if (event.key === 'Enter') setGroupOpen((open) => !open)
+          return
+        }
+        if (selectedItem !== undefined) void window.claudeswitcher.focusSession(selectedItem)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -329,6 +407,90 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
       window.removeEventListener('keydown', onKey)
     }
   })
+
+  /**
+   * One row of the list: above the excluded group, or in it (`inGroup`, dimmed). A row above the
+   * group whose session is excluded, because something of it waits, carries the `kizárt` tag
+   * (list-cleanup.ts `showsExcludedTag`).
+   */
+  function renderRow(row: (typeof allRows)[number], inGroup: boolean): JSX.Element {
+    const pending = activeDecision(row.decisions)
+    const marker = row.marker
+    const badge = pendingBadge(row.decisions)
+    // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
+    const source = requestSource(row.session?.entrypoint)
+    const flagged = source.standsOut && row.decisions.length > 0
+    const note = promptedByNote(row.promptedBy)
+    const isSelected = !headerSelected && row.sessionId === selectedItem
+    return (
+      <li
+        key={row.sessionId}
+        ref={isSelected ? selectedRow : null}
+        className={`session ${row.status} ${inGroup ? 'excluded' : ''} ${isSelected ? 'selected' : ''}`}
+        onClick={() => {
+          setSelectedId(row.sessionId)
+        }}
+        onDoubleClick={() => {
+          void window.claudeswitcher.focusSession(row.sessionId)
+        }}
+      >
+        <span className={`marker tone-${marker.tone}`} title={marker.title}>
+          {marker.glyph}
+        </span>
+        <span className="name">
+          {/*
+            Only the text is truncated (…), never the dot: it must show with a long name too.
+            The tooltip also names the registry name when the row shows the tab title.
+          */}
+          <span className="name-text" title={row.session === undefined ? row.name : nameTooltip(row.session)}>
+            {row.name}
+          </span>
+          {row.session !== undefined && hasRemoteControl(row.session) && (
+            <span className="remote" title="Remote Control: telefonról is elérhető">
+              ●
+            </span>
+          )}
+          {flagged && (
+            <span className="source-tag" title={source.title}>
+              {source.label}
+            </span>
+          )}
+          {badge !== undefined && (
+            <span className="pending-count" title="Ennyi kérése vár az appban">
+              {badge}
+            </span>
+          )}
+          {!inGroup && showsExcludedTag(row, excluded) && (
+            <span className="excluded-tag" title={EXCLUDED_TEXT.tagTitle}>
+              {EXCLUDED_TEXT.tag}
+            </span>
+          )}
+        </span>
+        <span
+          className="summary"
+          // A pending decision overrides the row; the tooltip still lists every active subagent.
+          title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
+        >
+          {/* The sessions this one works for, first, so the end of a long text is what CSS cuts. */}
+          {note !== undefined && (
+            <span className="prompted-by" title={`Megkérte: ${row.promptedBy.join(', ')}`}>
+              {note}{' '}
+            </span>
+          )}
+          {pending !== undefined
+            ? pendingRowText(pending)
+            : row.waitsOn.length > 0
+              ? waitsOnText(row.waitsOn)
+              : row.session !== undefined
+                ? summarize(row.session, now)
+                : ''}
+        </span>
+        <span className="age">
+          {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}
+        </span>
+      </li>
+    )
+  }
 
   return (
     <div className="overlay">
@@ -370,85 +532,30 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
             </div>
           )}
           <ul className="sessions">
-            {rows.length === 0 && (
+            {rows.length === 0 && !list.groupShown && (
               // "No session", "the daemon cannot be reached" and "the search finds none" are not the
               // same: the user has to see which one it is.
               <li className="empty">
                 {allRows.length > 0 ? 'Nincs találat' : connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
               </li>
             )}
-            {rows.map((row, index) => {
-              const pending = activeDecision(row.decisions)
-              const marker = row.marker
-              const badge = pendingBadge(row.decisions)
-              // The source tag shows only on a row with a request and only when it stands out (shared/request-source.ts).
-              const source = requestSource(row.session?.entrypoint)
-              const flagged = source.standsOut && row.decisions.length > 0
-              const note = promptedByNote(row.promptedBy)
-              return (
-                <li
-                  key={row.sessionId}
-                  ref={index === selected ? selectedRow : null}
-                  className={`session ${row.status} ${index === selected ? 'selected' : ''}`}
-                  onClick={() => {
-                    setSelectedId(row.sessionId)
-                  }}
-                  onDoubleClick={() => {
-                    void window.claudeswitcher.focusSession(row.sessionId)
-                  }}
-                >
-                  <span className={`marker tone-${marker.tone}`} title={marker.title}>
-                    {marker.glyph}
-                  </span>
-                  <span className="name">
-                    {/*
-                      Only the text is truncated (…), never the dot: it must show with a long name too.
-                      The tooltip also names the registry name when the row shows the tab title.
-                    */}
-                    <span className="name-text" title={row.session === undefined ? row.name : nameTooltip(row.session)}>
-                      {row.name}
-                    </span>
-                    {row.session !== undefined && hasRemoteControl(row.session) && (
-                      <span className="remote" title="Remote Control: telefonról is elérhető">
-                        ●
-                      </span>
-                    )}
-                    {flagged && (
-                      <span className="source-tag" title={source.title}>
-                        {source.label}
-                      </span>
-                    )}
-                    {badge !== undefined && (
-                      <span className="pending-count" title="Ennyi kérése vár az appban">
-                        {badge}
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    className="summary"
-                    // A pending decision overrides the row; the tooltip still lists every active subagent.
-                    title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
-                  >
-                    {/* The sessions this one works for, first, so the end of a long text is what CSS cuts. */}
-                    {note !== undefined && (
-                      <span className="prompted-by" title={`Megkérte: ${row.promptedBy.join(', ')}`}>
-                        {note}{' '}
-                      </span>
-                    )}
-                    {pending !== undefined
-                      ? pendingRowText(pending)
-                      : row.waitsOn.length > 0
-                        ? waitsOnText(row.waitsOn)
-                        : row.session !== undefined
-                          ? summarize(row.session, now)
-                          : ''}
-                  </span>
-                  <span className="age">
-                    {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}
-                  </span>
-                </li>
-              )
-            })}
+            {rows.map((row) => renderRow(row, false))}
+            {list.groupShown && (
+              <li
+                key={EXCLUDED_GROUP_ID}
+                ref={headerSelected ? selectedRow : null}
+                className={`excluded-header ${headerSelected ? 'selected' : ''}`}
+                title={EXCLUDED_TEXT.groupTitle}
+                onClick={() => {
+                  setSelectedId(EXCLUDED_GROUP_ID)
+                  setGroupOpen((open) => !open)
+                }}
+              >
+                <span className="excluded-toggle">{list.groupOpen ? '▾' : '▸'}</span>
+                <span>{EXCLUDED_TEXT.group(list.group.length)}</span>
+              </li>
+            )}
+            {list.groupOpen && list.group.map((row) => renderRow(row, true))}
           </ul>
 
           {panel !== undefined && (
