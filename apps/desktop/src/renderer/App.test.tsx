@@ -241,6 +241,36 @@ describe('the cleanup keys', () => {
     expect(row('gamma').classList.contains('excluded')).toBe(false)
   })
 
+  it('opens the closed group with → on its header, takes ← from its row to the header, and closes it with ←', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
+    await user.keyboard('{ArrowDown}{ArrowDown}')
+    expect(header()?.classList.contains('selected')).toBe(true)
+    await user.keyboard('{ArrowRight}')
+    expect(header()?.textContent).toContain('▾')
+
+    await user.keyboard('{ArrowDown}')
+    expect(selectedName()).toBe('gamma')
+    await user.keyboard('{ArrowLeft}')
+    expect(header()?.classList.contains('selected')).toBe(true)
+    expect(header()?.textContent).toContain('▾')
+    await user.keyboard('{ArrowLeft}')
+    expect(header()?.textContent).toContain('▸')
+
+    // ← on the closed header and → on the open one do nothing.
+    await user.keyboard('{ArrowLeft}{ArrowRight}{ArrowRight}')
+    expect(header()?.textContent).toContain('▾')
+    expect(api.focusSession).not.toHaveBeenCalled()
+  })
+
+  it('acts once on a held ←: from a row of the open group to the header, without closing it', async () => {
+    const { user } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowRight}{ArrowDown}')
+    expect(selectedName()).toBe('gamma')
+    await user.keyboard('{ArrowLeft>4/}')
+    expect(header()?.classList.contains('selected')).toBe(true)
+    expect(header()?.textContent).toContain('▾')
+  })
+
   it('keeps an excluded session with a pending request in the list, with the tag, out of the group', async () => {
     await renderOverlay({
       sessions: [session(1, 'alpha'), session(2, 'beta')],

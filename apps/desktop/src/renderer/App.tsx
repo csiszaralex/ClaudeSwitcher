@@ -19,6 +19,7 @@ import { armUntil, type KeyHistory } from './key-guard.js'
 import {
   EXCLUDED_GROUP_ID,
   EXCLUDED_TEXT,
+  groupArrow,
   isClearFinishKey,
   isExcludeKey,
   keptRows,
@@ -140,6 +141,8 @@ export function App({
   const selected = resolveSelectedIndex(ids, selectedId)
   const selectedItem = selected === -1 ? undefined : ids[selected]
   const headerSelected = selectedItem === EXCLUDED_GROUP_ID
+  /** Whether the item is a row of the open excluded group. */
+  const inGroup = (id: string | undefined): boolean => list.group.some((row) => row.sessionId === id) && list.groupOpen
   const selectedRowView =
     selectedItem === undefined || headerSelected
       ? undefined
@@ -394,6 +397,17 @@ export function App({
         // Without this the arrow would also scroll the list besides moving the selection.
         event.preventDefault()
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
+      }
+      // ←/→ on the excluded group, as in a tree view (`groupArrow`). Not in the search field, whose
+      // arrows move the cursor (`SEARCH_FIELD_KEYS` returned above), and not in a question form,
+      // which keeps its own keys.
+      const arrow = groupArrow(event, headerSelected ? 'header' : inGroup(selectedItem) ? 'group-row' : 'other', list.groupOpen)
+      if (arrow !== undefined) {
+        event.preventDefault()
+        if (arrow === 'open') setGroupOpen(true)
+        else if (arrow === 'close') setGroupOpen(false)
+        else setSelectedId(EXCLUDED_GROUP_ID)
+        return
       }
       // With a question form open, Tab moves the focus onto its active question; from then on its
       // keys are the form's own (`QuestionForm` `onKeyDown`), and the list's keys rest until Esc.
