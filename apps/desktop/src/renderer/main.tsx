@@ -24,14 +24,14 @@ function overlayFailed(message: string, retries: boolean): JSX.Element {
  */
 function Root(): JSX.Element {
   const overlay = useDaemonState()
-  const seenFinishes = useSeenFinishes()
+  const [seenFinishes, trackSeen] = useSeenFinishes()
   return (
     <ErrorBoundary
       label="overlay"
       resetKey={overlay.stateVersion}
       fallback={(message) => overlayFailed(message, true)}
     >
-      <App overlay={overlay} seenFinishes={seenFinishes} />
+      <App overlay={overlay} seenFinishes={seenFinishes} trackSeen={trackSeen} />
     </ErrorBoundary>
   )
 }

@@ -11,10 +11,16 @@ export const OVERLAY_CHANNELS = {
   connection: 'daemon:connection',
   state: 'daemon:state',
   /**
-   * The finishes the user has seen (main `index.ts` `finishesSeen`), as `[sessionId, stoppedAt]`
-   * pairs; the renderer reads them with a check (`readSeenFinishes`).
+   * The finishes the user has seen (main `index.ts` `finishesSeen`), as `seenFinishesReply` gives
+   * them; the renderer reads them with a check (`readSeenFinishes`).
    */
   finishesSeen: 'session:finishes-seen',
+  /**
+   * Clears the ✓ of a session's finish (Backspace on its row, `shared/session-finished.ts`
+   * `clearFinish`); the argument is the session id. Answers like `finishesSeen`, so the list
+   * redraws at once.
+   */
+  clearFinish: 'session:clear-finish',
   decide: 'decision:decide',
   focusSession: 'session:focus',
   /**

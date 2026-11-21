@@ -15,6 +15,7 @@ import {
   waitsOnText,
 } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
+import { isClearFinishKey, showsFinishMark } from './list-cleanup.js'
 import { isPeekKey, PEEK_TEXT, peekRequest, peekScrollTop } from './peek.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
@@ -81,8 +82,18 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * @param overlay The daemon's live state. It comes from outside (`main.tsx` `Root`) and is not read
  * here: so the connection lives on after a render error, and the next state can restore the UI.
  * @param seenFinishes The finishes the user has seen (`useSeenFinishes`), for the ✓ marker's color.
+ * @param trackSeen Takes the reply of a request that answers with the seen finishes (a cleared ✓), so
+ * the list redraws at once (`useSeenFinishes`).
  */
-export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFinishes: SeenFinishes }): JSX.Element {
+export function App({
+  overlay,
+  seenFinishes,
+  trackSeen,
+}: {
+  overlay: OverlayState
+  seenFinishes: SeenFinishes
+  trackSeen: (reply: Promise<unknown>) => void
+}): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
   // A session id, not an index: when the list reorders, the selection moves with the session.
   // See the selection.ts documentation.
@@ -302,6 +313,16 @@ export function App({ overlay, seenFinishes }: { overlay: OverlayState; seenFini
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
           setPeekId(row.sessionId)
         }
+        return
+      }
+      // Backspace clears the selected row's ✓ (list-cleanup.ts). Its default is prevented, so a
+      // focused button is not pressed (Chromium presses a button only on Enter and Space anyway). The
+      // main process checks the session's state when the request arrives (`clearFinish`), so a row
+      // whose session started a new turn meanwhile is left alone.
+      if (isClearFinishKey(event)) {
+        event.preventDefault()
+        const row = rows[resolveSelectedIndex(ids, selectedId)]
+        if (row !== undefined && showsFinishMark(row)) trackSeen(window.claudeswitcher.clearFinish(row.sessionId))
         return
       }
       // On a focused button or <summary>, Enter belongs to the element (presses or opens it), not a jump.

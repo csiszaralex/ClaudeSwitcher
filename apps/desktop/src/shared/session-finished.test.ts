@@ -1,7 +1,7 @@
 import type { SessionStatus } from '@claudeswitcher/core'
 import { describe, expect, it } from 'vitest'
 import type { LinkedSession } from './prompt-links.js'
-import { acknowledgeFinish, finishState, hasFinished, waitsOn } from './session-finished.js'
+import { acknowledgeFinish, clearFinish, finishState, hasFinished, seenFinishesReply, waitsOn, type SeenFinish } from './session-finished.js'
 
 // Invented sessions and pipes in the measured shapes (design doc "Cross-session messages").
 const SESSION_ID = '6f1c2a3e-0000-4000-8000-000000000011'
@@ -95,19 +95,26 @@ describe('waitsOn', () => {
 
 describe('acknowledgeFinish', () => {
   it('records the stoppedAt the user has seen', () => {
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     acknowledgeFinish(seen, finished(5_000), [])
-    expect(seen.get(SESSION_ID)).toBe(5_000)
+    expect(seen.get(SESSION_ID)).toEqual({ stoppedAt: 5_000, cleared: false })
+  })
+
+  it('keeps a cleared finish cleared when the same finish is seen again', () => {
+    const seen = new Map<string, SeenFinish>()
+    clearFinish(seen, finished(5_000), [])
+    acknowledgeFinish(seen, finished(5_000), [])
+    expect(finishState(finished(5_000), seen, [])).toBe('none')
   })
 
   it('records nothing for a session without a stoppedAt', () => {
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     acknowledgeFinish(seen, { sessionId: SESSION_ID, status: 'idle' }, [])
     expect(seen.size).toBe(0)
   })
 
   it('records nothing while the session waits on a session it prompted', () => {
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     acknowledgeFinish(seen, finished(5_000), [recipient('r1', 'Worker', 'working', PIPE)])
     expect(seen.size).toBe(0)
   })
@@ -119,19 +126,19 @@ describe('finishState', () => {
   })
 
   it('is seen once that stoppedAt is acknowledged', () => {
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     acknowledgeFinish(seen, finished(5_000), [])
     expect(finishState(finished(5_000), seen, [])).toBe('seen')
   })
 
   it('is unseen again for a new stoppedAt after a seen one', () => {
-    const seen = new Map<string, number>()
+    const seen = new Map<string, SeenFinish>()
     acknowledgeFinish(seen, finished(5_000), [])
     expect(finishState(finished(9_000), seen, [])).toBe('unseen')
   })
 
   it('is none for a session that has not finished, seen or not', () => {
-    const seen = new Map([[SESSION_ID, 5_000]])
+    const seen = new Map([[SESSION_ID, { stoppedAt: 5_000, cleared: false }]])
     expect(finishState({ sessionId: SESSION_ID, status: 'idle' }, seen, [])).toBe('none')
     expect(finishState({ ...finished(5_000), status: 'working' }, seen, [])).toBe('none')
   })
@@ -140,5 +147,66 @@ describe('finishState', () => {
     const working = recipient('r1', 'Worker', 'working', PIPE)
     expect(finishState(finished(5_000), new Map(), [working])).toBe('none')
     expect(finishState(finished(5_000), new Map(), [{ ...working, status: 'idle' }])).toBe('unseen')
+  })
+})
+
+describe('clearFinish', () => {
+  it('clears an unseen finish: it counts as seen and shows no ✓', () => {
+    const seen = new Map<string, SeenFinish>()
+    expect(clearFinish(seen, finished(5_000), [])).toBe(true)
+    expect(finishState(finished(5_000), seen, [])).toBe('none')
+  })
+
+  it('clears a seen finish', () => {
+    const seen = new Map<string, SeenFinish>()
+    acknowledgeFinish(seen, finished(5_000), [])
+    expect(clearFinish(seen, finished(5_000), [])).toBe(true)
+    expect(finishState(finished(5_000), seen, [])).toBe('none')
+  })
+
+  it('shows the next finish again: a new stoppedAt is unseen', () => {
+    const seen = new Map<string, SeenFinish>()
+    clearFinish(seen, finished(5_000), [])
+    expect(finishState(finished(9_000), seen, [])).toBe('unseen')
+  })
+
+  it('keeps the finish cleared while a subagent hides its stoppedAt, and after it comes back', () => {
+    const seen = new Map<string, SeenFinish>()
+    clearFinish(seen, finished(5_000), [])
+    expect(finishState({ sessionId: SESSION_ID, status: 'idle' }, seen, [])).toBe('none')
+    expect(finishState(finished(5_000), seen, [])).toBe('none')
+  })
+
+  it('does nothing on a session that works again: the key arrived after a new turn began', () => {
+    const seen = new Map<string, SeenFinish>()
+    expect(clearFinish(seen, { ...finished(5_000), status: 'working' }, [])).toBe(false)
+    expect(clearFinish(seen, { sessionId: SESSION_ID, status: 'idle' }, [])).toBe(false)
+    expect(seen.size).toBe(0)
+  })
+
+  it('does nothing on a session that waits on a session it prompted', () => {
+    const seen = new Map<string, SeenFinish>()
+    expect(clearFinish(seen, finished(5_000), [recipient('r1', 'Worker', 'working', PIPE)])).toBe(false)
+    expect(seen.size).toBe(0)
+  })
+
+  it('is idempotent: a second press changes nothing', () => {
+    const seen = new Map<string, SeenFinish>()
+    expect(clearFinish(seen, finished(5_000), [])).toBe(true)
+    expect(clearFinish(seen, finished(5_000), [])).toBe(false)
+    expect(seenFinishesReply(seen)).toEqual([[SESSION_ID, 5_000, true]])
+  })
+})
+
+describe('seenFinishesReply', () => {
+  it('gives each finish as a [sessionId, stoppedAt, cleared] triple', () => {
+    const seen = new Map<string, SeenFinish>([
+      [SESSION_ID, { stoppedAt: 5_000, cleared: false }],
+      ['6f1c2a3e-0000-4000-8000-000000000012', { stoppedAt: 7_000, cleared: true }],
+    ])
+    expect(seenFinishesReply(seen)).toEqual([
+      [SESSION_ID, 5_000, false],
+      ['6f1c2a3e-0000-4000-8000-000000000012', 7_000, true],
+    ])
   })
 })

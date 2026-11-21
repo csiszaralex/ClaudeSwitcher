@@ -17,10 +17,12 @@ export interface ClaudeSwitcherApi {
   /** The daemon's state; the renderer reads it with `sanitizeState`. */
   state: () => Promise<unknown>
   /**
-   * The finishes the user has seen, as `[sessionId, stoppedAt]` pairs; the renderer reads them with
+   * The finishes the user has seen (`seenFinishesReply`); the renderer reads them with
    * `readSeenFinishes`.
    */
   finishesSeen: () => Promise<unknown>
+  /** Clears the ✓ of the session's finish; answers like `finishesSeen`. */
+  clearFinish: (sessionId: string) => Promise<unknown>
   focusSession: (sessionId: string) => Promise<boolean>
   /**
    * The session's recent conversation; the main process gives a `ConversationReply`, the renderer

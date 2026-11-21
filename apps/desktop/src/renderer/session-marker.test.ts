@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionStatus as Status } from '@claudeswitcher/core'
 import { PERMISSION_RELEASE_AFTER_MS, UNREADABLE_REQUEST } from '@claudeswitcher/core/browser'
 import { sessionHost } from '../shared/request-source.js'
+import type { SeenFinish } from '../shared/session-finished.js'
 import { hasRemoteControl, outsideAppMessage, releasedMessage, statusMarker, unreadableMessage } from './session-marker.js'
 
 const SESSION_ID = '6f1c2a3e-0000-4000-8000-000000000031'
@@ -11,7 +12,7 @@ const session = (status: Status, stoppedAt?: number): { sessionId: string; statu
   stoppedAt,
 })
 /** Nothing seen, unless a test says otherwise. */
-const NONE_SEEN = new Map<string, number>()
+const NONE_SEEN = new Map<string, SeenFinish>()
 // An invented pipe in the measured shape (design doc "Cross-session messages").
 const PIPE = String.raw`\\.\pipe\LOCAL\cc-msg-0a1b2c3d4e5f60718293a4b5c6d7e8f9`
 const waitingOnWorker = { ...session('idle', 5_000), messagingSocketPath: PIPE }
@@ -78,18 +79,24 @@ describe('statusMarker', () => {
   })
 
   it('shows a seen finish as a blue ✓ with its own tooltip', () => {
-    const marker = statusMarker(session('idle', 5_000), [], new Map([[SESSION_ID, 5_000]]), [])
+    const marker = statusMarker(session('idle', 5_000), [], new Map([[SESSION_ID, { stoppedAt: 5_000, cleared: false }]]), [])
     expect(marker.tone).toBe('seen')
     expect(marker.glyph).toBe('✓')
     expect(marker.title).toBe('Végzett, már megnyitottad')
   })
 
   it('shows a new stoppedAt after a seen one as green again', () => {
-    expect(statusMarker(session('idle', 9_000), [], new Map([[SESSION_ID, 5_000]]), []).tone).toBe('done')
+    expect(statusMarker(session('idle', 9_000), [], new Map([[SESSION_ID, { stoppedAt: 5_000, cleared: false }]]), []).tone).toBe('done')
+  })
+
+  it('shows a cleared finish as idle, and its next finish as green again', () => {
+    const cleared = new Map([[SESSION_ID, { stoppedAt: 5_000, cleared: true }]])
+    expect(statusMarker(session('idle', 5_000), [], cleared, []).tone).toBe('idle')
+    expect(statusMarker(session('idle', 9_000), [], cleared, []).tone).toBe('done')
   })
 
   it('ignores the seen finish of another session', () => {
-    expect(statusMarker(session('idle', 5_000), [], new Map([['6f1c2a3e-0000-4000-8000-000000000032', 5_000]]), []).tone).toBe('done')
+    expect(statusMarker(session('idle', 5_000), [], new Map([['6f1c2a3e-0000-4000-8000-000000000032', { stoppedAt: 5_000, cleared: false }]]), []).tone).toBe('done')
   })
 
   it('does not call a running or waiting session done, even with a stale stoppedAt', () => {
@@ -100,7 +107,7 @@ describe('statusMarker', () => {
   it('shows an idle session the usage limit stopped in its own tone, over the finish', () => {
     const limited = { ...session('idle', 1), activity: { usageLimit: { kind: 'five_hour' } } }
     expect(statusMarker(limited, [], NONE_SEEN, []).tone).toBe('limit')
-    expect(statusMarker(limited, [], new Map([[SESSION_ID, 1]]), []).tone).toBe('limit')
+    expect(statusMarker(limited, [], new Map([[SESSION_ID, { stoppedAt: 1, cleared: false }]]), []).tone).toBe('limit')
     expect(statusMarker({ ...limited, stoppedAt: undefined }, [], NONE_SEEN, []).tone).toBe('limit')
   })
 
@@ -115,7 +122,7 @@ describe('statusMarker', () => {
     expect(statusMarker(waitingOnWorker, [], NONE_SEEN, [worker('working')]).tone).toBe('waits-on')
     expect(statusMarker(waitingOnWorker, [], NONE_SEEN, [worker('waiting')]).tone).toBe('waits-on')
     expect(statusMarker(waitingOnWorker, [], NONE_SEEN, [worker('idle')]).tone).toBe('done')
-    expect(statusMarker(waitingOnWorker, [], new Map([[SESSION_ID, 5_000]]), [worker('idle')]).tone).toBe('seen')
+    expect(statusMarker(waitingOnWorker, [], new Map([[SESSION_ID, { stoppedAt: 5_000, cleared: false }]]), [worker('idle')]).tone).toBe('seen')
     // Working again (the reply arrived as a new prompt): the plain working marker.
     expect(statusMarker({ ...waitingOnWorker, status: 'working' }, [], NONE_SEEN, [worker('working')]).tone).toBe('working')
   })

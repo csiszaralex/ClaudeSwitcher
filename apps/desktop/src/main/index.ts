@@ -35,7 +35,7 @@ import {
   type FocusOutcome,
 } from './focus-window.js'
 import { errorMessage } from '../shared/error-message.js'
-import { acknowledgeFinish } from '../shared/session-finished.js'
+import { acknowledgeFinish, clearFinish, seenFinishesReply, type SeenFinish } from '../shared/session-finished.js'
 import { OVERLAY_CHANNELS, type ConversationReply } from '../shared/overlay-channels.js'
 import { SETUP_CHANNELS, type InstallReply } from '../shared/setup-channels.js'
 import { settingsToAsk } from '../shared/settings.js'
@@ -449,10 +449,11 @@ async function startApp(): Promise<void> {
   await running.refresh()
 
   // The finishes the user has seen (`acknowledgeFinish`): by opening the session from the overlay
-  // (`focusSession`), or by keeping its VS Code tab in front (`watchSeen`). The tray tick and the
-  // overlay (`OVERLAY_CHANNELS.finishesSeen`) read them. In memory only, as the daemon's `stoppedAt`
-  // itself (`SessionStore`).
-  const finishesSeen = new Map<string, number>()
+  // (`focusSession`), or by keeping its VS Code tab in front (`watchSeen`); and the ones whose ✓ the
+  // user cleared (`clearFinish`, Backspace in the list). The tray tick and the overlay
+  // (`OVERLAY_CHANNELS.finishesSeen`) read them. In memory only, as the daemon's `stoppedAt` itself
+  // (`SessionStore`).
+  const finishesSeen = new Map<string, SeenFinish>()
   // The watch that counts a finish as seen when its VS Code tab stays in front (`watchSeen` below);
   // here, before the jump handler, which holds it while a jump brings up a tab (`jumpedTo`).
   const seenWatch = createSeenWatch()
@@ -468,7 +469,19 @@ async function startApp(): Promise<void> {
     return running.state()
   })
   handleFrom(RENDERER, OVERLAY_CHANNELS.finishesSeen, () => {
-    return [...finishesSeen]
+    return seenFinishesReply(finishesSeen)
+  })
+  handleFrom(RENDERER, OVERLAY_CHANNELS.clearFinish, (sessionId: unknown) => {
+    // IPC input: the renderer may send anything, hence `unknown`, checked here. The session is read
+    // from the daemon's state now, not as the renderer saw it: a session that started a new turn
+    // since the key was pressed has no finish to clear (`clearFinish`), and a second press changes
+    // nothing. The tray shows the change on its next tick.
+    if (typeof sessionId === 'string') {
+      const { sessions } = running.state()
+      const view = sessions.find((s) => s.sessionId === sessionId)
+      if (view !== undefined) clearFinish(finishesSeen, view, sessions)
+    }
+    return seenFinishesReply(finishesSeen)
   })
   handleFrom(
     RENDERER,

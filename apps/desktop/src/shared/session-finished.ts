@@ -37,8 +37,17 @@ export function hasFinished(view: FinishView, sessions: readonly LinkedSession[]
   return stoppedIdle(view) && waitsOn(view, sessions).length === 0
 }
 
-/** The finishes the user has seen (`acknowledgeFinish`): session id to the `stoppedAt` seen. */
-export type SeenFinishes = ReadonlyMap<string, number>
+/**
+ * A finish the user has seen (`acknowledgeFinish`): its `stoppedAt`, and whether they also cleared
+ * its ✓ (`clearFinish`).
+ */
+export interface SeenFinish {
+  stoppedAt: number
+  cleared: boolean
+}
+
+/** The finishes the user has seen: session id to the finish seen (`SeenFinish`). */
+export type SeenFinishes = ReadonlyMap<string, SeenFinish>
 
 /**
  * Records that the user has seen a session's finish: `main/index.ts` calls it whenever the user
@@ -47,17 +56,40 @@ export type SeenFinishes = ReadonlyMap<string, number>
  * Per session and `stoppedAt`: the next finish of the session has a new `stoppedAt`, so it counts as
  * unseen again. A new turn clears the finish anyway, since `stoppedAt` goes. A `stoppedAt` that
  * disappears while a subagent runs comes back with the same value, which stays seen, so entries are
- * never pruned (one number per session id, in memory only, as the daemon's `stoppedAt` itself).
+ * never pruned (one entry per session id, in memory only, as the daemon's `stoppedAt` itself). A
+ * finish already recorded keeps its entry, so seeing a cleared finish again does not bring its ✓
+ * back.
  *
  * A session that waits on others (`waitsOn`) is no finish to acknowledge: opening it then records
  * nothing, so when the last recipient goes idle its finish shows as unseen.
  */
 export function acknowledgeFinish(
-  seen: Map<string, number>,
+  seen: Map<string, SeenFinish>,
   session: FinishView,
   sessions: readonly LinkedSession[],
 ): void {
-  if (session.stoppedAt !== undefined && waitsOn(session, sessions).length === 0) seen.set(session.sessionId, session.stoppedAt)
+  const { stoppedAt } = session
+  if (stoppedAt === undefined || waitsOn(session, sessions).length > 0) return
+  if (seen.get(session.sessionId)?.stoppedAt === stoppedAt) return
+  seen.set(session.sessionId, { stoppedAt, cleared: false })
+}
+
+/**
+ * Clears a finish's ✓ (Backspace on its row, `main/index.ts` `OVERLAY_CHANNELS.clearFinish`): the
+ * finish then counts as seen and shows no ✓ (`finishState` `none`), until the session's next finish
+ * (a new `stoppedAt`). Only a finish the session shows now (`finishState` not `none`), read from the
+ * state the caller passes, so a session that started a new turn meanwhile is left alone. True when
+ * it cleared something; clearing a cleared finish again changes nothing.
+ */
+export function clearFinish(
+  seen: Map<string, SeenFinish>,
+  session: FinishView,
+  sessions: readonly LinkedSession[],
+): boolean {
+  const { stoppedAt } = session
+  if (stoppedAt === undefined || finishState(session, seen, sessions) === 'none') return false
+  seen.set(session.sessionId, { stoppedAt, cleared: true })
+  return true
 }
 
 /**
@@ -68,6 +100,10 @@ export function acknowledgeFinish(
  * the two always agree. One exception: a turn the usage limit ended finishes too (its `StopFailure`
  * sets `stoppedAt`), but the list shows its usage limit marker instead of the ✓, while the tray
  * still counts an unseen one.
+ *
+ * A cleared finish (`clearFinish`) is `none`, not a state of its own: every reader treats it as no
+ * finish at all (no ✓ in the list, no done mark in the tray, nothing for the seen watch to
+ * acknowledge), so a fourth state would only make each of them map it to `none` again.
  */
 export function finishState(
   view: FinishView,
@@ -75,5 +111,16 @@ export function finishState(
   sessions: readonly LinkedSession[],
 ): 'none' | 'unseen' | 'seen' {
   if (!hasFinished(view, sessions)) return 'none'
-  return seen.get(view.sessionId) === view.stoppedAt ? 'seen' : 'unseen'
+  const mark = seen.get(view.sessionId)
+  if (mark === undefined || mark.stoppedAt !== view.stoppedAt) return 'unseen'
+  return mark.cleared ? 'none' : 'seen'
+}
+
+/**
+ * The seen finishes as the overlay gets them over IPC (`OVERLAY_CHANNELS.finishesSeen` and
+ * `clearFinish`): `[sessionId, stoppedAt, cleared]` triples. The renderer reads them back with a
+ * check (`renderer/useSeenFinishes.ts` `readSeenFinishes`).
+ */
+export function seenFinishesReply(seen: SeenFinishes): [string, number, boolean][] {
+  return [...seen].map(([sessionId, mark]) => [sessionId, mark.stoppedAt, mark.cleared])
 }
