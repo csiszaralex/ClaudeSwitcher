@@ -153,11 +153,12 @@ function sideOf(ids: readonly string[], id: string): 'list' | 'group' | 'gone' {
  * `before` to `after`. A selection on another row stays while that row is listed. A selection on the
  * moved row stays only while the row stays on its side of the group's header (a waiting row, which
  * keeps its place and only gains or loses its tag, `showsExcludedTag`); a row that went into the
- * group or came out of it leaves the selection behind, on the next item after it that is still listed, else on the nearest one
- * before it. So after Delete the selection is on the row below, or on the group's header after the
- * last row (where a second Delete does nothing), never on a row the user did not see selected, and a
- * second Delete does not undo the first, except on a row that stays in place (a waiting one, whose
- * tag shows the change).
+ * group or came out of it leaves the selection behind, on the next item after it that is still
+ * listed, else on the nearest one before it. So after Delete the selection is on the row below; after
+ * the last row it is on the group's header when the group was there already (where a second Delete
+ * does nothing), else, on the first exclusion, which only now adds the header, on the row above.
+ * Never on a row the user did not see selected, and a second Delete does not undo the first, except
+ * on a row that stays in place (a waiting one, whose tag shows the change).
  */
 export function selectionAfterChange(
   before: readonly string[],

@@ -10,5 +10,5 @@
     "noEmit": true
   },
   "include": ["src/renderer/**/*", "src/shared/**/*", "src/preload/api.ts", "src/preload/setup-api.ts"],
-  "exclude": ["src/renderer/**/*.test.ts", "src/renderer/**/*.test.tsx"]
+  "exclude": ["src/renderer/**/*.test.ts", "src/renderer/**/*.test.tsx", "src/renderer/test-helpers.tsx"]
 }
