@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { AskQuestion } from '@claudeswitcher/core'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { pendingRowText } from '../shared/row-text.js'
@@ -6,6 +7,7 @@ import { ACTION_BUTTONS } from './decision-actions.js'
 import { EXCLUDED_TEXT } from './list-cleanup.js'
 import {
   bashRequest,
+  questionRequest,
   renderOverlay,
   type OverlaySetup,
   row,
@@ -311,5 +313,229 @@ describe('the state and the showing', () => {
     await show()
     expect(peek()).toBeNull()
     expect(rowNames()).toEqual(['alpha', 'beta'])
+  })
+})
+
+describe('the question form', () => {
+  const branch: AskQuestion = {
+    question: 'Melyik ágon dolgozzunk?',
+    header: 'Ág',
+    multiSelect: false,
+    options: [{ label: 'main', description: 'A fő ág' }, { label: 'fejlesztés' }, { label: 'kísérlet' }],
+  }
+  const tests: AskQuestion = {
+    question: 'Mely teszteket futtassuk?',
+    header: 'Tesztek',
+    multiSelect: true,
+    options: [{ label: 'egység' }, { label: 'komponens' }, { label: 'végpontok' }],
+  }
+  const name: AskQuestion = { question: 'Mi legyen a neve?', multiSelect: false, options: [{ label: 'alfa' }, { label: 'béta' }] }
+  const request = questionRequest(1, [branch, tests, name])
+  const setup = (): OverlaySetup => ({ sessions: [session(1, 'alpha'), session(2, 'beta')], decisions: [request] })
+
+  function optionBox(): HTMLElement {
+    const box = document.querySelector<HTMLElement>('.question-options')
+    if (box === null) throw new Error('no option box')
+    return box
+  }
+  function otherField(): HTMLInputElement {
+    const field = document.querySelector<HTMLInputElement>('input.other')
+    if (field === null) throw new Error('no free text field')
+    return field
+  }
+  const shownQuestion = (): string | null | undefined => document.querySelector('.question-text')?.textContent
+  const cursorLabel = (): string | null | undefined => document.querySelector('.option.cursor .option-label')?.textContent
+  /** The checked options' labels of the shown question, with their number ("2. fejlesztés"). */
+  const checked = (): string[] =>
+    [...document.querySelectorAll('.option[aria-checked="true"] .option-label')].map((label) => label.textContent)
+  /** The tabs' texts: the mark (✓ answered, ○ not yet) and the label. */
+  const tabTexts = (): string[] => screen.getAllByRole('tab').map((tab) => tab.textContent)
+  const activeTab = (): string | null | undefined => document.querySelector('.question-tab.active')?.textContent
+
+  it('labels the tabs by header, else by number, and enters the form on Tab, onto the first option', async () => {
+    const { user } = await renderOverlay(setup())
+    expect(tabTexts()).toEqual(['○ Ág', '○ Tesztek', '○ 3. kérdés'])
+    expect(shownQuestion()).toBe(branch.question)
+    // Only the open question shows.
+    expect(screen.queryByText(tests.question)).toBeNull()
+
+    await user.keyboard('{Tab}')
+    expect(document.activeElement).toBe(optionBox())
+    expect(cursorLabel()).toBe('1. main')
+  })
+
+  it('steps the options with the arrows without moving the list, and a single-choice pick moves on', async () => {
+    const { api, user } = await renderOverlay(setup())
+    expect(selectedName()).toBe('alpha')
+    await user.keyboard('{Tab}{ArrowDown}{ArrowDown}{ArrowUp}')
+    expect(cursorLabel()).toBe('2. fejlesztés')
+    expect(selectedName()).toBe('alpha')
+
+    await user.keyboard('{Enter}')
+    expect(tabTexts()[0]).toBe('✓ Ág')
+    expect(shownQuestion()).toBe(tests.question)
+    expect(activeTab()).toBe('○ Tesztek')
+    expect(document.activeElement).toBe(optionBox())
+    expect(api.focusSession).not.toHaveBeenCalled()
+  })
+
+  it('picks by digit, toggles a multiple-choice question with Space, and moves on from it on Enter', async () => {
+    const { user } = await renderOverlay(setup())
+    await user.keyboard('{Tab}3')
+    expect(tabTexts()[0]).toBe('✓ Ág')
+    expect(shownQuestion()).toBe(tests.question)
+
+    await user.keyboard(' {ArrowDown}{ArrowDown} ')
+    expect(checked()).toEqual(['1. egység', '3. végpontok'])
+    await user.keyboard(' ')
+    expect(checked()).toEqual(['1. egység'])
+    expect(shownQuestion()).toBe(tests.question)
+
+    await user.keyboard('3{Enter}')
+    expect(tabTexts()[1]).toBe('✓ Tesztek')
+    expect(shownQuestion()).toBe(name.question)
+  })
+
+  it('goes back with ← to an answered question, changes its answer, and → opens the next one', async () => {
+    const { user } = await renderOverlay(setup())
+    await user.keyboard('{Tab}1')
+    expect(shownQuestion()).toBe(tests.question)
+
+    await user.keyboard('{ArrowLeft}')
+    expect(shownQuestion()).toBe(branch.question)
+    expect(checked()).toEqual(['1. main'])
+    // The cursor starts on the chosen option.
+    expect(cursorLabel()).toBe('1. main')
+    await user.keyboard('{ArrowDown}{ArrowDown} ')
+    // The next unanswered one opens.
+    expect(shownQuestion()).toBe(tests.question)
+    await user.keyboard('{ArrowLeft}')
+    expect(checked()).toEqual(['3. kísérlet'])
+
+    await user.keyboard('{ArrowRight}{ArrowRight}')
+    expect(shownQuestion()).toBe(name.question)
+    await user.keyboard('{ArrowRight}')
+    expect(shownQuestion()).toBe(name.question)
+  })
+
+  it('puts the cursor into the free text field with ↓, keeps the side arrows there, and moves on on Enter', async () => {
+    const { user } = await renderOverlay(setup())
+    await user.keyboard('{Tab}{ArrowRight}{ArrowRight}')
+    expect(shownQuestion()).toBe(name.question)
+
+    await user.keyboard('{ArrowDown}{ArrowDown}')
+    expect(document.activeElement).toBe(otherField())
+    await user.keyboard('gamm{ArrowLeft}a1 ')
+    expect(otherField().value).toBe('gama1 m')
+    expect(shownQuestion()).toBe(name.question)
+
+    await user.keyboard('{ArrowUp}')
+    expect(document.activeElement).toBe(optionBox())
+    expect(cursorLabel()).toBe('2. béta')
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(tabTexts()[2]).toBe('✓ 3. kérdés')
+    // The first unanswered question after the last one, around the end.
+    expect(shownQuestion()).toBe(branch.question)
+  })
+
+  it('sends the exact answers on Ctrl+Enter only once every question is answered', async () => {
+    const { api, user } = await renderOverlay(setup())
+    await user.keyboard('{Tab}2')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    expect(api.decide).not.toHaveBeenCalled()
+
+    await user.keyboard('31{Enter}{ArrowDown}{ArrowDown}')
+    await user.keyboard('gamma{Enter}')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    expect(api.decide.mock.calls).toEqual([
+      [
+        request.id,
+        {
+          type: 'answer',
+          answers: {
+            [branch.question]: 'fejlesztés',
+            [tests.question]: 'egység, végpontok',
+            [name.question]: 'gamma',
+          },
+        },
+      ],
+    ])
+  })
+
+  it('answers one question only on a held Enter', async () => {
+    const { user } = await renderOverlay(setup())
+    await user.keyboard('{Tab}')
+    fireEvent.keyDown(optionBox(), { key: 'Enter' })
+    fireEvent.keyDown(optionBox(), { key: 'Enter', repeat: true })
+    fireEvent.keyDown(optionBox(), { key: 'Enter', repeat: true })
+    expect(tabTexts()).toEqual(['✓ Ág', '○ Tesztek', '○ 3. kérdés'])
+    expect(shownQuestion()).toBe(tests.question)
+    expect(checked()).toEqual([])
+  })
+
+  it('goes back to the list on Esc with the answers kept, and the list keys work again', async () => {
+    const { api, user } = await renderOverlay(setup())
+    await user.keyboard('{Tab}2')
+    await user.keyboard('{Escape}')
+    expect(document.activeElement).toBe(document.body)
+    expect(api.hide).not.toHaveBeenCalled()
+    expect(tabTexts()[0]).toBe('✓ Ág')
+
+    await user.keyboard('{Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+
+    // Back in, the form is where it was left.
+    await user.keyboard('{Tab}')
+    expect(shownQuestion()).toBe(tests.question)
+  })
+
+  it('takes the focus out of the form when the overlay appears again, so the first keys are the list keys', async () => {
+    const { api, user, show } = await renderOverlay(setup())
+    await user.keyboard('{Tab}')
+    expect(document.activeElement).toBe(optionBox())
+
+    await show()
+    expect(document.activeElement).toBe(document.body)
+    await user.keyboard('{Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+    expect(tabTexts()[0]).toBe('○ Ág')
+  })
+
+  it("keeps the list's keys from acting while the focus is in the form", async () => {
+    const { api, user, settle } = await renderOverlay(setup())
+    await user.keyboard('{Tab}')
+    // Enter and Space pick in the form; on the list they would jump and peek.
+    await user.keyboard('{Enter}{Delete}{Backspace}/ {Control>}k{/Control}')
+    await settle()
+    expect(api.focusSession).not.toHaveBeenCalled()
+    expect(api.setExcluded).not.toHaveBeenCalled()
+    expect(api.clearFinish).not.toHaveBeenCalled()
+    expect(api.conversation).not.toHaveBeenCalled()
+    expect(api.hide).not.toHaveBeenCalled()
+    expect(searchField()).toBeNull()
+    expect(rowNames()).toEqual(['alpha', 'beta'])
+    expect(selectedName()).toBe('alpha')
+  })
+
+  it('still answers and sends by mouse, without taking the focus from the list', async () => {
+    const { api, user } = await renderOverlay(setup())
+    await user.click(screen.getByText('kísérlet'))
+    expect(document.activeElement).toBe(document.body)
+    expect(shownQuestion()).toBe(tests.question)
+    await user.click(screen.getByText('komponens'))
+    await user.click(screen.getByRole('tab', { name: /3\. kérdés/ }))
+    await user.click(otherField())
+    await user.keyboard('delta')
+
+    await user.click(screen.getByRole('button', { name: /Válasz elküldése/ }))
+    expect(api.decide.mock.calls).toEqual([
+      [
+        request.id,
+        {
+          type: 'answer',
+          answers: { [branch.question]: 'kísérlet', [tests.question]: 'komponens', [name.question]: 'delta' },
+        },
+      ],
+    ])
   })
 })

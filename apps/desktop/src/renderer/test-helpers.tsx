@@ -7,7 +7,7 @@
  * (`tsconfig.web.json`) excludes it, the tests' one (`tsconfig.web.test.json`) checks it, and no
  * entry point of the bundle imports it.
  */
-import type { SessionView } from '@claudeswitcher/core'
+import type { AskQuestion, SessionView } from '@claudeswitcher/core'
 import { DAEMON_PROTOCOL } from '@claudeswitcher/core/browser'
 import type { DaemonState, PendingDecisionView } from '@claudeswitcher/daemon'
 import { act, cleanup, render } from '@testing-library/react'
@@ -212,6 +212,18 @@ export function bashRequest(n: number, command: string): PendingDecisionView {
     suggestedRules: [],
     questions: [],
     readable: true,
+  }
+}
+
+/** A held AskUserQuestion request of the session, readable and not released, with invented questions. */
+export function questionRequest(n: number, questions: AskQuestion[]): PendingDecisionView {
+  return {
+    ...bashRequest(n, ''),
+    toolName: 'AskUserQuestion',
+    toolInput: { questions },
+    kind: 'question',
+    summary: questions[0]?.question ?? '',
+    questions,
   }
 }
 

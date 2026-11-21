@@ -4,6 +4,7 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
 import { PeekPanel } from './PeekPanel.js'
+import type { QuestionFocus } from './QuestionForm.js'
 import { isActivationTarget, isTypingTarget, readOverlaySettings } from './decision-actions.js'
 import {
   formatDuration,
@@ -172,6 +173,8 @@ export function App({
   // For the guard on the panel's key letters (key-guard.ts): when the overlay appeared, and when
   // the user last typed into a text field.
   const keyHistory = useRef<KeyHistory>({ shownArmedAt: 0, lastTypedAt: undefined })
+  // The question form's focus while one shows (`QuestionForm`): Tab enters it, a show leaves it.
+  const questionFocus = useRef<QuestionFocus | null>(null)
   // Only triggers a re-render on show: from it the panel dims the allowing buttons.
   const [, rerenderOnShow] = useState(0)
 
@@ -200,6 +203,8 @@ export function App({
         const armedAt = armUntil(Date.now())
         keyHistory.current.shownArmedAt = armedAt
         rerenderOnShow(armedAt)
+        // The keys act on the list again on every show, not on a question form left focused.
+        questionFocus.current?.leave()
         // The search, the peek and the excluded group start closed on every show.
         setQuery(undefined)
         setPeekId(undefined)
@@ -390,10 +395,20 @@ export function App({
         event.preventDefault()
         setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
-      // With the decision panel open, Tab moves between the buttons there, not a jump. In the
-      // search, Enter opens the selected match; without a match there is nothing to open. On the
-      // excluded group's header Enter opens or closes the group, and Tab does nothing.
-      if (event.key === 'Enter' || (event.key === 'Tab' && panel === undefined)) {
+      // With a question form open, Tab moves the focus onto its active question; from then on its
+      // keys are the form's own (`QuestionForm` `onKeyDown`), and the list's keys rest until Esc.
+      // With another decision panel open, Tab moves between the buttons there, not a jump.
+      if (event.key === 'Tab' && panel !== undefined) {
+        const form = questionFocus.current
+        if (form !== null) {
+          event.preventDefault()
+          form.enter()
+        }
+        return
+      }
+      // In the search, Enter opens the selected match; without a match there is nothing to open. On
+      // the excluded group's header Enter opens or closes the group, and Tab does nothing.
+      if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
         if (headerSelected) {
           if (event.key === 'Enter') setGroupOpen((open) => !open)
@@ -581,6 +596,7 @@ export function App({
                 agentLabel={subagentLabel(panel.decision, panel.row.session?.subagents)}
                 remoteControl={panel.row.session !== undefined && hasRemoteControl(panel.row.session)}
                 keyHistory={keyHistory}
+                questionFocus={questionFocus}
                 onDecided={() => {
                   afterDecision(panel.decision).catch((error: unknown) => {
                     console.error('[overlay] could not move on after the decision', error)

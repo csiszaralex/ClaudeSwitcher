@@ -16,7 +16,7 @@ import { DecisionContent } from './DecisionContent.js'
 import { JumpButton } from './JumpButton.js'
 import { armUntil, isArmed, shortcutAllowed, type KeyHistory } from './key-guard.js'
 import { PlanPanel } from './PlanPanel.js'
-import { QuestionForm } from './QuestionForm.js'
+import { QuestionForm, type QuestionFocus } from './QuestionForm.js'
 import { RuleEditor } from './RuleEditor.js'
 import { SourceLabel } from './SourceLabel.js'
 import { ruleEditorSeed, suggestionTooltip } from './rule-editor.js'
@@ -47,6 +47,8 @@ interface Props {
   remoteControl: boolean
   /** App's key history: the overlay's appearance and the last keystroke in a text field (key-guard.ts). */
   keyHistory: RefObject<KeyHistory>
+  /** The question form's focus, for App's Tab and show (`QuestionForm`); `null` while no form shows. */
+  questionFocus: RefObject<QuestionFocus | null>
   /** The daemon accepted the decision: from this App steps the selection or hides the overlay. */
   onDecided: () => void
   /** Jumps to the session's window (VS Code or its terminal): the native prompt is there all along. */
@@ -63,6 +65,7 @@ export function DecisionPanel({
   agentLabel,
   remoteControl,
   keyHistory,
+  questionFocus,
   onDecided,
   onJump,
 }: Props): JSX.Element {
@@ -289,6 +292,7 @@ export function DecisionPanel({
           <QuestionForm
             questions={decision.questions}
             busy={busy}
+            focus={questionFocus}
             onSubmit={(answers) => {
               void submit({ type: 'answer', answers })
             }}

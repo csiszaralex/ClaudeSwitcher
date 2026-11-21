@@ -1,7 +1,15 @@
 import { buildHookResponse } from '@claudeswitcher/core/browser'
 import { parsedPayload } from '@claudeswitcher/core/testing'
 import { describe, expect, it } from 'vitest'
-import { buildAnswers, initialFormState, isComplete, setOtherText, toggleOption } from './question-form.js'
+import {
+  buildAnswers,
+  initialFormState,
+  isAnswered,
+  isComplete,
+  questionTabLabel,
+  setOtherText,
+  toggleOption,
+} from './question-form.js'
 
 // The spike's real questions: a multiple-choice one (fruits) and a single-choice one (colour).
 const ask = parsedPayload('permissionRequest_askMulti')
@@ -59,5 +67,25 @@ describe('question form', () => {
     expect(isComplete(ask.questions, state)).toBe(true)
     const result = buildHookResponse(ask, { type: 'answer', answers: buildAnswers(ask.questions, state) })
     expect(result.ok).toBe(true)
+  })
+
+  it('counts a question answered by an option or by non-blank free text, and not by blank text', () => {
+    let state = initialFormState(ask.questions)
+    expect(isAnswered(colour, state)).toBe(false)
+    state = setOtherText(state, colour, '   ')
+    expect(isAnswered(colour, state)).toBe(false)
+    state = setOtherText(state, colour, 'levendula')
+    expect(isAnswered(colour, state)).toBe(true)
+    expect(isAnswered(fruits, state)).toBe(false)
+    state = toggleOption(state, fruits, 'Eper')
+    expect(isAnswered(fruits, state)).toBe(true)
+  })
+})
+
+describe('question tab label', () => {
+  it('is the header when there is one, else the question number', () => {
+    expect(questionTabLabel(fruits, 0)).toBe('Gyümölcsök')
+    expect(questionTabLabel({ ...colour, header: undefined }, 1)).toBe('2. kérdés')
+    expect(questionTabLabel({ ...colour, header: '  ' }, 2)).toBe('3. kérdés')
   })
 })

@@ -614,7 +614,8 @@ is now `ACTION_BUTTONS`, read by `shortcutFor`):
 - the arrows move the selection, Esc hides the overlay;
 - Enter jumps to the selected session's window (and tab), except on a focused button, `<summary>`
   or link, where it belongs to the element. Tab jumps too, but only without an open decision
-  panel: on the panel it moves between the buttons;
+  panel: on the panel it moves between the buttons (since changed: on a question it enters the
+  question form, see below);
 - approving works with the panel's letters: for a `tool` request A = allow, D = deny, P = project
   level, G = machine level; for an `edit` request A, D and S = the session's further edits. A
   question and a plan have no letter. For an unreadable request only D remains;
@@ -622,6 +623,14 @@ is now `ACTION_BUTTONS`, read by `shortcutFor`):
   freshly shown panel, or for a short time after typing (`key-guard.ts`);
 - added later: / or Ctrl+K opens the list's search (`session-search.ts`, README "Searching the list").
   In its field the arrows, Enter and Esc act on the matches, and the first Esc closes the search.
+- added later (issue #5): a question is answered one question at a time from the keyboard
+  (`QuestionForm`, the keys in `question-keys.ts` `questionKeyCommand`). Tab from the list enters
+  the form; Esc, or a new show of the overlay, leaves it with the answers kept. Inside, the form
+  stops the propagation of every key at its own `onKeyDown`, so no list key (Enter, Delete,
+  Backspace, Space, /, Ctrl+K, Esc) acts mid-answer. It is stopped there rather than filtered by
+  the target in App's window handler: then the form alone decides what its keys do, and App needs
+  to know nothing of its elements. A held key's auto-repeat picks nothing and moves on
+  nowhere, so one long press cannot answer several questions; nothing sends without Ctrl+Enter.
 
 ## 5. Data flow
 

@@ -12,7 +12,7 @@
   --text-dim: #a8a6a2; /* secondary text */
   --text-soft: #8a8885; /* the command description */
   --text-faint: #6b6a67; /* muted text */
-  --accent: #d97757; /* waiting, key letters, focus, primary button */
+  --accent: #d97757; /* waiting, key letters, focus, primary button, the question form's cursor */
   --choice: #b8406a; /* the waiting dot of a question or a plan; the tray icon repeats it (main/tray-icon.ts) */
   --accent-tint: #d977572e; /* the pending-count badge */
   --danger: #e0796b; /* warnings, errors, removed diff lines */
@@ -20,8 +20,8 @@
   --danger-tint-strong: #e0796b33; /* escaped invisible characters */
   --warning: #e3b341; /* released marker, line count, setup warnings */
   --info: #7aa2c4; /* working marker, seen done marker, subagent description */
-  --success: #8fbf7a; /* unseen done marker, added diff lines */
-  --success-tint: #8fbf7a1a; /* added diff lines */
+  --success: #8fbf7a; /* unseen done marker, added diff lines, an answered question's tab, a chosen option */
+  --success-tint: #8fbf7a1a; /* added diff lines, a chosen option */
   --link: #5fa8e8; /* Remote Control dot, setup link */
   --limit: #a98fd8; /* usage limit marker and status bar note */
   --waits-on: #6cb6b0; /* the marker of a session that waits on the sessions it prompted, and the prompted-by note */
@@ -304,10 +304,33 @@ body {
 .rule-editor .confirm { display: block; margin-top: 6px; color: var(--danger); }
 .question-form { display: flex; flex-direction: column; min-height: 0; }
 .question-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
-.question-form fieldset { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 5px; }
-.question-form legend { padding: 0 4px; color: var(--text); font-weight: 600; }
-.question-form .option { display: block; padding: 2px 0; cursor: pointer; }
+/* One tab per question (QuestionForm): ✓ and green once answered, the open one raised. */
+.question-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; }
+.decision .question-tab { padding: 2px 8px; border-color: var(--border); background: transparent; color: var(--text-dim); }
+.decision .question-tab.answered { color: var(--success); }
+.decision .question-tab.active { border-color: var(--control-border); background: var(--raised); color: var(--text); font-weight: 600; }
+.decision .question-tab.active.answered { color: var(--success); }
+.question-header { margin: 6px 0 0; color: var(--text-dim); font-size: 11px; }
+.question-text { margin: 6px 0 4px; color: var(--text); font-weight: 600; white-space: pre-wrap; }
+.question-options { outline: none; }
+.question-form .option {
+  display: grid;
+  grid-template-columns: 1.4em 1fr;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.question-form .option-mark { grid-row: span 2; }
+.question-form .option-number { color: var(--text-faint); }
+.question-form .option-description { grid-column: 2; color: var(--text-dim); }
+.question-form .option.selected { background: var(--success-tint); }
+.question-form .option.selected .option-mark,
+.question-form .option.selected .option-label { color: var(--success); }
+/* The cursor shows only while the option box has the focus (Tab from the list). */
+.question-options:focus .option.cursor { border-color: var(--accent); }
 .question-form .other { width: 100%; margin-top: 4px; }
+.question-form .other:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .plan-panel { display: flex; flex-direction: column; min-height: 0; }
 .plan-panel form { flex: none; }
 .plan {

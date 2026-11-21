@@ -101,14 +101,17 @@ export function isActivationTarget(target: unknown): boolean {
   return false
 }
 
-/** The submit key of the multi-line fields: Ctrl+Enter. A plain Enter starts a new line. */
+/**
+ * The submit key of the multi-line fields, where a plain Enter starts a new line, and of the
+ * question form, where a plain Enter picks an option or moves on (question-keys.ts): Ctrl+Enter.
+ */
 export function isSubmitChord(event: { key: string; ctrlKey: boolean }): boolean {
   return event.key === 'Enter' && event.ctrlKey
 }
 
 /**
- * The `isSubmitChord` label on the submit button of the multi-line fields. Where the field is
- * single-line and Enter submits (the deny reason, the questions' free text), there is no label.
+ * The `isSubmitChord` label on the submit button of the multi-line fields and of the question form.
+ * Where the field is single-line and Enter submits (the deny reason), there is no label.
  */
 export const SUBMIT_CHORD_LABEL = 'Ctrl+Enter'
 
