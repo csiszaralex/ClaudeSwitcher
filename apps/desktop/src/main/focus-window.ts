@@ -211,6 +211,20 @@ export async function bringToFront(
   return true
 }
 
+/**
+ * Brings up the one window of the VS Code process `pid` whose title shows the session's tab
+ * (`showsTab`, `main/seen-elsewhere.ts` `showsSessionTab`). None, or several: nothing, so the jump
+ * goes on to the `code` CLI (`focusWith`).
+ */
+async function focusByShownTab(pid: number, showsTab: (window: ForegroundTitle) => boolean): Promise<boolean> {
+  const api = loadUser32()
+  if (api === null) return false
+  titleBuffer ??= Buffer.alloc(WINDOW_TITLE_CHARS * 2)
+  const [only, ...more] = windowsShowing(api, pid, titleBuffer, showsTab)
+  if (only === undefined || more.length > 0) return false
+  return bringToFront(api, only)
+}
+
 async function focusByPid(pid: number): Promise<boolean> {
   const api = loadUser32()
   if (api === null) return false
@@ -458,11 +472,39 @@ export type ForegroundTitleReader = Pick<User32, 'GetForegroundWindow' | 'GetWin
 export function foregroundTitleOf(api: ForegroundTitleReader, buffer: Buffer): ForegroundTitle | undefined {
   const hwnd = Number(api.GetForegroundWindow())
   if (hwnd === 0) return undefined
-  const length = api.GetWindowTextW(hwnd, buffer, Math.floor(buffer.length / 2))
-  if (length <= 0) return undefined
+  const title = windowTitleOf(api, hwnd, buffer)
+  if (title === undefined) return undefined
   const pidOut: [number] = [0]
   api.GetWindowThreadProcessId(hwnd, pidOut)
-  return { hwnd, pid: pidOut[0], title: buffer.toString('utf16le', 0, length * 2) }
+  return { hwnd, pid: pidOut[0], title }
+}
+
+/**
+ * A window's title, or `undefined` for none. Only reads, and sends the window no message (see
+ * `foregroundTitleOf`). `buffer` caps it: its size in characters is passed, so a long title is cut.
+ */
+function windowTitleOf(api: Pick<User32, 'GetWindowTextW'>, hwnd: number, buffer: Buffer): string | undefined {
+  const length = api.GetWindowTextW(hwnd, buffer, Math.floor(buffer.length / 2))
+  return length <= 0 ? undefined : buffer.toString('utf16le', 0, length * 2)
+}
+
+/** The user32 subset `windowsShowing` needs, so it can be tested with a fake. */
+export type WindowTitleScanner = WindowScanner & Pick<User32, 'GetWindowTextW'>
+
+/**
+ * The visible, titled windows of the process `pid` (`scanWindowsForPid`, every one of them) whose
+ * title `shows` accepts. Only reads.
+ */
+export function windowsShowing(
+  api: WindowTitleScanner,
+  pid: number,
+  buffer: Buffer,
+  shows: (window: ForegroundTitle) => boolean,
+): number[] {
+  return scanWindowsForPid(api, pid, MAX_WINDOWS_SCANNED).filter((hwnd) => {
+    const title = windowTitleOf(api, hwnd, buffer)
+    return title !== undefined && shows({ hwnd, pid, title })
+  })
 }
 
 /** One reused buffer: the poll reads every `main/seen-elsewhere.ts` `SEEN_POLL_MS`. */
@@ -592,6 +634,9 @@ function focusByCli(folder: string): Promise<boolean> {
 /**
  * Which path brought the window up. The tab focus needs this, not a bare "it worked":
  * - `pid`: the fast path, and the window that came to the front was checked (`bringToFront`);
+ * - `tab`: the process has several windows, and exactly one of their titles showed the session's
+ *   tab (`byShownTab`); that window came up and was checked (`bringToFront`). The tab is in front
+ *   already, so no tab focus URI is needed (`tabFocusUri`);
  * - `workspace`: the `code` CLI got the lock file's folder, and VSCode resolved the window itself;
  * - `cwd`: the `code` CLI got the session's cwd because the folder is unknown. If the cwd is open
  *   nowhere, this opened a BRAND NEW window, so it is unknown whether the session's window is in
@@ -601,11 +646,13 @@ function focusByCli(folder: string): Promise<boolean> {
  *   does not open its terminal panel;
  * - `failed`: no path succeeded.
  */
-export type FocusOutcome = 'pid' | 'workspace' | 'cwd' | 'terminal' | 'failed'
+export type FocusOutcome = 'pid' | 'tab' | 'workspace' | 'cwd' | 'terminal' | 'failed'
 
 /** The focus steps, so the order in `focusWith` can be tested without bringing up a window. */
 export interface FocusSteps {
   byPid(pid: number): Promise<boolean>
+  /** By the one window of the VS Code process whose title shows the session's tab (`focusByShownTab`). */
+  byShownTab(pid: number): Promise<boolean>
   byCli(folder: string): Promise<boolean>
   /** By the session's own process (`SessionView.pid`), up to the window showing its terminal. */
   byTerminal(pid: number): Promise<boolean>
@@ -634,8 +681,12 @@ export interface FocusSteps {
  * Every other session (the extension's, or an unknown `entrypoint`): first by the pid known from the
  * lock file, because that is fast and its result is checked. But only if that pid has exactly one
  * window (see `findMainWindow`: a VSCode main process can own several windows, and then the pid does
- * not identify a window). With several windows, and whenever the fast path fails for any reason, the
- * `code` CLI decides by the folder.
+ * not identify a window). With several windows, the one whose title shows the session's tab
+ * (`byShownTab`): measured on 2026-11-21, the owner's 11 VS Code windows all have one pid, so every
+ * jump went to the `code` CLI, and the tab was in front 1.13 to 1.29 s after Enter (51 of 56 jumps;
+ * `code --version` alone takes about 0.5 s). The title decides only when exactly one window shows
+ * the tab, and the tab is shown by the user's `window.title`, which may not name the active editor at
+ * all; then this step finds nothing. Whenever these fail, the `code` CLI decides by the folder.
  */
 export async function focusWith(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
   if (view.entrypoint !== undefined && view.entrypoint !== VSCODE_ENTRYPOINT) {
@@ -646,18 +697,33 @@ export async function focusWith(view: SessionView, steps: FocusSteps): Promise<F
   return focusVSCodeWindow(view, steps)
 }
 
-/** The VS Code way of `focusWith`: the lock's pid, then the `code` CLI with the folder, else the cwd. */
+/**
+ * The VS Code way of `focusWith`: the lock's pid, then the one window of that process whose title
+ * shows the session's tab, then the `code` CLI with the folder, else the cwd.
+ */
 async function focusVSCodeWindow(view: SessionView, steps: FocusSteps): Promise<FocusOutcome> {
-  if (view.windowPid !== undefined && (await steps.byPid(view.windowPid))) return 'pid'
+  if (view.windowPid !== undefined) {
+    if (await steps.byPid(view.windowPid)) return 'pid'
+    if (await steps.byShownTab(view.windowPid)) return 'tab'
+  }
   if (view.workspaceFolder !== undefined) {
     return (await steps.byCli(view.workspaceFolder)) ? 'workspace' : 'failed'
   }
   return (await steps.byCli(view.cwd)) ? 'cwd' : 'failed'
 }
 
-/** Brings the session's window to the front and says by which path (see `FocusOutcome`). */
-export function focusSessionWindow(view: SessionView): Promise<FocusOutcome> {
-  return focusWith(view, { byPid: focusByPid, byCli: focusByCli, byTerminal: focusByTerminal, runsUnder })
+/**
+ * Brings the session's window to the front and says by which path (see `FocusOutcome`). `showsTab`
+ * tells whether a window's title shows the session's tab (`byShownTab`).
+ */
+export function focusSessionWindow(view: SessionView, showsTab: (window: ForegroundTitle) => boolean): Promise<FocusOutcome> {
+  return focusWith(view, {
+    byPid: focusByPid,
+    byShownTab: (pid) => focusByShownTab(pid, showsTab),
+    byCli: focusByCli,
+    byTerminal: focusByTerminal,
+    runsUnder,
+  })
 }
 
 /**
@@ -683,7 +749,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  *   folder. The `cwd` path is not enough: `code <cwd>` may have opened a new window, and there the
  *   URI would open a second copy of the running session. With `failed` the topmost window can be
  *   any window. Nor `terminal`: the window is a terminal's, where the extension has no tab of the
- *   session (and such a session's `entrypoint` fails the extension check below anyway);
+ *   session (and such a session's `entrypoint` fails the extension check below anyway). Nor `tab`:
+ *   that window's title shows the session's tab already, so the URI would change nothing, and VS
+ *   Code would only take the focus from an overlay opened again in the meantime;
  * - the session's window is known (`windowPid` or `workspaceFolder`), regardless of the outcome
  *   too, so that a contradictory outcome cannot open a tab either;
  * - the session runs in the VSCode extension: for a CLI or terminal session the extension would

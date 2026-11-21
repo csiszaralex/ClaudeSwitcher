@@ -498,7 +498,11 @@ async function startApp(): Promise<void> {
       // the process currently in the foreground: hiding the overlay would take that right away, and
       // the call would silently just flash the taskbar button. If it fails anyway, the `code` CLI
       // fallback handles it.
-      const outcome = await focusSessionWindow(view)
+      const outcome = await focusSessionWindow(view, (window) =>
+        showsSessionTab(window, running.state().sessions, view.sessionId),
+      )
+      // So the jump's paths and their times can be measured (`focus-window.ts` `focusWith`).
+      console.log(`[focus] session ${view.sessionId}: window by ${outcome} in ${String(Date.now() - jumpedAt)} ms`)
       overlay.hide()
       // The user has opened the session from the overlay: its finish is seen whatever the outcome
       // (a session whose window cannot be brought forward, such as a terminal the console search

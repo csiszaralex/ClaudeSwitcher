@@ -780,7 +780,8 @@ is not in the foreground); if it is another one, a new tab opens there.
 
 So the app (`focus-window.ts`, `tabFocusUri`) first brings up the window (the monitor milestone's
 path), and sends the URI (`shell.openExternal`, after a wait of about 200 ms) only if the window
-came up verified through the `pid` path, or through the `code <workspaceFolder>` path; the `code`
+came up verified through the `pid` path, or through the `code <workspaceFolder>` path (not after the
+`tab` path below, whose window shows the tab already); the `code`
 call with the `cwd` (possibly a new window) and a failed focus are excluded. Since 2026-10-25 the
 CLI runs without `-r`, and for a session known not to be `claude-vscode` it does not run at all
 (the reasons: `focus-window.ts` `codeCliCommand` and `focusWith`). Only for an
@@ -794,9 +795,21 @@ moment later. So after the wait the app reads the foreground window once more, a
 only if it changes something: not when the window shows the session's tab already (the match of
 the seen watch, `seen-elsewhere.ts` `showsSessionTab`, so only where the user's `window.title` shows
 the active editor), and not when the overlay is open again. An overlay opened while a sent URI is
-still on its way still closes. How long VS Code takes is not measured yet: the app logs, after every
-jump to a tab, how many ms passed until the window showed it (`[focus] the tab of session …`, for at
-most `SEEN_JUMP_HOLD_MS`), which also bounds the hold of the seen watch.
+still on its way still closes. The app logs, after every jump to a tab, how many ms passed until the
+window showed it (`[focus] the tab of session …`, for at most `SEEN_JUMP_HOLD_MS`), which also
+bounds the hold of the seen watch.
+
+Measured from that log (0.16.2 and 0.17.0, 2026-11-20 and 2026-11-21, 56 jumps): in 51 the tab was in
+front already, 1133 to 1288 ms after Enter, and the URI was not sent; in 5 the URI switched the tab,
+which was in front 1701 to 1830 ms after Enter, so VS Code took about 0.35 to 0.5 s after the URI was
+sent. The slow part was the window: the owner's 11 lock files all name one VS Code pid, so
+`findMainWindow` never found a single window, and every jump ran `code <workspaceFolder>` (`code
+--version` alone took 467 to 543 ms, three runs). So the jump now first looks for the one window of
+that process whose title shows the session's tab (`focus-window.ts` `byShownTab`, the seen watch's
+`showsSessionTab`), brings it up, and sends no URI (`FocusOutcome` `tab`). It decides only when
+exactly one window matches; with a `window.title` that does not show the active editor nothing
+matches, and the jump goes on to the `code` CLI as before. The app logs each jump's path and time
+(`[focus] session …: window by <outcome> in N ms`).
 
 There is **no** decision surface in the VS Code window (decision of 2026-10-20): the native prompt
 is visible there anyway, and a second surface would only be a duplicate and a source of errors.

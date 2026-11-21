@@ -31,6 +31,7 @@ import {
   quoteForCli,
   readForegroundTitle,
   scanWindowsForPid,
+  windowsShowing,
   tabFocusUri,
   terminalWindowOf,
   type FocusApi,
@@ -40,6 +41,7 @@ import {
   type GiveBackCheck,
   type TerminalWindowScanner,
   type WindowScanner,
+  type WindowTitleScanner,
 } from './focus-window.js'
 
 /** A fake desktop: the given windows in Z order, linked into a chain. */
@@ -149,6 +151,44 @@ describe('scanWindowsForPid', () => {
 
   it('returns nothing for a pid that owns no window', () => {
     expect(scanWindowsForPid(fakeScanner([{ hwnd: 10, pid: 111 }]), 222)).toEqual([])
+  })
+})
+
+describe('windowsShowing', () => {
+  /** The fake desktop with titles: one VS Code process (4242) with three windows, and another process. */
+  const titles = new Map([
+    [10, 'alpha - CRM master'],
+    [20, 'beta - index.ts'],
+    [30, 'gamma - CRM master'],
+    [40, 'alpha - CRM master'],
+  ])
+  const api: WindowTitleScanner = {
+    ...fakeScanner([
+      { hwnd: 10, pid: 4242 },
+      { hwnd: 20, pid: 4242 },
+      { hwnd: 30, pid: 4242 },
+      { hwnd: 40, pid: 5151 },
+    ]),
+    GetWindowTextW: (hWnd, buffer) => {
+      const title = titles.get(hWnd) ?? ''
+      buffer.write(title, 0, 'utf16le')
+      return title.length
+    },
+  }
+
+  it('returns every window of the process whose title the check accepts, with its pid and title', () => {
+    const seen: string[] = []
+    const shows = (window: { hwnd: number; pid: number; title: string }): boolean => {
+      seen.push(`${String(window.pid)} ${window.title}`)
+      return window.title.endsWith('CRM master')
+    }
+    expect(windowsShowing(api, 4242, Buffer.alloc(1024), shows)).toEqual([10, 30])
+    // Another process's window is never asked about.
+    expect(seen).toEqual(['4242 alpha - CRM master', '4242 beta - index.ts', '4242 gamma - CRM master'])
+  })
+
+  it('returns nothing when no title is accepted', () => {
+    expect(windowsShowing(api, 4242, Buffer.alloc(1024), () => false)).toEqual([])
   })
 })
 
@@ -626,14 +666,16 @@ function terminalView(over: Partial<SessionView> = {}): SessionView {
 }
 
 /** Fake focus steps: they record what was asked of them and bring nothing forward. */
-function fakeSteps(result: { pid: boolean; cli: boolean; terminal?: boolean; ancestors?: readonly number[] }): {
+function fakeSteps(result: { pid: boolean; cli: boolean; tab?: boolean; terminal?: boolean; ancestors?: readonly number[] }): {
   steps: Parameters<typeof focusWith>[1]
   pidCalls: number[]
+  tabCalls: number[]
   cliCalls: string[]
   terminalCalls: number[]
   runsUnderCalls: Array<[number, number]>
 } {
   const pidCalls: number[] = []
+  const tabCalls: number[] = []
   const cliCalls: string[] = []
   const terminalCalls: number[] = []
   const runsUnderCalls: Array<[number, number]> = []
@@ -642,6 +684,10 @@ function fakeSteps(result: { pid: boolean; cli: boolean; terminal?: boolean; anc
       byPid: (pid) => {
         pidCalls.push(pid)
         return Promise.resolve(result.pid)
+      },
+      byShownTab: (pid) => {
+        tabCalls.push(pid)
+        return Promise.resolve(result.tab ?? false)
       },
       byCli: (folder) => {
         cliCalls.push(folder)
@@ -657,6 +703,7 @@ function fakeSteps(result: { pid: boolean; cli: boolean; terminal?: boolean; anc
       },
     },
     pidCalls,
+    tabCalls,
     cliCalls,
     terminalCalls,
     runsUnderCalls,
@@ -669,6 +716,22 @@ describe('focusWith', () => {
     expect(await focusWith(extensionView(), fake.steps)).toBe<FocusOutcome>('pid')
     expect(fake.pidCalls).toEqual([900])
     expect(fake.cliCalls).toEqual([])
+  })
+
+  it('takes the window whose title shows the tab when the pid has several, before the CLI', async () => {
+    const fake = fakeSteps({ pid: false, tab: true, cli: true })
+    expect(await focusWith(extensionView(), fake.steps)).toBe<FocusOutcome>('tab')
+    expect(fake.tabCalls).toEqual([900])
+    expect(fake.cliCalls).toEqual([])
+  })
+
+  it('goes on to the CLI when no single window shows the tab, and asks no title without a pid', async () => {
+    const fake = fakeSteps({ pid: false, tab: false, cli: true })
+    expect(await focusWith(extensionView(), fake.steps)).toBe<FocusOutcome>('workspace')
+    expect(fake.tabCalls).toEqual([900])
+    const noPid = fakeSteps({ pid: false, tab: true, cli: true })
+    expect(await focusWith(extensionView({ windowPid: undefined }), noPid.steps)).toBe<FocusOutcome>('workspace')
+    expect(noPid.tabCalls).toEqual([])
   })
 
   it('reports the workspace path when the CLI resolved the lock file folder', async () => {
@@ -886,6 +949,10 @@ describe('tabFocusUri', () => {
   it('builds the extension URI after the fast path or the workspace path focused the window', () => {
     expect(tabFocusUri(extensionView(), 'pid', true, [])).toBe(expected)
     expect(tabFocusUri(extensionView(), 'workspace', true, [])).toBe(expected)
+  })
+
+  it('sends nothing after the tab path: the window shows the tab already', () => {
+    expect(tabFocusUri(extensionView(), 'tab', true, [])).toBeUndefined()
   })
 
   it('sends nothing when the window focus failed', () => {
