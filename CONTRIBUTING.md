@@ -106,6 +106,12 @@ To see what a window title shows while you switch tabs and windows, `scripts/mea
 
 To see how the sessions message each other, `node scripts/measure/cross-session.mjs [days]` links, read only, every `SendMessage` of the last days' transcripts to its arrival in the recipient's transcript, and prints per sender and recipient how many messages went, how many got a reply, and how long the sender showed finished while the recipient still worked. It prints session names and counts, never message text.
 
+### Tests
+
+Every test is a vitest file next to its module (`<module>.test.ts`), run by `pnpm verify` and by each package's `test` script; `pnpm --filter @claudeswitcher/desktop test <name>` runs the desktop files whose path contains `<name>`. They run in Node, except the overlay's component tests.
+
+The component tests (`apps/desktop/src/renderer/*.test.tsx`) check the overlay's key paths end to end, the wiring that the pure helpers' tests cannot see. Each file starts with `// @vitest-environment happy-dom`, so only it runs in happy-dom. A test renders the real `App` with `renderOverlay` from `renderer/test-helpers.tsx` and states only its data (`session`, `bashRequest`, the excluded ids, the peek's reply); it presses keys with `user` (`@testing-library/user-event`), reads the list with `rowNames`, `selectedName` and `row`, and checks the calls the overlay made on `api` (every preload method is a vitest mock, `api.focusSession.mock.calls`). Only `Date` is faked: the decision panel's letters stay unarmed until the test calls `armKeys`. `App.test.tsx` is the example.
+
 ### Code
 
 - **No synchronous child processes** (`execSync`, `execFileSync`, `spawnSync`) outside tests. They stop the Electron main thread, and with it the daemon and every session's hooks. ESLint enforces this.
@@ -180,6 +186,7 @@ The shared modules, each the one home of its facts. Core modules marked "/browse
 - `renderer/usage-limit.ts`: the usage limit in the overlay: when a row shows it (`sessionUsageLimit`: the session is idle and its transcript reported a limit, `SessionActivity.usageLimit`; `renderer/session-marker.ts` `statusMarker` gives it the `limit` tone, `renderer/format.ts` `summarize` its text), the row's text (`usageLimitRowText`) and the status bar's note (`usageLimitStatusText`: the limit that resets last), the local `H:mm` clock and the Hungarian weekday names. Pure; the times follow App's one-second clock.
 - `renderer/git-explain.ts`: the plain Hungarian line of each git call in a Bash request's command, which `DecisionContent` shows (`gitExplanation`): how the command is split into calls and words the way bash would (quotes, substitutions, here-documents and redirections), which subcommands and flags it knows, their texts, and which of them are dangerous (`GitLevel`; the level of the hedged `git checkout <name>` line is `CHECKOUT_NAME_LEVEL`). Pure; a call it cannot classify with confidence gets no line.
 - `shared/overlay-channels.ts`, `shared/setup-channels.ts`: the IPC channel names and reply types of the two windows.
+- `renderer/test-helpers.tsx` (tests only): the kit of the overlay's component tests (`renderOverlay`): the fake preload API, which implements `ClaudeSwitcherApi` with a vitest mock per method and answers like the main process (the seen finishes and the excluded sessions in their wire formats, a cleared ✓ by `shared/session-finished.ts` `clearFinish`), the fake WebSocket that delivers the daemon's state the way `useDaemonState` gets it (the socket opens, then the state over IPC; `sendState` for a live message), the overlay composed as `main.tsx` `Root` composes it, the faked `Date` (`armKeys`), the overlay appearing again (`show`), the builders of the invented sessions and requests, and the list's queries. `tsconfig.web.json` excludes it, so the renderer's own type check does not see it, and no entry point of the bundle imports it.
 
 ## Claude Code coupling points
 
