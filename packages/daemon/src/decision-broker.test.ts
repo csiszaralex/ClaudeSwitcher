@@ -1,10 +1,13 @@
-import { PERMISSION_RELEASE_AFTER_MS, type HookDecisionBody } from '@claudeswitcher/core'
+import { PERMISSION_RELEASE_AFTER_MS, type HookDecisionBody, type UserDecision } from '@claudeswitcher/core'
 import { hookPayload, parsedPayload } from '@claudeswitcher/core/testing'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ABSENT_SESSION_GRACE_MS,
   DecisionBroker,
+  type AutoDecider,
   type BrokerClock,
+  type DecideResult,
+  type DecisionChange,
   type ToolUseEvent,
 } from './decision-broker.js'
 
@@ -490,5 +493,103 @@ describe('DecisionBroker', () => {
     client.abort()
     for (const [change] of listener.mock.calls) expect(change).toMatchObject({ abortedSessionId: undefined })
     expect(listener).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe('DecisionBroker: an AutoDecider', () => {
+  /** A decider that answers every request with `decision`, and records what it was asked and told. */
+  function decider(decision: UserDecision | undefined) {
+    const asked: string[] = []
+    const told: { id: string; result: DecideResult }[] = []
+    const auto: AutoDecider = {
+      decisionFor: (request) => {
+        asked.push(request.id)
+        return decision
+      },
+      decided: (request, result) => {
+        told.push({ id: request.id, result })
+      },
+    }
+    return { auto, asked, told }
+  }
+
+  it('answers a new request at once, and no listener ever sees it pending', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    const seen: number[] = []
+    const changes: DecisionChange[] = []
+    broker.onChange((change) => {
+      seen.push(broker.views().length)
+      changes.push(change)
+    })
+    const { auto, asked, told } = decider({ type: 'allow' })
+    broker.autoDecideWith(auto)
+
+    const request = parsedPayload('permissionRequest_bash')
+    const held = observe(broker.hold(request))
+    await flush()
+
+    expect(held.value?.hookSpecificOutput.decision).toEqual({ behavior: 'allow' })
+    expect(broker.views()).toEqual([])
+    // One emit, the resolved one, with the request already gone: nothing read it as pending.
+    expect(seen).toEqual([0])
+    expect(changes).toEqual([{ abortedSessionId: undefined, resolvedSessionId: request.sessionId }])
+    expect(asked).toHaveLength(1)
+    expect(told).toEqual([{ id: asked[0], result: { ok: true } }])
+  })
+
+  it('holds the request as usual when the decider gives no decision', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    const listener = vi.fn()
+    broker.onChange(listener)
+    const { auto, told } = decider(undefined)
+    broker.autoDecideWith(auto)
+
+    const held = observe(broker.hold(parsedPayload('permissionRequest_bash')))
+    await flush()
+    expect(held.done).toBe(false)
+    expect(broker.views()).toHaveLength(1)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(told).toEqual([])
+  })
+
+  it('holds the request as usual when its decision is refused, and tells the decider so', async () => {
+    // A plan cannot be allowed by the hook (`buildHookResponse`): the refusal leaves it held.
+    const broker = new DecisionBroker(fakeClock())
+    const { auto, told } = decider({ type: 'allow' })
+    broker.autoDecideWith(auto)
+
+    const held = observe(broker.hold(parsedPayload('permissionRequest_plan')))
+    await flush()
+    expect(held.done).toBe(false)
+    expect(broker.views()).toHaveLength(1)
+    expect(told).toHaveLength(1)
+    expect(told[0]?.result.ok).toBe(false)
+  })
+
+  it('holds the request as usual when the decider throws', async () => {
+    const broker = new DecisionBroker(fakeClock())
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    broker.autoDecideWith({
+      decisionFor: () => {
+        throw new Error('boom')
+      },
+      decided: () => undefined,
+    })
+    const held = observe(broker.hold(parsedPayload('permissionRequest_bash')))
+    await flush()
+    expect(held.done).toBe(false)
+    expect(broker.views()).toHaveLength(1)
+    expect(error).toHaveBeenCalledOnce()
+    error.mockRestore()
+  })
+
+  it('asks no more once it is removed', () => {
+    const broker = new DecisionBroker(fakeClock())
+    const { auto, asked } = decider({ type: 'allow' })
+    broker.autoDecideWith(auto)
+    broker.autoDecideWith(undefined)
+    void broker.hold(parsedPayload('permissionRequest_bash'))
+    expect(asked).toEqual([])
+    expect(broker.views()).toHaveLength(1)
   })
 })
