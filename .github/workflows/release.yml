@@ -28,12 +28,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      # Corepack provides the pnpm version pinned in `packageManager`.
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
+      # Node.js, pnpm and the dependencies: `.github/actions/setup`.
+      - uses: ./.github/actions/setup
       # Red means no release. It also builds the workspace packages the installer bundles.
       - run: pnpm verify
 
