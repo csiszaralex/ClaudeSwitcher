@@ -321,6 +321,31 @@ export function App({
     }
   }, [hold])
 
+  // The Esc that hides the overlay hides it on its release, not on its press. Hiding gives the focus
+  // back to the window in front before (`main/focus-return.ts`), and with the key still down that
+  // window would get its release, and its auto-repeat if held: a browser showing a video full screen
+  // took that as its own Esc and left full screen (seen by the owner, 2026-11-22). A press the overlay
+  // armed only counts: an Esc that went down elsewhere does nothing here, and the focus leaving the
+  // overlay meanwhile disarms it.
+  const escapeHides = useRef(false)
+  useEffect(() => {
+    const onKeyUp = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || !escapeHides.current) return
+      escapeHides.current = false
+      event.preventDefault()
+      void window.claudeswitcher.hide()
+    }
+    const disarm = (): void => {
+      escapeHides.current = false
+    }
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', disarm)
+    return () => {
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', disarm)
+    }
+  }, [])
+
   /** Back from the peek to the list, with the peeked session selected (a new request may have moved the selection meanwhile). */
   function closePeek(id: string): void {
     setSelectedId(id)
@@ -454,9 +479,12 @@ export function App({
       // On a focused button or <summary>, Enter belongs to the element (presses or opens it), not a jump.
       if (event.key === 'Enter' && isActivationTarget(event.target)) return
       if (event.key === 'Escape') {
-        // The first Esc closes the search, with the full list back and the selection kept.
-        if (query === undefined) void window.claudeswitcher.hide()
-        else setQuery(undefined)
+        // The first Esc closes the search, with the full list back and the selection kept. Without a
+        // search the Esc hides the overlay, but only on its release (`escapeHides`).
+        if (query === undefined) {
+          event.preventDefault()
+          if (!event.repeat) escapeHides.current = true
+        } else setQuery(undefined)
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         // Without this the arrow would also scroll the list besides moving the selection.

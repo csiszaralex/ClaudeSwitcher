@@ -99,6 +99,32 @@ describe('the search', () => {
     expect(api.hide).toHaveBeenCalledTimes(1)
   })
 
+  it('hides the overlay on the release of Esc, not on its press, so the window behind never gets the key', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard('{Escape>}')
+    expect(api.hide).not.toHaveBeenCalled()
+    await user.keyboard('{/Escape}')
+    expect(api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores an Esc release whose press it did not see, and a press the focus left meanwhile', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    // The press went to another window before the overlay showed.
+    fireEvent.keyUp(window, { key: 'Escape' })
+    expect(api.hide).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.blur(window)
+    fireEvent.keyUp(window, { key: 'Escape' })
+    expect(api.hide).not.toHaveBeenCalled()
+
+    // Held: the auto-repeat presses change nothing, the one release hides once.
+    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.keyDown(window, { key: 'Escape', repeat: true })
+    fireEvent.keyUp(window, { key: 'Escape' })
+    expect(api.hide).toHaveBeenCalledTimes(1)
+  })
+
   it('lets Backspace and Delete edit the query and types / as a character, without touching the list', async () => {
     // The selected row shows a ✓ and is a session: outside the field, Backspace would clear the ✓
     // and Delete would exclude it.
