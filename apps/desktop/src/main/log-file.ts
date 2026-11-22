@@ -61,6 +61,8 @@ export function installFileLog(deps: {
   pid: number
   /** Overridable for tests; `LOG_MAX_BYTES` otherwise. */
   maxBytes?: number
+  /** Overridable for tests; `renameSync` otherwise. */
+  rename?: (from: string, to: string) => void
 }): void {
   const { userData, target, now, pid } = deps
   const maxBytes = deps.maxBytes ?? LOG_MAX_BYTES
@@ -72,7 +74,26 @@ export function installFileLog(deps: {
     warn: target.warn.bind(target),
     error: target.error.bind(target),
   }
+  const rename = deps.rename ?? renameSync
   let enabled = true
+  /** Whether a refused rotation has been reported in this run: it is reported once, not on every line. */
+  let rotationReported = false
+
+  /**
+   * Moves a full file to the old name. Windows refuses the rename for a moment while another process
+   * (a virus scanner, an editor showing the log) has either file open (EPERM, seen in the tests,
+   * 2026-11-22). That must not turn the log off: the line goes into the current file, a little over
+   * the limit, and the next line tries again.
+   */
+  const rotate = (): void => {
+    try {
+      rename(file, oldFile)
+    } catch (error) {
+      if (rotationReported) return
+      rotationReported = true
+      originals.warn('[log] moving the full log file aside failed; it grows until a later try succeeds', error)
+    }
+  }
 
   /** The file's size now, read each time: the `--quit` helper writes to the same file. */
   const currentSize = (): number => {
@@ -89,7 +110,7 @@ export function installFileLog(deps: {
       const line = `${now().toISOString()} ${String(pid)} ${level.toUpperCase()} ${formatWithOptions({ colors: false }, ...args)}\n`
       mkdirSync(logDir(userData), { recursive: true })
       const size = currentSize()
-      if (size > 0 && size + Buffer.byteLength(line) > maxBytes) renameSync(file, oldFile)
+      if (size > 0 && size + Buffer.byteLength(line) > maxBytes) rotate()
       appendFileSync(file, line)
     } catch (error) {
       enabled = false

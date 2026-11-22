@@ -1,5 +1,14 @@
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useRef, useState, type JSX } from 'react'
+import {
+  AUTO_ACCEPT_HOLD_MS,
+  autoTagText,
+  autoTagTitle,
+  endsHold,
+  holdText,
+  isAutoAcceptKey,
+  type AutoAcceptHold,
+} from './auto-accept-hold.js'
 import { DecisionPanel } from './DecisionPanel.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { JumpButton } from './JumpButton.js'
@@ -99,6 +108,8 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * @param excluded The sessions moved out of the list (`useExcludedSessions`), for the excluded group.
  * @param trackExcluded Takes the reply of a Delete, which answers with the excluded sessions, and
  * calls `onApplied` with them in the same update (`useExcludedSessions`).
+ * @param autoAccept The sessions in the auto-accept mode and their counts (`useAutoAccept`).
+ * @param trackAutoAccept Takes the reply of a completed Shift+A hold, which answers with them (`useAutoAccept`).
  */
 export function App({
   overlay,
@@ -106,12 +117,16 @@ export function App({
   trackSeen,
   excluded,
   trackExcluded,
+  autoAccept,
+  trackAutoAccept,
 }: {
   overlay: OverlayState
   seenFinishes: SeenFinishes
   trackSeen: (reply: Promise<unknown>) => void
   excluded: ReadonlySet<string>
   trackExcluded: (reply: Promise<unknown>, onApplied: (excluded: ReadonlySet<string>) => void) => void
+  autoAccept: ReadonlyMap<string, number>
+  trackAutoAccept: (reply: Promise<unknown>) => void
 }): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
   // A session id, not an index: when the list reorders, the selection moves with the session.
@@ -128,6 +143,10 @@ export function App({
   const peekHistory = useRef<HTMLDivElement | null>(null)
   // Whether the excluded group at the bottom of the list shows its rows (list-cleanup.ts).
   const [groupOpen, setGroupOpen] = useState(false)
+  // The running Shift+A hold on the selected row (auto-accept-hold.ts), else `undefined`; and a
+  // counter that redraws its countdown while it runs.
+  const [hold, setHold] = useState<AutoAcceptHold | undefined>()
+  const [, redrawHold] = useState(0)
 
   // All rows: the sessions, plus a row of its own for each pending request whose session the
   // snapshot does not know yet, in the list's order (rows.ts).
@@ -208,7 +227,8 @@ export function App({
         rerenderOnShow(armedAt)
         // The keys act on the list again on every show, not on a question form left focused.
         questionFocus.current?.leave()
-        // The search, the peek and the excluded group start closed on every show.
+        // The search, the peek and the excluded group start closed on every show, and no hold runs.
+        setHold(undefined)
         setQuery(undefined)
         setPeekId(undefined)
         setGroupOpen(false)
@@ -267,6 +287,39 @@ export function App({
   useEffect(() => {
     if (peekGone) setPeekId(undefined)
   }, [peekGone])
+
+  // A running hold ends early, changing nothing, when the A or the Shift is released, the window
+  // loses the focus, the selection leaves its row, or the peek opens. Otherwise it completes after
+  // `AUTO_ACCEPT_HOLD_MS` from its first keydown (the key's auto-repeat does not restart it), and the
+  // main process turns the mode on or off (`AutoAccept.set`).
+  const holdOff = hold !== undefined && (hold.sessionId !== selectedItem || peekId !== undefined)
+  useEffect(() => {
+    if (holdOff) setHold(undefined)
+  }, [holdOff])
+  useEffect(() => {
+    if (hold === undefined) return
+    const cancel = (): void => {
+      setHold(undefined)
+    }
+    const onKeyUp = (event: KeyboardEvent): void => {
+      if (endsHold(event)) cancel()
+    }
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', cancel)
+    const done = setTimeout(() => {
+      setHold(undefined)
+      trackAutoAccept(window.claudeswitcher.setAutoAccept(hold.sessionId, hold.turnOn))
+    }, Math.max(0, hold.startedAt + AUTO_ACCEPT_HOLD_MS - Date.now()))
+    const countdown = setInterval(() => {
+      redrawHold((count) => count + 1)
+    }, 200)
+    return () => {
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', cancel)
+      clearTimeout(done)
+      clearInterval(countdown)
+    }
+  }, [hold])
 
   /** Back from the peek to the list, with the peeked session selected (a new request may have moved the selection meanwhile). */
   function closePeek(id: string): void {
@@ -354,6 +407,18 @@ export function App({
       // the query (the panel's key letters skip a text field too, `isTypingTarget`).
       if (isTypingTarget(event.target) && !inSearch) return
       if (inSearch && !SEARCH_FIELD_KEYS.has(event.key)) return
+      // Shift+A starts the hold that turns the selected row's auto-accept mode on or off
+      // (auto-accept-hold.ts). Only its first keydown starts it: the auto-repeat of the held key
+      // does not restart the countdown. The decision panel's letters skip it (Shift, key-guard.ts).
+      if (isAutoAcceptKey(event)) {
+        event.preventDefault()
+        const row = selectedRowView
+        if (!event.repeat && row !== undefined) {
+          const start: AutoAcceptHold = { sessionId: row.sessionId, turnOn: !autoAccept.has(row.sessionId), startedAt: Date.now() }
+          setHold((current) => current ?? start)
+        }
+        return
+      }
       // Space opens the peek of the selected session, also on a focused button or <summary>, which
       // it must not press: its default is prevented, the focus leaves the element, and the panel
       // with its buttons is not drawn while the peek is open. A text field keeps its Space (the
@@ -451,11 +516,14 @@ export function App({
     const flagged = source.standsOut && row.decisions.length > 0
     const note = promptedByNote(row.promptedBy)
     const isSelected = !headerSelected && row.sessionId === selectedItem
+    // In the auto-accept mode: the green row and the `auto` tag with the mode's count.
+    const autoAllowed = autoAccept.get(row.sessionId)
+    const rowHold = hold?.sessionId === row.sessionId ? hold : undefined
     return (
       <li
         key={row.sessionId}
         ref={isSelected ? selectedRow : null}
-        className={`session ${row.status} ${inGroup ? 'excluded' : ''} ${isSelected ? 'selected' : ''}`}
+        className={`session ${row.status} ${inGroup ? 'excluded' : ''} ${isSelected ? 'selected' : ''} ${autoAllowed === undefined ? '' : 'auto-accept'}`}
         onClick={() => {
           setSelectedId(row.sessionId)
         }}
@@ -489,6 +557,11 @@ export function App({
               {badge}
             </span>
           )}
+          {autoAllowed !== undefined && (
+            <span className="auto-tag" title={autoTagTitle(autoAllowed)}>
+              {autoTagText(autoAllowed)}
+            </span>
+          )}
           {!inGroup && showsExcludedTag(row, excluded) && (
             <span className="excluded-tag" title={EXCLUDED_TEXT.tagTitle}>
               {EXCLUDED_TEXT.tag}
@@ -506,13 +579,18 @@ export function App({
               {note}{' '}
             </span>
           )}
-          {pending !== undefined
-            ? pendingRowText(pending)
-            : row.waitsOn.length > 0
-              ? waitsOnText(row.waitsOn)
-              : row.session !== undefined
-                ? summarize(row.session, now)
-                : ''}
+          {/* A running Shift+A hold's countdown takes the place of the row's text. */}
+          {rowHold !== undefined ? (
+            <span className="auto-hold">{holdText(rowHold, Date.now())}</span>
+          ) : pending !== undefined ? (
+            pendingRowText(pending)
+          ) : row.waitsOn.length > 0 ? (
+            waitsOnText(row.waitsOn)
+          ) : row.session !== undefined ? (
+            summarize(row.session, now)
+          ) : (
+            ''
+          )}
         </span>
         <span className="age">
           {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}

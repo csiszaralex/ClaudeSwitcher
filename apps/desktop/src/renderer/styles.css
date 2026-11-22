@@ -21,7 +21,9 @@
   --warning: #e3b341; /* released marker, line count, setup warnings */
   --info: #7aa2c4; /* working marker, seen done marker, subagent description */
   --success: #8fbf7a; /* unseen done marker, added diff lines, an answered question's tab, a chosen option */
-  --success-tint: #8fbf7a1a; /* added diff lines, a chosen option */
+  --success-tint: #8fbf7a1a; /* added diff lines, a chosen option, the auto tag */
+  --auto-accept: #8fbf7a24; /* the row of a session in the auto-accept mode (--success, translucent) */
+  --auto-accept-selected: #8fbf7a40; /* the same row while selected */
   --link: #5fa8e8; /* Remote Control dot, setup link */
   --limit: #a98fd8; /* usage limit marker and status bar note */
   --waits-on: #6cb6b0; /* the marker of a session that waits on the sessions it prompted, and the prompted-by note */
@@ -64,6 +66,9 @@ body {
 }
 
 .session.selected { background: var(--raised); }
+/* A session in the auto-accept mode (auto-accept-hold.ts): a green row, a stronger green while selected. */
+.session.auto-accept { background: var(--auto-accept); }
+.session.auto-accept.selected { background: var(--auto-accept-selected); }
 /* The status marker (session-marker.ts): the shape differs besides the color, except between the
    yes/no and the choice dot, which tell the kind of the request. */
 .marker { cursor: default; }
@@ -117,6 +122,20 @@ body {
   font-weight: 400;
   cursor: default;
 }
+/* The `auto` tag of a row in the auto-accept mode, with the mode's count (auto-accept-hold.ts `autoTagText`). */
+.auto-tag {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--success-tint);
+  color: var(--success);
+  font-size: 10px;
+  font-weight: 400;
+  cursor: default;
+}
+/* The countdown of a running Shift+A hold, in place of the row's text. */
+.auto-hold { color: var(--success); }
 .summary { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The sessions a working row works for (rows.ts `Row.promptedBy`), at the start of its text. */
 .prompted-by { color: var(--waits-on); cursor: default; }

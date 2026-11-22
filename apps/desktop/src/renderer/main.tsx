@@ -2,6 +2,7 @@ import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
+import { useAutoAccept } from './useAutoAccept.js'
 import { useDaemonState } from './useDaemonState.js'
 import { useExcludedSessions } from './useExcludedSessions.js'
 import { useSeenFinishes } from './useSeenFinishes.js'
@@ -20,14 +21,15 @@ function overlayFailed(message: string, retries: boolean): JSX.Element {
 }
 
 /**
- * The daemon connection (and the seen finishes and the excluded sessions) live ABOVE the error
- * boundary: so a render error does not break the connection, and the next state message
+ * The daemon connection (and the seen finishes, the excluded sessions and the auto-accept sessions)
+ * live ABOVE the error boundary: so a render error does not break the connection, and the next state message
  * (`stateVersion`) retries rendering App.
  */
 function Root(): JSX.Element {
   const overlay = useDaemonState()
   const [seenFinishes, trackSeen] = useSeenFinishes()
   const [excluded, trackExcluded] = useExcludedSessions()
+  const [autoAccept, trackAutoAccept] = useAutoAccept()
   return (
     <ErrorBoundary
       label="overlay"
@@ -40,6 +42,8 @@ function Root(): JSX.Element {
         trackSeen={trackSeen}
         excluded={excluded}
         trackExcluded={trackExcluded}
+        autoAccept={autoAccept}
+        trackAutoAccept={trackAutoAccept}
       />
     </ErrorBoundary>
   )

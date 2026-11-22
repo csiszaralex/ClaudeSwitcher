@@ -60,6 +60,24 @@ export interface DecisionChange {
 
 const NO_ABORT: DecisionChange = { abortedSessionId: undefined }
 
+/**
+ * Decides a newly held request at once, before any listener hears of it (`DecisionBroker.autoDecideWith`).
+ * The desktop app's per-session auto-accept mode is one: a request it allows is answered and closed
+ * before the broker's first emit for it, so no listener, and so no broadcast, ever sees it pending.
+ */
+export interface AutoDecider {
+  /**
+   * The decision for the newly held request, or `undefined` to hold it as usual. Called
+   * synchronously inside `hold`, once per request; a throw counts as `undefined`.
+   */
+  decisionFor(request: PendingDecisionView): UserDecision | undefined
+  /**
+   * The outcome of the decision `decisionFor` gave, as `decide` returned it. A refused decision
+   * leaves the request held as usual. A throw is only logged.
+   */
+  decided(request: PendingDecisionView, result: DecideResult): void
+}
+
 /** Time and timers. Fakeable in tests, so the release time need not be waited out. */
 export interface BrokerClock {
   now(): number
@@ -119,7 +137,8 @@ function callKey(
 /**
  * The owner of the held PermissionRequests: the only real concurrent state machine of the system.
  *
- * A decision can come from three sources, and the first one wins: the app (`decide`), VS Code or the
+ * A decision can come from three sources, and the first one wins: the app (`decide`, or its
+ * `AutoDecider` at once inside `hold`), VS Code or the
  * phone (`postToolUse`, `sessionStopped`, `sessionEnded`, `subagentStopped`), or the release. The hook
  * client disconnecting and the clean-up of a vanished session's released request (`pruneAbsent`)
  * close without an answer. Every held request gets exactly one answer: the `respond` function's own
@@ -133,6 +152,8 @@ export class DecisionBroker {
   #recentPre: Array<{ key: string; toolUseId: string; at: number }> = []
   /** True after `releaseAll`: the daemon is shutting down and no new request is held. */
   #closed = false
+  /** Asked about every newly held request (`autoDecideWith`); none by default. */
+  #autoDecider: AutoDecider | undefined
 
   constructor(clock: BrokerClock = systemClock, releaseAfterMs: number = PERMISSION_RELEASE_AFTER_MS) {
     this.#clock = clock
@@ -141,6 +162,11 @@ export class DecisionBroker {
 
   onChange(listener: (change: DecisionChange) => void): void {
     this.#listeners.push(listener)
+  }
+
+  /** Asks `decider` about every request held from now on (`AutoDecider`); `undefined` stops asking. */
+  autoDecideWith(decider: AutoDecider | undefined): void {
+    this.#autoDecider = decider
   }
 
   /**
@@ -183,8 +209,32 @@ export class DecisionBroker {
       }, this.#releaseAfterMs)
       this.#pending.set(id, pending)
       signal?.addEventListener('abort', onAbort, { once: true })
+      // Before the first emit: a request decided here reaches the listeners only as resolved by the
+      // app (`decide`'s one emit), never as pending.
+      if (this.#autoDecided(pending.view)) return
       this.#emit()
     })
+  }
+
+  /** Asks the `AutoDecider`, if any, about a request just held; true if its decision closed the request. */
+  #autoDecided(view: PendingDecisionView): boolean {
+    const decider = this.#autoDecider
+    if (decider === undefined) return false
+    let decision: UserDecision | undefined
+    try {
+      decision = decider.decisionFor(view)
+    } catch (error) {
+      console.error('[decisions] auto decider failed', error)
+      return false
+    }
+    if (decision === undefined) return false
+    const result = this.decide(view.id, decision)
+    try {
+      decider.decided(view, result)
+    } catch (error) {
+      console.error('[decisions] auto decider failed', error)
+    }
+    return result.ok
   }
 
   /** The user's decision from the app. On an invalid decision the request stays pending. */

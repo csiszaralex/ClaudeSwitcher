@@ -659,7 +659,8 @@ PermissionRequest ─→ PendingDecision, the HTTP response suspended
                      └─→ meanwhile the native prompt is already visible in VS Code and on the phone
 
    THE FIRST DECISION WINS, from three sources:
-   ├─ the app (overlay)  → HTTP response: allow / deny (+ updatedInput / updatedPermissions)
+   ├─ the app (overlay,  → HTTP response: allow / deny (+ updatedInput / updatedPermissions)
+   │   or its auto-accept mode at once: a plain allow, see §7 "Auto-accept per session")
    ├─ VS Code / phone    → the daemon learns it from PostToolUse/PostToolUseFailure (allow), from
    │                       the aborted connection (native No/Esc, §3.4), or from
    │                       Stop/SessionEnd/SubagentStop (the end of the turn);
@@ -800,6 +801,39 @@ the list; the ids are stored in `config.json`. Two decisions:
   empty list counts as no picture and restarts every count (`main/excluded-sessions.ts`
   `createExcludedSessions`). A wrong drop only brings a session back into the list; a stale id
   could hide a later session that reuses the id.
+
+**Auto-accept per session** (issue #2). Holding Shift+A on a row for 3 s puts its session into a
+mode in which the app allows the session's requests by itself. The decisions:
+
+- *Accept only, and only what the allow button allows.* The mode gives one decision, the plain
+  `allow` the panel's allow button sends (`shared/auto-accept.ts` `ALLOW_DECISION`), never a rule
+  and never `allow-session-edits`, and it never denies. It takes a `tool` or an `edit` request
+  only (`autoAcceptTakes`): never a question or a plan, which need the user's answer; never an
+  unreadable request, which the core would refuse anyway; never a released one, which only the
+  session's own prompt can decide; and never a command that turns off the sandbox
+  (`shared/sandbox.ts` `sandboxDisabled`), which the panel marks red because it is the one field
+  that widens what a command may do. What it does not take waits, notifies and colours the tray as
+  without the mode.
+- *In the main process, before the state.* The daemon asks the mode (`DaemonOptions.autoDecider`,
+  the broker's `AutoDecider`) inside `DecisionBroker.hold`, before the broker's first emit. So it
+  works while the overlay is closed, and a request it allows is closed before any listener hears of
+  it: the broadcast, the toasts and the tray, which all read the daemon's state (the tray tick reads
+  `running.state()` once a second and runs the notifier on it), have nothing to show. The broker
+  emits once, as resolved by the app, so the session store treats the late `permission_prompt`
+  Notification as after any app decision (`LATE_PROMPT_WINDOW_MS`). Deciding in the tray tick
+  instead would have let the overlay see the request for up to a second and needed an ordering
+  between the decision and the notifier.
+- *Switch-on allows what waits.* Turning the mode on allows the session's waiting requests that the
+  mode takes (the owner's choice), through the daemon's `decide`, which checks each again.
+- *Memory only.* The set of sessions in the mode lives in the main process (`main/auto-accept.ts`)
+  and is empty after a restart: a mode that allows by itself should not outlive the moment the user
+  chose it. A session leaves it once it has been gone (not listed, no pending request) for
+  `AUTO_ACCEPT_GONE_AFTER_MS` (30 s, ten polls), so the set stays bounded; an empty session list
+  counts as no picture, as for the excluded sessions.
+- *Shift+A never allows.* The panel's letters lower-case the key (`shortcutFor`), so before this
+  change Shift+A allowed the selected request. The letters now skip any key with Shift
+  (`key-guard.ts` `shortcutAllowed`), and the hold ignores the key's auto-repeat, so the countdown
+  runs from the first keydown.
 
 ### Tab focus (tab focus milestone): without an extension of our own
 

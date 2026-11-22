@@ -1,6 +1,7 @@
 import type { UserDecision } from '@claudeswitcher/core'
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
+import { ALLOW_DECISION } from '../shared/auto-accept.js'
 import { errorMessage } from '../shared/error-message.js'
 import {
   ACTION_BUTTONS,
@@ -91,7 +92,7 @@ export function DecisionPanel({
   function run(action: DecisionAction): void {
     switch (action) {
       case 'allow':
-        void submit({ type: 'allow' })
+        void submit(ALLOW_DECISION)
         return
       case 'session-edits':
         void submit({ type: 'allow-session-edits' })
@@ -136,6 +137,7 @@ export function DecisionPanel({
         ctrlKey: event.ctrlKey,
         altKey: event.altKey,
         metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
         typingTarget: isTypingTarget(event.target),
       }
       const clock = { armedAt: armedAt(), lastTypedAt: keyHistory.current.lastTypedAt, now: Date.now() }

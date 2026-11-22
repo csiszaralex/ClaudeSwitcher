@@ -27,6 +27,15 @@ export interface ClaudeSwitcherApi {
   excludedSessions: () => Promise<unknown>
   /** Moves the session out of the list (`true`) or brings it back (`false`); answers like `excludedSessions`. */
   setExcluded: (sessionId: string, excluded: boolean) => Promise<unknown>
+  /** The sessions in the auto-accept mode and their counts; the renderer reads them with `readAutoAccept`. */
+  autoAccept: () => Promise<unknown>
+  /** Turns the auto-accept mode on (`true`) or off (`false`) for the session; answers like `autoAccept`. */
+  setAutoAccept: (sessionId: string, on: boolean) => Promise<unknown>
+  /**
+   * Subscribes to the main process's push of the auto-accept sessions (answered like `autoAccept`);
+   * the returned function unsubscribes. As with `onShown`, the callback gets only the payload.
+   */
+  onAutoAcceptChanged: (callback: (raw: unknown) => void) => () => void
   focusSession: (sessionId: string) => Promise<boolean>
   /**
    * The session's recent conversation; the main process gives a `ConversationReply`, the renderer

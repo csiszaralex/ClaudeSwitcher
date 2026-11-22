@@ -317,6 +317,57 @@ describe('startDaemon: held decisions', () => {
     expect(states[0]?.sessions[0]?.status).toBe('idle')
   })
 
+  it('answers a request its AutoDecider takes at once, and never broadcasts it as pending', async () => {
+    const decided: string[] = []
+    running = await startDaemon({
+      claudeDir: await fixture(),
+      probe: aliveProbe,
+      pollMs: 0,
+      autoDecider: {
+        decisionFor: (request) => (request.kind === 'tool' ? { type: 'allow' } : undefined),
+        decided: (request, result) => {
+          if (result.ok) decided.push(request.toolName)
+        },
+      },
+    })
+    const daemon = running
+    await daemon.refresh()
+
+    const socket = new WebSocket(`ws://127.0.0.1:${daemon.port}/ws?token=${daemon.token}`)
+    const messages: string[] = []
+    socket.on('message', (data) => {
+      messages.push(data instanceof Buffer ? data.toString('utf8') : '')
+    })
+    await new Promise((resolve) => socket.on('open', resolve))
+
+    const res = await postHook(daemon, '/hooks/permission-request', { ...hookPayload('permissionRequest_bash'), session_id: 'sid-100' })
+    expect(await res.json()).toEqual({
+      hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
+    })
+    // The late permission_prompt of a decided request is no wait (`LATE_PROMPT_WINDOW_MS`).
+    await postHook(daemon, '/hooks/notification', { ...hookPayload('notification_permissionPrompt'), session_id: 'sid-100' })
+    await drained(socket)
+    socket.close()
+
+    expect(decided).toEqual(['Bash'])
+    expect(daemon.state().decisions).toEqual([])
+    expect(daemon.state().sessions[0]?.status).toBe('idle')
+    for (const message of messages) expect(message).not.toContain('"decisions":[{')
+  })
+
+  it('holds a request its AutoDecider does not take, as without one', async () => {
+    running = await startDaemon({
+      claudeDir: await fixture(),
+      probe: aliveProbe,
+      pollMs: 0,
+      autoDecider: { decisionFor: () => undefined, decided: () => undefined },
+    })
+    const daemon = running
+    void postHook(daemon, '/hooks/permission-request', hookPayload('permissionRequest_bash'))
+    const [pending] = await waitFor(() => daemon.state().decisions)
+    expect(pending?.toolName).toBe('Bash')
+  })
+
   it('clears the waiting row when a tool of the session has run', async () => {
     running = await startDaemon({ claudeDir: await fixture(), probe: aliveProbe, pollMs: 0 })
     const daemon = running

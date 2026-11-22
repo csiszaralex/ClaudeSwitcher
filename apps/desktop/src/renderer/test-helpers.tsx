@@ -15,10 +15,12 @@ import { userEvent, type UserEvent } from '@testing-library/user-event'
 import type { JSX } from 'react'
 import { onTestFinished, vi, type Mock } from 'vitest'
 import type { ClaudeSwitcherApi } from '../preload/api.js'
+import type { AutoAcceptEntry } from '../shared/auto-accept.js'
 import type { ConversationReply } from '../shared/overlay-channels.js'
 import { clearFinish, seenFinishesReply, type SeenFinish } from '../shared/session-finished.js'
 import { App } from './App.js'
 import { SHORTCUT_ARM_MS, TYPING_COOLDOWN_MS } from './key-guard.js'
+import { useAutoAccept } from './useAutoAccept.js'
 import { useDaemonState } from './useDaemonState.js'
 import { useExcludedSessions } from './useExcludedSessions.js'
 import { useSeenFinishes } from './useSeenFinishes.js'
@@ -34,6 +36,8 @@ export interface OverlaySetup {
   excluded?: readonly string[]
   /** The peek's reply (`OVERLAY_CHANNELS.conversation`); an empty history by default. */
   conversation?: ConversationReply
+  /** The sessions already in the auto-accept mode, with their counts (`main/auto-accept.ts`). */
+  autoAccept?: readonly AutoAcceptEntry[]
 }
 
 /** The fixed start of the overlay's clock: only `Date` is faked, so the key letters arm when a test says so. */
@@ -64,18 +68,22 @@ class FakeSocket {
 }
 
 /**
- * The fake preload API. It answers like the main process: the state over IPC, the seen finishes
- * and the excluded sessions in their wire formats, a clear and a Delete applied with the main
- * process's rules (only a listed session; `shared/session-finished.ts` `clearFinish`), and every
- * decision accepted.
+ * The fake preload API. It answers like the main process: the state over IPC, the seen finishes,
+ * the excluded sessions and the auto-accept sessions in their wire formats, a clear, a Delete and a
+ * completed Shift+A hold applied with the main process's rules (only a listed session;
+ * `shared/session-finished.ts` `clearFinish`), and every decision accepted. The auto-accept toggle
+ * only records the session (its count starts at 0); the main side is `main/auto-accept.test.ts`'s.
  */
 function fakeApi(
   setup: OverlaySetup,
   state: DaemonState,
   shown: Set<(preferred: string | undefined) => void>,
+  autoAcceptPush: Set<(raw: unknown) => void>,
 ): FakeApi {
   const seen = new Map<string, SeenFinish>()
   const excluded = new Set(setup.excluded ?? [])
+  const autoAccept = new Map((setup.autoAccept ?? []).map((entry) => [entry.sessionId, entry.allowed]))
+  const autoAcceptReply = (): AutoAcceptEntry[] => [...autoAccept].map(([sessionId, allowed]) => ({ sessionId, allowed }))
   const listed = (sessionId: string): SessionView | undefined => state.sessions.find((s) => s.sessionId === sessionId)
   return {
     connection: vi.fn(() => Promise.resolve({ port: 47_999, token: 'a'.repeat(64) })),
@@ -92,6 +100,18 @@ function fakeApi(
       if (!exclude) excluded.delete(sessionId)
       return Promise.resolve([...excluded])
     }),
+    autoAccept: vi.fn(() => Promise.resolve(autoAcceptReply())),
+    setAutoAccept: vi.fn((sessionId: string, on: boolean) => {
+      if (on && listed(sessionId) !== undefined && !autoAccept.has(sessionId)) autoAccept.set(sessionId, 0)
+      if (!on) autoAccept.delete(sessionId)
+      return Promise.resolve(autoAcceptReply())
+    }),
+    onAutoAcceptChanged: vi.fn((callback: (raw: unknown) => void) => {
+      autoAcceptPush.add(callback)
+      return () => {
+        autoAcceptPush.delete(callback)
+      }
+    }),
     focusSession: vi.fn(() => Promise.resolve(true)),
     conversation: vi.fn(() => Promise.resolve(setup.conversation ?? { ok: true, version: 'v1', entries: [] })),
     hide: vi.fn(() => Promise.resolve()),
@@ -107,13 +127,25 @@ function fakeApi(
   }
 }
 
-/** `main.tsx` `Root` without its error boundaries: the daemon state, the seen finishes and the excluded sessions, then App. */
+/**
+ * `main.tsx` `Root` without its error boundaries: the daemon state, the seen finishes, the excluded
+ * and the auto-accept sessions, then App.
+ */
 function Overlay(): JSX.Element {
   const overlay = useDaemonState()
   const [seenFinishes, trackSeen] = useSeenFinishes()
   const [excluded, trackExcluded] = useExcludedSessions()
+  const [autoAccept, trackAutoAccept] = useAutoAccept()
   return (
-    <App overlay={overlay} seenFinishes={seenFinishes} trackSeen={trackSeen} excluded={excluded} trackExcluded={trackExcluded} />
+    <App
+      overlay={overlay}
+      seenFinishes={seenFinishes}
+      trackSeen={trackSeen}
+      excluded={excluded}
+      trackExcluded={trackExcluded}
+      autoAccept={autoAccept}
+      trackAutoAccept={trackAutoAccept}
+    />
   )
 }
 
@@ -131,6 +163,8 @@ export interface RenderedOverlay {
   show: () => Promise<void>
   /** A live state message from the daemon, as the hub sends it; the fake main process sees the new state too. */
   sendState: (next: DaemonState) => void
+  /** The main process's push of the auto-accept sessions (`OVERLAY_CHANNELS.autoAcceptChanged`). */
+  pushAutoAccept: (entries: readonly AutoAcceptEntry[]) => void
   /** Moves the clock past the key letters' arming and the pause after typing (`key-guard.ts`). */
   armKeys: () => void
   /** Lets the replies in flight land. */
@@ -146,9 +180,10 @@ export async function renderOverlay(setup: OverlaySetup = {}): Promise<RenderedO
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(START)
   const shown = new Set<(preferred: string | undefined) => void>()
+  const autoAcceptPush = new Set<(raw: unknown) => void>()
   // The daemon's state, which the fake main process reads too; a live message replaces it.
   const state: DaemonState = { sessions: setup.sessions ?? [], decisions: setup.decisions ?? [] }
-  const api = fakeApi(setup, state, shown)
+  const api = fakeApi(setup, state, shown, autoAcceptPush)
   window.claudeswitcher = api
   vi.stubGlobal('WebSocket', FakeSocket)
   onTestFinished(() => {
@@ -178,6 +213,11 @@ export async function renderOverlay(setup: OverlaySetup = {}): Promise<RenderedO
       state.decisions = next.decisions
       act(() => {
         socket.onmessage?.({ data: JSON.stringify({ type: 'state', protocol: DAEMON_PROTOCOL, payload: next }) })
+      })
+    },
+    pushAutoAccept: (entries) => {
+      act(() => {
+        for (const callback of autoAcceptPush) callback(structuredClone(entries))
       })
     },
     armKeys: () => {

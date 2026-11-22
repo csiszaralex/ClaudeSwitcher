@@ -3,7 +3,7 @@ import type { AddressInfo, Socket } from 'node:net'
 import { performance } from 'node:perf_hooks'
 import { serve, type ServerType } from '@hono/node-server'
 import { DAEMON_HOST, DAEMON_PROTOCOL, POLL_INTERVAL_MS, type ProcessProbe, type SessionView, type UserDecision } from '@claudeswitcher/core'
-import { DecisionBroker, type DecideResult, type PendingDecisionView } from './decision-broker.js'
+import { DecisionBroker, type AutoDecider, type DecideResult, type PendingDecisionView } from './decision-broker.js'
 import { createHookApp } from './hook-server.js'
 import { Hub } from './hub.js'
 import { scanSessions } from './scanner.js'
@@ -11,7 +11,7 @@ import { SessionStore } from './session-store.js'
 import { createTranscriptCache } from './transcript-cache.js'
 import { createToken } from './token.js'
 
-export type { PendingDecisionView } from './decision-broker.js'
+export type { AutoDecider, PendingDecisionView } from './decision-broker.js'
 export { createToken, isToken } from './token.js'
 
 export interface DaemonState {
@@ -54,6 +54,12 @@ export interface DaemonOptions {
    * message equals the last one and is not sent. Must not throw.
    */
   onTimed?: ((job: DaemonJob, ms: number, chars?: number) => void) | undefined
+  /**
+   * Asked about every newly held permission request before any listener hears of it
+   * (`AutoDecider`): a request it decides is answered and closed at once, so no broadcast and no
+   * later `state()` carries it. None by default: every request is held for the user.
+   */
+  autoDecider?: AutoDecider | undefined
 }
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
@@ -62,6 +68,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 
   const sessions = new SessionStore()
   const decisions = new DecisionBroker()
+  decisions.autoDecideWith(options.autoDecider)
 
   const app = createHookApp(
     token,

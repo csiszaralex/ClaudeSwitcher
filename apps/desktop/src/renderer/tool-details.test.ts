@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DETAILS_LIMIT, formatToolInput, sandboxDisabled, showsDetails, toolDetails } from './tool-details.js'
+import { DETAILS_LIMIT, formatToolInput, showsDetails, toolDetails } from './tool-details.js'
 
 describe('showsDetails', () => {
   it('offers details for a tool request with input', () => {
@@ -87,15 +87,5 @@ describe('toolDetails: a tool that runs a command', () => {
     expect(toolDetails({ kind: 'tool', toolName: 'mcp__x__y', toolInput: { command: 'c', description: 'd' } })?.blocks).toEqual([
       { text: JSON.stringify({ command: 'c', description: 'd' }, null, 2) },
     ])
-  })
-})
-
-describe('sandboxDisabled', () => {
-  it('is true only for an explicit dangerouslyDisableSandbox: true', () => {
-    expect(sandboxDisabled({ command: 'ls', dangerouslyDisableSandbox: true })).toBe(true)
-    expect(sandboxDisabled({ command: 'ls', dangerouslyDisableSandbox: false })).toBe(false)
-    expect(sandboxDisabled({ command: 'ls', dangerouslyDisableSandbox: 'true' })).toBe(false)
-    expect(sandboxDisabled({ command: 'ls' })).toBe(false)
-    expect(sandboxDisabled(null)).toBe(false)
   })
 })

@@ -10,7 +10,14 @@ import {
   type ShortcutKey,
 } from './key-guard.js'
 
-const plainKey: ShortcutKey = { repeat: false, ctrlKey: false, altKey: false, metaKey: false, typingTarget: false }
+const plainKey: ShortcutKey = {
+  repeat: false,
+  ctrlKey: false,
+  altKey: false,
+  metaKey: false,
+  shiftKey: false,
+  typingTarget: false,
+}
 const NOW = 100_000
 // A panel armed long ago, and no typing into a text field ever: every other rule measures against this.
 const calm: ShortcutClock = { armedAt: NOW - 10_000, lastTypedAt: undefined, now: NOW }
@@ -50,6 +57,10 @@ describe('shortcutAllowed', () => {
     expect(shortcutAllowed({ ...plainKey, altKey: true }, calm)).toBe(false)
     expect(shortcutAllowed({ ...plainKey, metaKey: true }, calm)).toBe(false)
     expect(shortcutAllowed({ ...plainKey, ctrlKey: true, altKey: true }, calm)).toBe(false)
+  })
+
+  it('ignores Shift: Shift+A is the auto-accept hold, never the allow letter', () => {
+    expect(shortcutAllowed({ ...plainKey, shiftKey: true }, calm)).toBe(false)
   })
 
   it('ignores a key whose target is a text field: the letter belongs to the field', () => {

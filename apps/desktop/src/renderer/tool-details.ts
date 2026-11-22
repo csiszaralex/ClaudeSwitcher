@@ -67,14 +67,6 @@ export function toolDetails(decision: DetailSource): ToolDetails | undefined {
 }
 
 /**
- * The Bash field `dangerouslyDisableSandbox: true`: the command would run outside the sandbox. The
- * panel shows this in a red line, without expanding the details. Only an explicit `true` counts.
- */
-export function sandboxDisabled(toolInput: unknown): boolean {
-  return isRecord(toolInput) && toolInput['dangerouslyDisableSandbox'] === true
-}
-
-/**
  * The `toolInput` as readable text, with a size limit. Never throws.
  *
  * Multi-line or long string fields (the Workflow `script`, the prompt of an MCP call) get blocks of

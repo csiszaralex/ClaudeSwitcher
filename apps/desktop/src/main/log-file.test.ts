@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { renameSync } from 'node:fs'
 import path from 'node:path'
 import { tempDir } from '@claudeswitcher/core/testing'
 import { describe, expect, it, vi } from 'vitest'
@@ -22,14 +23,40 @@ function fakeConsole(): { target: ConsoleTarget; log: ReturnType<typeof vi.fn>; 
   return { target: { log, warn, error }, log, warn, error }
 }
 
-async function install(maxBytes?: number) {
+async function install(maxBytes?: number, rename?: (from: string, to: string) => void) {
   const userData = await tempDir('cs-log-')
   const fake = fakeConsole()
-  installFileLog({ userData, target: fake.target, now: () => FIXED_TIME, pid: PID, ...(maxBytes === undefined ? {} : { maxBytes }) })
+  installFileLog({
+    userData,
+    target: fake.target,
+    now: () => FIXED_TIME,
+    pid: PID,
+    ...(maxBytes === undefined ? {} : { maxBytes }),
+    ...(rename === undefined ? {} : { rename }),
+  })
   return { userData, ...fake }
 }
 
 const read = (userData: string): Promise<string> => readFile(logFilePath(userData), 'utf8')
+
+/**
+ * `renameSync` that tries again while Windows refuses it for a moment (EPERM, EACCES, EBUSY: another
+ * process, such as a virus scanner, has the file open). For the tests about which line lands in which
+ * file; the refusal itself is the subject of its own test.
+ */
+function patientRename(from: string, to: string): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      renameSync(from, to)
+      return
+    } catch (error) {
+      const code = (error as { code?: unknown }).code
+      if (attempt >= 50 || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')) throw error
+      // A synchronous 10 ms pause, at most about 0.5 s in all.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10)
+    }
+  }
+}
 
 describe('installFileLog', () => {
   it('writes one line with the time, the pid, the level and the formatted arguments', async () => {
@@ -75,7 +102,7 @@ describe('installFileLog', () => {
   })
 
   it('moves a full file to the old name, replacing an older one, and starts a new file', async () => {
-    const { userData, target } = await install(300)
+    const { userData, target } = await install(300, patientRename)
     const oldPath = path.join(logDir(userData), OLD_LOG_FILE_NAME)
     await mkdir(logDir(userData), { recursive: true })
     await writeFile(oldPath, 'a much older file\n')
@@ -89,6 +116,27 @@ describe('installFileLog', () => {
     expect(old).not.toContain('charlie')
     expect(current).toContain('charlie'.repeat(20))
     expect(current).not.toContain('bravo')
+  })
+
+  it('keeps logging into the current file while Windows refuses the rotation, and rotates on a later line', async () => {
+    let refuse = true
+    const rename = (from: string, to: string): void => {
+      if (refuse) throw Object.assign(new Error('EPERM: simulated'), { code: 'EPERM' })
+      renameSync(from, to)
+    }
+    const { userData, target, log, warn, error } = await install(300, rename)
+    const oldPath = path.join(logDir(userData), OLD_LOG_FILE_NAME)
+    for (const word of ['alpha', 'bravo', 'charlie', 'delta']) target.log(word.repeat(20))
+    // Both refused rotations kept every line, and the refusal was reported once, through the original console.
+    expect(await read(userData)).toContain('delta'.repeat(20))
+    expect(warn.mock.calls.filter(([first]) => String(first).startsWith('[log]'))).toHaveLength(1)
+    expect(error).not.toHaveBeenCalledWith(expect.stringContaining('[log]'), expect.anything())
+
+    refuse = false
+    target.log('echo'.repeat(20))
+    expect(await readFile(oldPath, 'utf8')).toContain('delta'.repeat(20))
+    expect(await read(userData)).toContain('echo'.repeat(20))
+    expect(log).toHaveBeenCalledTimes(5)
   })
 
   it('does not rotate an empty file for one oversized line', async () => {
