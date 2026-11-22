@@ -1,7 +1,9 @@
 import { crc32, deflateSync } from 'node:zlib'
 
 // Draws an icon from a description of its shapes and encodes it as a PNG, with `node:zlib` only.
-// The tray icons (`tray-icon.ts`) draw with it.
+// The tray icons (`tray-icon.ts`) and the app logo (`app-logo.ts`, drawn by `scripts/make-icon.mjs`)
+// both draw with it. The script runs this file in Node directly (type stripping), so it imports
+// nothing but `node:` modules.
 
 /**
  * The colour at a point of the icon, in the icon's own units (`0` to `units` on both axes, x to the
