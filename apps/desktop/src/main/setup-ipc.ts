@@ -12,7 +12,7 @@ import {
 import type { SetupState } from '../shared/setup-state.js'
 import type { HotkeySwitch } from './hotkey.js'
 import type { SettingsService, SettingsSnapshot } from './settings-service.js'
-import type { HookInstallState } from './claude-integration.js'
+import { staleAdvice, type HookInstallState } from './claude-integration.js'
 
 /**
  * The answer to `setup:load`. The renderer checks it with `readSetupState`, against the same
@@ -36,6 +36,7 @@ export function setupState(
     installed,
     hotkey: extra.hotkey,
     integration: extra.integration.kind,
+    ...(extra.integration.kind === 'stale' ? { integrationAdvice: staleAdvice(extra.integration) } : {}),
     showAll: extra.showAll,
   }
 }

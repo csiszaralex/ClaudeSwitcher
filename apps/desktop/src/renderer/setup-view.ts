@@ -43,12 +43,21 @@ export function readSetupState(raw: unknown): SetupState | undefined {
   const values = parseSettingValues(raw['values'])
   const ask = readKeys(raw['ask'])
   const hotkey = readHotkeyRegistration(raw['hotkey'])
-  const { installed, integration, showAll } = raw
+  const { installed, integration, integrationAdvice, showAll } = raw
   if (values === undefined || ask === undefined || hotkey === undefined) return undefined
   if (typeof installed !== 'boolean' || typeof showAll !== 'boolean' || !isIntegrationKind(integration)) {
     return undefined
   }
-  return { values, ask, installed, hotkey, integration, showAll }
+  if (integrationAdvice !== undefined && typeof integrationAdvice !== 'string') return undefined
+  return {
+    values,
+    ask,
+    installed,
+    hotkey,
+    integration,
+    ...(integrationAdvice === undefined ? {} : { integrationAdvice }),
+    showAll,
+  }
 }
 
 /**
@@ -90,13 +99,17 @@ export function readInstallReply(raw: unknown): InstallReply {
 
 const MALFORMED_REPLY = 'A ClaudeSwitcher érvénytelen választ adott.'
 
-/** The integration row's text. A missing integration never adds to `ask`: it is an action. */
-export function integrationLabel(kind: IntegrationKind): string {
+/**
+ * The integration row's text. A missing integration never adds to `ask`: it is an action. A stale
+ * one shows what to do and why (`SetupState.integrationAdvice`, the tray notice's text); without it
+ * only "Elavult", beside the install button.
+ */
+export function integrationLabel(kind: IntegrationKind, advice?: string): string {
   switch (kind) {
     case 'current':
       return 'Telepítve'
     case 'stale':
-      return 'Elavult, telepítsd újra'
+      return advice === undefined ? 'Elavult' : `Elavult, ${advice}`
     case 'not-installed':
       return 'Nincs telepítve'
     case 'unknown':

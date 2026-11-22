@@ -87,6 +87,12 @@ describe('readSetupState', () => {
     expect(readSetupState({ ...state(), integration: 'broken' })).toBeUndefined()
   })
 
+  it('keeps the advice of a stale integration and rejects one that is not a string', () => {
+    const stale = state({ integration: 'stale', integrationAdvice: 'telepítsd újra (1 hiányzó hook)' })
+    expect(readSetupState(JSON.parse(JSON.stringify(stale)))).toEqual(stale)
+    expect(readSetupState({ ...state(), integrationAdvice: 3 })).toBeUndefined()
+  })
+
   it('rejects a malformed hotkey registration and missing flags', () => {
     expect(readSetupState({ ...state(), hotkey: { requested: 'F9', status: 'busy' } })).toBeUndefined()
     expect(readSetupState({ ...state(), hotkey: { status: 'registered' } })).toBeUndefined()
@@ -127,7 +133,8 @@ describe('readInstallReply', () => {
 describe('integrationLabel', () => {
   it('names every state without a dash inside the text', () => {
     expect(integrationLabel('current')).toBe('Telepítve')
-    expect(integrationLabel('stale')).toBe('Elavult, telepítsd újra')
+    expect(integrationLabel('stale', 'telepítsd újra (rossz token)')).toBe('Elavult, telepítsd újra (rossz token)')
+    expect(integrationLabel('stale')).toBe('Elavult')
     expect(integrationLabel('not-installed')).toBe('Nincs telepítve')
     for (const kind of INTEGRATION_KINDS) expect(integrationLabel(kind)).not.toMatch(/[–—]/)
   })

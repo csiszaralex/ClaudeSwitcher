@@ -16,6 +16,11 @@ export interface SetupState {
   /** The hotkey registration that holds now. */
   hotkey: HotkeyRegistration
   integration: IntegrationKind
+  /**
+   * For a stale integration: what to do and why (`main/claude-integration.ts` `staleAdvice`), the
+   * text the tray's notice shows too. Absent otherwise.
+   */
+  integrationAdvice?: string | undefined
   /** True when the tray opened the window ("Beállítások"), false for the first-run open. */
   showAll: boolean
 }

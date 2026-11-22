@@ -780,7 +780,9 @@ compares the hooks in `settings.json` with `HOOK_CONTRACT` (`claude-integration.
 `hookInstallState`). If a hook is missing, the tray menu warns: "Integráció elavult, telepítsd
 újra" (the integration is outdated, install it again). This only reads the file. (Since changed:
 it also warns when `env.CLAUDESWITCHER_TOKEN` is not the daemon's token, since every hook would
-then get a 401; the notice names the reason.)
+then get a 401; the notice names the reason, and since issue #10 the setup window's integration
+row shows the same text, `staleAdvice`. An `env` that is not an object gets its own advice, a
+hand edit before the reinstall, because the install cannot write the token into it.)
 
 **Excluded sessions** (issue #62). Delete moves a session into a collapsed group at the bottom of
 the list; the ids are stored in `config.json`. Two decisions:
