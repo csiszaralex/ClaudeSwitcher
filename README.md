@@ -169,9 +169,17 @@ Where the app cannot decide (a released request, a plan's approval, an unreadabl
 
 Every request shows where it comes from: a source label on the panel (under the request, next to the working folder, and the permission mode when it is not `default`) and, for a source that stands out, on the row too. The label comes from the session's `entrypoint` in Claude Code's session registry: **"VS Code"** (the extension), **"CLI"** (an interactive terminal session), **"claude -p"** (a headless run), any other value as it is, and **"ismeretlen"** (unknown) when the session is not in the registry. Everything except VS Code and CLI stands out: the label is red on the panel, and the row gets a red tag, so a request from a run you did not start yourself is not allowed by habit. Nothing is blocked; you decide as before.
 
-The letter keys do not fire for a short moment after a panel appears, on key repeat, or within a moment after you typed in a text field.
+The letter keys do not fire for a short moment after a panel appears, on key repeat, with Ctrl, Alt or Shift held (Shift+A is the auto-accept hold, see [Letting a session allow its requests by itself](#letting-a-session-allow-its-requests-by-itself)), or within a moment after you typed in a text field.
 
 The app holds a request for at most 590 seconds, just under the 600-second timeout its hook is installed with, and then lets go of it. From 540 seconds on, the tray icon flashes to warn you. The session's own prompt (in VS Code or in the terminal) stays and can still be answered there.
+
+### Letting a session allow its requests by itself
+
+Hold **Shift+A** on a selected row for 3 seconds to put its session into the auto-accept mode. While you hold, the row counts the seconds down (**"Automatikus engedélyezés bekapcsolása: még 3 mp, tartsd lenyomva"**); letting go of either key early changes nothing, and so does the list losing the focus or the selection moving. The same hold turns the mode off again (**"Automatikus engedélyezés kikapcsolása: …"**). The hold does not start in a text field, in the peek, or with Ctrl or Alt held. Shift+A never allows the selected request; a plain **A** allows it as before.
+
+In the mode the app allows the session's requests by itself, the moment they arrive, also while the list is closed. It allows exactly what the **"Engedélyezés"** button would allow, with the same plain allow: a command, a tool call or a file edit. It never allows a question, a plan, an unreadable request, a request the app has already let go of (◆), or a command that turns off the sandbox (`dangerouslyDisableSandbox: true`): those wait in the list as usual, notify, and colour the tray. It never denies anything, and it never adds a rule. Turning the mode on also allows the requests of these kinds that the session already has waiting.
+
+A request the mode allows never shows in the list, raises no toast and does not colour the tray. A row in the mode is green and carries an **"auto N"** tag: N is how many requests the mode has allowed since it was turned on. The log (**"Napló megnyitása"** in the tray) gets a line for each, with the session and the tool's name, never the command or the file. The mode is kept in memory only: it ends when the app quits, and for a session that has been gone (not listed, with nothing waiting) for 30 seconds while the app sees other sessions.
 
 ## Uninstall
 

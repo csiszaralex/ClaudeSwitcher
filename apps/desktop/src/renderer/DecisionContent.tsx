@@ -4,7 +4,8 @@ import { LINE_MARK, panelContent } from './edit-preview.js'
 import { gitExplanation } from './git-explain.js'
 import type { SummaryView } from './summary-view.js'
 import type { SessionHost } from '../shared/request-source.js'
-import { DETAILS_LIMIT, sandboxDisabled } from './tool-details.js'
+import { sandboxDisabled } from '../shared/sandbox.js'
+import { DETAILS_LIMIT } from './tool-details.js'
 
 interface Props {
   decision: PendingDecisionView

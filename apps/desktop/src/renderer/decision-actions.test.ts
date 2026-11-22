@@ -1,4 +1,6 @@
+import type { DecisionKind } from '@claudeswitcher/core'
 import { describe, expect, it } from 'vitest'
+import { autoAcceptTakes } from '../shared/auto-accept.js'
 import {
   ACTION_BUTTONS,
   isActivationTarget,
@@ -48,6 +50,16 @@ describe('ACTION_BUTTONS labels', () => {
       'Projektszabály',
       'Gépszintű szabály',
     ])
+  })
+})
+
+describe('the auto-accept mode and the allow button', () => {
+  it('takes exactly the kinds whose button row has the plain allow button', () => {
+    const kinds = Object.keys(ACTION_BUTTONS) as DecisionKind[]
+    const withAllow = kinds.filter((kind) => ACTION_BUTTONS[kind].some((button) => button.action === 'allow'))
+    const taken = kinds.filter((kind) => autoAcceptTakes({ kind, readable: true, released: false, toolInput: {} }))
+    expect(taken).toEqual(withAllow)
+    expect(taken).toEqual(['tool', 'edit'])
   })
 })
 

@@ -20,6 +20,8 @@ export interface ShortcutKey {
   ctrlKey: boolean
   altKey: boolean
   metaKey: boolean
+  /** Shift: Shift+A is the auto-accept mode's hold (`auto-accept-hold.ts`), never the allow letter. */
+  shiftKey: boolean
   /** Its target is a text field (`isTypingTarget`). */
   typingTarget: boolean
 }
@@ -61,12 +63,14 @@ export function recentlyTyped(lastTypedAt: number | undefined, now: number): boo
  * Whether the key letter may take effect. Every condition must hold:
  * - not an auto-repeat;
  * - no Ctrl, Alt or Meta (AltGr on the Hungarian layout arrives as Ctrl+Alt, and an `@` must not decide);
+ * - no Shift: `shortcutFor` lower-cases the key, so without this Shift+A, the hold that turns on the
+ *   auto-accept mode (`auto-accept-hold.ts`), would also allow the selected request;
  * - its target is not a text field;
  * - the panel is armed;
  * - `TYPING_COOLDOWN_MS` has passed since the last typing in a text field.
  */
 export function shortcutAllowed(key: ShortcutKey, clock: ShortcutClock): boolean {
-  if (key.repeat || key.ctrlKey || key.altKey || key.metaKey || key.typingTarget) return false
+  if (key.repeat || key.ctrlKey || key.altKey || key.metaKey || key.shiftKey || key.typingTarget) return false
   if (!isArmed(clock.armedAt, clock.now)) return false
   return !recentlyTyped(clock.lastTypedAt, clock.now)
 }

@@ -33,6 +33,8 @@ export interface OverlayController {
   readonly isVisible: () => boolean
   /** Registers a listener for the overlay being hidden (its window's `hide` event, a re-created window included). */
   readonly onHidden: (listener: () => void) => void
+  /** Pushes a message to the overlay's page on `channel` (visible or not); nothing once its window is destroyed. */
+  readonly send: (channel: string, payload: unknown) => void
 }
 
 /**
@@ -183,6 +185,9 @@ export function createOverlayController(options: {
     isVisible: () => !overlay.isDestroyed() && overlay.isVisible(),
     onHidden: (listener) => {
       hiddenListeners.push(listener)
+    },
+    send: (channel, payload) => {
+      if (!overlay.isDestroyed()) overlay.webContents.send(channel, payload)
     },
   }
 }

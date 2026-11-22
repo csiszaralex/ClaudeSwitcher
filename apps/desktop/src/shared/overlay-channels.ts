@@ -32,6 +32,23 @@ export const OVERLAY_CHANNELS = {
    * pressed twice before the reply does the same thing twice. Answers like `excludedSessions`.
    */
   setExcluded: 'session:set-excluded',
+  /**
+   * The sessions in the auto-accept mode and their counts (main `auto-accept.ts`), as an array of
+   * `AutoAcceptEntry`; the renderer reads it with a check (`readAutoAccept`).
+   */
+  autoAccept: 'session:auto-accept',
+  /**
+   * Turns the auto-accept mode on or off for a session (the Shift+A hold on its row). The arguments
+   * are the session id and `true` for on, `false` for off; the direction is explicit, as for
+   * `setExcluded`. Answers like `autoAccept`.
+   */
+  setAutoAccept: 'session:set-auto-accept',
+  /**
+   * Pushed by the main process whenever the sessions in the auto-accept mode or their counts change
+   * (a request allowed by the mode while the overlay shows, a session gone), with the same array as
+   * `autoAccept`.
+   */
+  autoAcceptChanged: 'session:auto-accept-changed',
   decide: 'decision:decide',
   focusSession: 'session:focus',
   /**

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { AskQuestion } from '@claudeswitcher/core'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { pendingRowText } from '../shared/row-text.js'
 import { ACTION_BUTTONS } from './decision-actions.js'
 import { EXCLUDED_TEXT } from './list-cleanup.js'
@@ -586,5 +586,161 @@ describe('the question form', () => {
         },
       ],
     ])
+  })
+})
+
+describe('the auto-accept hold (Shift+A)', () => {
+  const request = bashRequest(1, 'pnpm test')
+
+  /**
+   * Fakes the timers too, so the 3 s hold need not be waited out; `Date` stays at the time the
+   * overlay had. Only after the render: the kit's own `settle` runs on real timers.
+   */
+  function fakeClock(): void {
+    const now = Date.now()
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    vi.setSystemTime(now)
+  }
+
+  function advance(ms: number): void {
+    act(() => {
+      vi.advanceTimersByTime(ms)
+    })
+  }
+
+  /** Lets the IPC reply of a completed hold land, without timers. */
+  async function flush(): Promise<void> {
+    for (let round = 0; round < 3; round += 1) await act(() => Promise.resolve())
+  }
+
+  const down = (repeat = false): void => {
+    fireEvent.keyDown(document.body, { key: 'A', shiftKey: true, repeat })
+  }
+  const up = (key = 'A'): void => {
+    fireEvent.keyUp(document.body, { key, shiftKey: key !== 'Shift' })
+  }
+
+  const summaryOf = (name: string): string => row(name).querySelector('.summary')?.textContent ?? ''
+  const tagOf = (name: string): string | undefined => row(name).querySelector('.auto-tag')?.textContent ?? undefined
+
+  it('turns the selected session on after 3 s, with the seconds counting down, and the row turns green with its tag', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fakeClock()
+    down()
+    expect(summaryOf('alpha')).toBe('Automatikus engedélyezés bekapcsolása: még 3 mp, tartsd lenyomva')
+    advance(1_200)
+    expect(summaryOf('alpha')).toContain('még 2 mp')
+    advance(1_799)
+    expect(api.setAutoAccept).not.toHaveBeenCalled()
+    advance(1)
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), true]])
+
+    await flush()
+    expect(row('alpha').classList.contains('auto-accept')).toBe(true)
+    expect(tagOf('alpha')).toBe('auto 0')
+    expect(row('beta').classList.contains('auto-accept')).toBe(false)
+    expect(tagOf('beta')).toBeUndefined()
+    expect(summaryOf('alpha')).not.toContain('Automatikus')
+  })
+
+  it('turns a session in the mode off the same way', async () => {
+    const { api } = await renderOverlay({ sessions: LIST, autoAccept: [{ sessionId: sessionId(1), allowed: 2 }] })
+    expect(row('alpha').classList.contains('auto-accept')).toBe(true)
+    expect(tagOf('alpha')).toBe('auto 2')
+    fakeClock()
+    down()
+    expect(summaryOf('alpha')).toContain('kikapcsolása')
+    advance(3_000)
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+    await flush()
+    expect(row('alpha').classList.contains('auto-accept')).toBe(false)
+  })
+
+  it('does nothing when the A, the Shift or the window is let go early', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fakeClock()
+    const releases = [
+      () => {
+        up('A')
+      },
+      () => {
+        up('Shift')
+      },
+      () => {
+        fireEvent.blur(window)
+      },
+    ]
+    for (const release of releases) {
+      down()
+      advance(2_000)
+      release()
+      expect(summaryOf('alpha')).not.toContain('Automatikus')
+      advance(5_000)
+    }
+    expect(api.setAutoAccept).not.toHaveBeenCalled()
+  })
+
+  it('counts from the first keydown: the auto-repeat of the held key does not restart it', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fakeClock()
+    down()
+    for (let step = 0; step < 5; step += 1) {
+      advance(500)
+      down(true)
+    }
+    expect(api.setAutoAccept).not.toHaveBeenCalled()
+    advance(500)
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), true]])
+  })
+
+  it('ends when the selection leaves the row', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fakeClock()
+    down()
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' })
+    advance(3_000)
+    expect(api.setAutoAccept).not.toHaveBeenCalled()
+  })
+
+  it('does not start in a text field or with Ctrl or Alt', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard('/')
+    expect(searchField()).not.toBeNull()
+    fakeClock()
+    fireEvent.keyDown(searchField()!, { key: 'A', shiftKey: true })
+    advance(3_000)
+    fireEvent.keyDown(document.body, { key: 'A', shiftKey: true, ctrlKey: true })
+    advance(3_000)
+    fireEvent.keyDown(document.body, { key: 'A', shiftKey: true, altKey: true })
+    advance(3_000)
+    expect(api.setAutoAccept).not.toHaveBeenCalled()
+  })
+
+  it('never allows the selected request, held or not, while a plain a still does', async () => {
+    const { api, armKeys } = await renderOverlay({ sessions: [session(1, 'alpha')], decisions: [request] })
+    armKeys()
+    fakeClock()
+    down()
+    for (let step = 0; step < 6; step += 1) {
+      advance(500)
+      down(true)
+    }
+    up()
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), true]])
+    expect(api.decide).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(document.body, { key: 'a' })
+    expect(api.decide.mock.calls).toEqual([[request.id, { type: 'allow' }]])
+  })
+
+  it('shows a count the main process pushes while the overlay is up', async () => {
+    const { pushAutoAccept } = await renderOverlay({ sessions: LIST, autoAccept: [{ sessionId: sessionId(2), allowed: 0 }] })
+    expect(tagOf('beta')).toBe('auto 0')
+    pushAutoAccept([{ sessionId: sessionId(2), allowed: 3 }])
+    await flush()
+    expect(tagOf('beta')).toBe('auto 3')
+    pushAutoAccept([])
+    await flush()
+    expect(tagOf('beta')).toBeUndefined()
   })
 })

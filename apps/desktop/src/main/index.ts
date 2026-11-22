@@ -21,6 +21,7 @@ import {
   shell,
 } from 'electron'
 import { APP_USER_MODEL_ID } from './app-id.js'
+import { createAutoAccept } from './auto-accept.js'
 import { createAutostart, type LoginItems } from './autostart.js'
 import { createConversationReader } from './conversation-reader.js'
 import { createExcludedSessions } from './excluded-sessions.js'
@@ -440,6 +441,19 @@ async function startApp(): Promise<void> {
   // The counters of the `[perf]` line (`perf-log.ts`), from before the daemon starts, so its scans
   // and broadcasts count from the first one.
   const perf = createPerfCounters()
+  // The per-session auto-accept mode (Shift+A held on a row), in memory only. Its decider sees every
+  // new request before the daemon's state does, so a request it allows never reaches the overlay,
+  // the toasts or the tray (`auto-accept.ts`). Its changes go to the overlay as a push once the
+  // overlay exists (`pushAutoAccept`, set below); none can come before, since the set starts empty.
+  let pushAutoAccept = (): void => undefined
+  const autoAccept = createAutoAccept({
+    log: (line) => {
+      console.log(line)
+    },
+    onChange: () => {
+      pushAutoAccept()
+    },
+  })
   const running = await startDaemon({
     claudeDir: resolveClaudeDir(),
     probe: nativeProbe ?? createWin32ProcessProbe(),
@@ -448,6 +462,7 @@ async function startApp(): Promise<void> {
     onTimed: (job, ms, chars) => {
       perf.add(job, ms, chars)
     },
+    autoDecider: autoAccept.decider,
   })
   quitSequence.setDaemon(running)
   // A quit began while the daemon started: `before-quit` saw no daemon then, so stop this one here.
@@ -511,6 +526,14 @@ async function startApp(): Promise<void> {
       else excludedSessions.include(sessionId)
     }
     return excludedSessions.ids()
+  })
+  handleFrom(RENDERER, OVERLAY_CHANNELS.autoAccept, () => autoAccept.entries())
+  handleFrom(RENDERER, OVERLAY_CHANNELS.setAutoAccept, (sessionId: unknown, on: unknown) => {
+    // IPC input: the renderer may send anything, hence `unknown`, checked here. The session and its
+    // waiting requests are read from the daemon's state now (`AutoAccept.set`), and both directions
+    // are idempotent.
+    if (typeof sessionId === 'string' && typeof on === 'boolean') autoAccept.set(sessionId, on, running)
+    return autoAccept.entries()
   })
   handleFrom(
     RENDERER,
@@ -637,6 +660,9 @@ async function startApp(): Promise<void> {
     isQuitting: quitSequence.isQuitting,
     focusReturn: createFocusReturn({ capture: captureForeground, restore: giveBackForeground }),
   })
+  pushAutoAccept = () => {
+    overlay.send(OVERLAY_CHANNELS.autoAcceptChanged, autoAccept.entries())
+  }
 
   // The hotkey is registered BEFORE the tray, because the menu shows the result. An invalid
   // (mistyped) value does not stop the startup: the default holds instead, and the tray says what
@@ -902,6 +928,8 @@ async function startApp(): Promise<void> {
     // Drops the ids of the excluded sessions that are gone (`EXCLUDED_GONE_AFTER_MS`). The overlay
     // reads the list again on its next `shown`; a gone session has no row meanwhile anyway.
     excludedSessions.observe(state.sessions, now)
+    // Ends the auto-accept mode of a session that is gone (`AUTO_ACCEPT_GONE_AFTER_MS`), and pushes it.
+    autoAccept.observe(state, now)
     const excluded = excludedSessions.set()
     tray.setState(trayState({ ...state, acknowledged: finishesSeen, excluded, now }))
     if (seenTimer === undefined && !seenWatchOff && watchesSeen(state.sessions, finishesSeen)) {
