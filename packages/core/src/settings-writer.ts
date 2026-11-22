@@ -37,10 +37,25 @@ const EMPTY_READ_RETRIES = 3
 const EMPTY_READ_DELAY_MS = 50
 /** How many times the whole read, transform, write cycle is retried when someone else wrote meanwhile. */
 const CONFLICT_ATTEMPTS = 3
+/**
+ * The pauses before each retry of a rename that Windows refused for a moment (`isTransientRenameError`),
+ * about 0.6 s in all. Seen in the tests (2026-11-22): a rename onto a file another process had open
+ * failed with EPERM once in about 25 runs.
+ */
+const RENAME_RETRY_DELAYS_MS = [20, 40, 80, 160, 320] as const
 
 /** The Node file system error code (`ENOENT`, `EBUSY`…), if any. */
 function errorCode(error: unknown): string | undefined {
   return error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : undefined
+}
+
+/**
+ * True for the errors Windows gives a rename while another process (a virus scanner, the search
+ * indexer, Claude Code reading the file) has the target or the temp file open: they pass in a moment.
+ */
+function isTransientRenameError(error: unknown): boolean {
+  const code = errorCode(error)
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
 }
 
 /** True when the error means the file does not exist. Every other error is a real error. */
@@ -91,12 +106,17 @@ export function transformSettingsFile(
   return next
 }
 
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
 /**
  * Atomic write: a uniquely named temporary file, then a rename. The target holds either the old or
  * the new content, never a partial one.
  *
  * `beforeRename` may decide at the last moment before the rename not to write after all: then the
- * temp file is removed, the target is untouched, and the result is `false`.
+ * temp file is removed, the target is untouched, and the result is `false`. A rename Windows refuses
+ * for a moment (`isTransientRenameError`) is retried after the pauses of `RENAME_RETRY_DELAYS_MS`,
+ * with `beforeRename` asked again before each try, so a write by someone else during a pause is
+ * still noticed.
  */
 export async function writeFileAtomic(
   filePath: string,
@@ -108,12 +128,20 @@ export async function writeFileAtomic(
   const temp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${randomUUID()}.tmp`)
   try {
     await fs.writeFile(temp, data, 'utf8')
-    if (options.beforeRename !== undefined && !(await options.beforeRename())) {
-      await fs.unlink(temp).catch(() => undefined)
-      return false
+    for (let attempt = 0; ; attempt++) {
+      if (options.beforeRename !== undefined && !(await options.beforeRename())) {
+        await fs.unlink(temp).catch(() => undefined)
+        return false
+      }
+      try {
+        await fs.rename(temp, filePath)
+        return true
+      } catch (error) {
+        const pause = RENAME_RETRY_DELAYS_MS[attempt]
+        if (pause === undefined || !isTransientRenameError(error)) throw error
+        await delay(pause)
+      }
     }
-    await fs.rename(temp, filePath)
-    return true
   } catch (error) {
     // Leave no debris in the target directory. The target file is untouched, which is what matters.
     await fs.unlink(temp).catch(() => undefined)
@@ -136,8 +164,6 @@ interface Snapshot {
   raw: string | undefined
   existing: Record<string, unknown>
 }
-
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * Reads the file, and treats it as empty settings only when it really does not exist (ENOENT).
