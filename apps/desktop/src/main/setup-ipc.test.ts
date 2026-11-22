@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS, type SettingKey, type SettingValues } from '../shared
 import type { HotkeyRegistration } from '../shared/hotkey-status.js'
 import type { HotkeySwitch } from './hotkey.js'
 import type { SettingsSnapshot } from './settings-service.js'
+import type { HookInstallState } from './claude-integration.js'
 import { parseSaveRequest, saveSetup, setupState, type SaveRequest } from './setup-ipc.js'
 
 const VALUES: SettingValues = { autostart: true, hideAfterLastDecision: true, jumpToTab: true, notifyOnRequest: true, notifyOnFinish: false, checkForUpdates: true, hotkey: 'Shift+Alt+Space' }
@@ -139,14 +140,22 @@ describe('setupState', () => {
 
   it('asks for the unconfirmed settings and passes the rest through', () => {
     const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(['jumpToTab']), installed: true }
-    expect(setupState(snapshot, { hotkey, integration: { kind: 'stale', missing: ['Stop'], tokenMismatch: false }, showAll: true })).toEqual({
+    const integration: HookInstallState = { kind: 'stale', missing: ['Stop'], tokenMismatch: false, envMalformed: false }
+    expect(setupState(snapshot, { hotkey, integration, showAll: true })).toEqual({
       values: VALUES,
       ask: ['autostart', 'hideAfterLastDecision', 'notifyOnRequest', 'notifyOnFinish', 'checkForUpdates', 'hotkey'],
       installed: true,
       hotkey,
       integration: 'stale',
+      integrationAdvice: 'telepítsd újra (1 hiányzó hook)',
       showAll: true,
     })
+  })
+
+  it('sends no advice for an integration that is not stale', () => {
+    const snapshot: SettingsSnapshot = { values: VALUES, confirmed: new Set(), installed: true }
+    const state = setupState(snapshot, { hotkey, integration: { kind: 'current' }, showAll: true })
+    expect('integrationAdvice' in state).toBe(false)
   })
 
   it('pre-ticks the default autostart while it is unconfirmed, whatever the OS says', () => {

@@ -214,7 +214,7 @@ export function SetupWindow({ api }: { api: SetupApi }): JSX.Element {
       <section className="setup-section">
         <h2>Claude Code-integráció</h2>
         <div className="setup-row">
-          <span className="setup-label">{integrationLabel(state.integration)}</span>
+          <span className="setup-label">{integrationLabel(state.integration, state.integrationAdvice)}</span>
           {integrationActions(state.integration).map((action) => (
             <button
               type="button"

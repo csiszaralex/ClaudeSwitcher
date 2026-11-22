@@ -7,6 +7,7 @@ import {
   hookInstallState,
   installIntegration,
   integrationNotice,
+  staleAdvice,
   readHookInstallState,
   removeIntegration,
   uninstallIntegration,
@@ -313,6 +314,7 @@ describe('hookInstallState', () => {
       kind: 'stale',
       missing: ['StopFailure', 'PostToolUseFailure'],
       tokenMismatch: false,
+      envMalformed: false,
     })
   })
 
@@ -321,7 +323,7 @@ describe('hookInstallState', () => {
     const wrongRoute = { ...hooks['Stop']![0]!.hooks[0]!, url: 'http://127.0.0.1:47821/hooks/lifecycle/end' }
     const wrongPort = { ...hooks['PreToolUse']![0]!.hooks[0]!, url: 'http://127.0.0.1:11111/hooks/pre-tool-use' }
     const state = stateOf(withHooks({ ...hooks, Stop: [{ hooks: [wrongRoute] }], PreToolUse: [{ hooks: [wrongPort] }] }))
-    expect(state).toEqual({ kind: 'stale', missing: ['Stop', 'PreToolUse'], tokenMismatch: false })
+    expect(state).toEqual({ kind: 'stale', missing: ['Stop', 'PreToolUse'], tokenMismatch: false, envMalformed: false })
   })
 
   it('finds our hook beside foreign ones in the same event', () => {
@@ -333,8 +335,14 @@ describe('hookInstallState', () => {
 
   it('reports our hooks with another token as stale, since every hook would get a 401', () => {
     // A settings.json brought from another machine carries that machine's token.
-    expect(hookInstallState(installed(), 'def456')).toEqual({ kind: 'stale', missing: [], tokenMismatch: true })
-    expect(stateOf(without(installed(), ['env']))).toEqual({ kind: 'stale', missing: [], tokenMismatch: true })
+    expect(hookInstallState(installed(), 'def456')).toEqual({ kind: 'stale', missing: [], tokenMismatch: true, envMalformed: false })
+    expect(stateOf(without(installed(), ['env']))).toEqual({ kind: 'stale', missing: [], tokenMismatch: true, envMalformed: false })
+  })
+
+  it('marks an env that is not an object, which a reinstall cannot write the token into', () => {
+    for (const env of ['CLAUDESWITCHER_TOKEN=abc123', ['abc123'], null]) {
+      expect(stateOf({ ...installed(), env })).toEqual({ kind: 'stale', missing: [], tokenMismatch: true, envMalformed: true })
+    }
   })
 
   it('does not report a token problem when none of our hooks is there', () => {
@@ -342,20 +350,36 @@ describe('hookInstallState', () => {
   })
 })
 
-describe('integrationNotice', () => {
+describe('staleAdvice and integrationNotice', () => {
+  const stale = (missing: string[], tokenMismatch: boolean, envMalformed = false) =>
+    ({ kind: 'stale', missing, tokenMismatch, envMalformed }) as const
+
   it('names the missing hook count and a wrong token only for a stale install', () => {
-    expect(integrationNotice({ kind: 'stale', missing: ['PostToolUseFailure', 'StopFailure'], tokenMismatch: false })).toBe(
+    expect(integrationNotice(stale(['PostToolUseFailure', 'StopFailure'], false))).toBe(
       'Integráció elavult, telepítsd újra (2 hiányzó hook)',
     )
-    expect(integrationNotice({ kind: 'stale', missing: [], tokenMismatch: true })).toBe(
-      'Integráció elavult, telepítsd újra (rossz token)',
-    )
-    expect(integrationNotice({ kind: 'stale', missing: ['Stop'], tokenMismatch: true })).toBe(
-      'Integráció elavult, telepítsd újra (1 hiányzó hook, rossz token)',
-    )
+    expect(integrationNotice(stale([], true))).toBe('Integráció elavult, telepítsd újra (rossz token)')
+    expect(integrationNotice(stale(['Stop'], true))).toBe('Integráció elavult, telepítsd újra (1 hiányzó hook, rossz token)')
+    expect(staleAdvice(stale(['Stop'], true))).toBe('telepítsd újra (1 hiányzó hook, rossz token)')
     expect(integrationNotice({ kind: 'current' })).toBeUndefined()
     expect(integrationNotice({ kind: 'not-installed' })).toBeUndefined()
     expect(integrationNotice({ kind: 'unknown' })).toBeUndefined()
+    expect(staleAdvice({ kind: 'current' })).toBeUndefined()
+  })
+
+  it('asks for a hand edit first when env is not an object, instead of a bare reinstall', () => {
+    expect(integrationNotice(stale([], true, true))).toBe(
+      'Integráció elavult, javítsd kézzel a settings.json fájlt, majd telepítsd újra (az „env” érték nem objektum)',
+    )
+    expect(staleAdvice(stale(['Stop'], true, true))).toBe(
+      'javítsd kézzel a settings.json fájlt, majd telepítsd újra (1 hiányzó hook, az „env” érték nem objektum)',
+    )
+  })
+
+  it('has no dash inside its texts', () => {
+    for (const state of [stale(['Stop'], true), stale(['Stop'], true, true)]) {
+      expect(integrationNotice(state)).not.toMatch(/[–—]/)
+    }
   })
 })
 
@@ -365,7 +389,7 @@ describe('readHookInstallState on a real file', () => {
     expect(await readHookInstallState(dir, OPTIONS.token)).toEqual({ kind: 'not-installed' })
     await installIntegration(dir, OPTIONS)
     expect(await readHookInstallState(dir, OPTIONS.token)).toEqual({ kind: 'current' })
-    expect(await readHookInstallState(dir, 'def456')).toEqual({ kind: 'stale', missing: [], tokenMismatch: true })
+    expect(await readHookInstallState(dir, 'def456')).toEqual({ kind: 'stale', missing: [], tokenMismatch: true, envMalformed: false })
   })
 
   it('treats an unreadable or unparsable file as unknown, not as stale', async () => {

@@ -7,6 +7,7 @@ import {
   isMissingPathError,
   isNotFoundError,
   transformSettingsFile,
+  writeFileAtomic,
   type SettingsFs,
 } from './settings-writer.js'
 import { tempDir } from './testing.js'
@@ -369,6 +370,74 @@ describe('transformSettingsFile never loses the existing settings', () => {
     await transformSettingsFile(file, (existing) => existing, { fs })
 
     expect(writes).toBe(0)
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+})
+
+describe('writeFileAtomic', () => {
+  const OLD = '{"old":1}'
+
+  it('retries a rename that Windows refuses for a moment, and asks beforeRename again each time', async () => {
+    const dir = await tempDir('cs-writer-')
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, OLD)
+    let renames = 0
+    let checks = 0
+    const fs = fsWith({
+      rename: (from, to) => {
+        renames += 1
+        return renames <= 2 ? Promise.reject(codedError(renames === 1 ? 'EPERM' : 'EBUSY')) : realFs.rename(from, to)
+      },
+    })
+    const beforeRename = () => {
+      checks += 1
+      return Promise.resolve(true)
+    }
+
+    expect(await writeFileAtomic(file, '{"new":1}', { fs, beforeRename })).toBe(true)
+
+    expect([renames, checks]).toEqual([3, 3])
+    expect(await readFile(file, 'utf8')).toBe('{"new":1}')
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('does not write when beforeRename says no during the retries', async () => {
+    const dir = await tempDir('cs-writer-')
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, OLD)
+    let checks = 0
+    const fs = fsWith({ rename: () => Promise.reject(codedError('EACCES')) })
+    const beforeRename = () => {
+      checks += 1
+      return Promise.resolve(checks === 1)
+    }
+
+    expect(await writeFileAtomic(file, '{"new":1}', { fs, beforeRename })).toBe(false)
+
+    expect(checks).toBe(2)
+    expect(await readFile(file, 'utf8')).toBe(OLD)
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
+  it('gives up after its retries, and at once on any other error, leaving no temp file', async () => {
+    const dir = await tempDir('cs-writer-')
+    const file = path.join(dir, 'settings.json')
+    await writeFile(file, OLD)
+    for (const [code, tries] of [
+      ['EPERM', 6],
+      ['EXDEV', 1],
+    ] as const) {
+      let renames = 0
+      const fs = fsWith({
+        rename: () => {
+          renames += 1
+          return Promise.reject(codedError(code))
+        },
+      })
+      await expect(writeFileAtomic(file, '{"new":1}', { fs })).rejects.toThrow(code)
+      expect(renames).toBe(tries)
+    }
+    expect(await readFile(file, 'utf8')).toBe(OLD)
     expect(await readdir(dir)).toEqual(['settings.json'])
   })
 })

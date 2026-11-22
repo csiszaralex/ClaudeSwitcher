@@ -238,14 +238,16 @@ export function removeIntegration(existing: Record<string, unknown>): Record<str
  * - `stale`: ours are there, but for the `missing` events the hook is absent or points to a wrong
  *   route or port. An install by an earlier version looks like this once a new event has been added
  *   to `HOOK_CONTRACT`. Also stale with `tokenMismatch`: the `env` token is not the daemon's, so
- *   every hook gets a 401, for example in a settings.json brought from another machine.
+ *   every hook gets a 401, for example in a settings.json brought from another machine. With
+ *   `envMalformed` the `env` value is there but not an object: the install cannot write the token
+ *   into it (`applyIntegration` reports a conflict), so only a hand edit of settings.json helps.
  * - `unknown`: the file cannot be read or parsed. That is not "stale": we do not know.
  *
  * The kinds are listed once, in `INTEGRATION_KINDS` (the setup window checks against it).
  */
 export type HookInstallState =
   | { kind: Exclude<IntegrationKind, 'stale'> }
-  | { kind: 'stale'; missing: string[]; tokenMismatch: boolean }
+  | { kind: 'stale'; missing: string[]; tokenMismatch: boolean; envMalformed: boolean }
 
 /** Our hooks of one event, across the matcher groups. A malformed entry holds none of ours. */
 function ourHooksOf(groups: unknown): Record<string, unknown>[] {
@@ -281,17 +283,30 @@ export function hookInstallState(
   if (!anyOurs) return { kind: 'not-installed' }
   const env = settings['env']
   const tokenMismatch = !isRecord(env) || env[TOKEN_ENV] !== token
-  return missing.length === 0 && !tokenMismatch ? { kind: 'current' } : { kind: 'stale', missing, tokenMismatch }
+  if (missing.length === 0 && !tokenMismatch) return { kind: 'current' }
+  return { kind: 'stale', missing, tokenMismatch, envMalformed: env !== undefined && !isRecord(env) }
+}
+
+/**
+ * What to do about a stale install, with its reasons in brackets: the tray's notice
+ * (`integrationNotice`) and the setup window's integration row (`SetupState.integrationAdvice`) both
+ * show it. A malformed `env` comes first: a reinstall alone cannot write the token into it.
+ * `undefined` when the install is not stale.
+ */
+export function staleAdvice(state: HookInstallState): string | undefined {
+  if (state.kind !== 'stale') return undefined
+  const reasons = [
+    ...(state.missing.length > 0 ? [`${String(state.missing.length)} hiányzó hook`] : []),
+    ...(state.envMalformed ? ['az „env” érték nem objektum'] : state.tokenMismatch ? ['rossz token'] : []),
+  ]
+  const action = state.envMalformed ? 'javítsd kézzel a settings.json fájlt, majd telepítsd újra' : 'telepítsd újra'
+  return `${action} (${reasons.join(', ')})`
 }
 
 /** The one line shown in the tray, or `undefined` if there is nothing to say. */
 export function integrationNotice(state: HookInstallState): string | undefined {
-  if (state.kind !== 'stale') return undefined
-  const reasons = [
-    ...(state.missing.length > 0 ? [`${String(state.missing.length)} hiányzó hook`] : []),
-    ...(state.tokenMismatch ? ['rossz token'] : []),
-  ]
-  return `Integráció elavult, telepítsd újra (${reasons.join(', ')})`
+  const advice = staleAdvice(state)
+  return advice === undefined ? undefined : `Integráció elavult, ${advice}`
 }
 
 /**
