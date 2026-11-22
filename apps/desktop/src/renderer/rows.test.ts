@@ -197,12 +197,31 @@ describe('buildRows order', () => {
     ]
     expect(ids(buildRows(sessions, [], NONE_SEEN))).toEqual(['b', 'c', 'a'])
 
-    // In a done group the stop counts too: d1's stop (400) is later than d2's last event (395).
-    const done = [
-      session('d2', 'idle', undefined, { stoppedAt: 380, lastEventAt: 395 }),
-      session('d1', 'idle', undefined, { stoppedAt: 400, lastEventAt: 390 }),
+    // The seen finishes (blue ✓) go the same way, and their stop counts too: s1's stop (400) is later
+    // than s2's last event (395).
+    const seen = [
+      session('s2', 'idle', undefined, { stoppedAt: 380, lastEventAt: 395 }),
+      session('s1', 'idle', undefined, { stoppedAt: 400, lastEventAt: 390 }),
     ]
-    expect(ids(buildRows(done, [], NONE_SEEN))).toEqual(['d1', 'd2'])
+    const seenAll = new Map([
+      ['s1', { stoppedAt: 400, cleared: false }],
+      ['s2', { stoppedAt: 380, cleared: false }],
+    ])
+    const seenRows = buildRows(seen, [], seenAll)
+    expect(seenRows.map((r) => r.marker.tone)).toEqual(['seen', 'seen'])
+    expect(ids(seenRows)).toEqual(['s1', 's2'])
+  })
+
+  it('puts the earliest finish first among the unseen finishes (green ✓), by the same latest time', () => {
+    // d1's stop (400) is later than d2's last event (395): d2 has waited longer for the user.
+    const done = [
+      session('d1', 'idle', undefined, { stoppedAt: 400, lastEventAt: 390 }),
+      session('d2', 'idle', undefined, { stoppedAt: 380, lastEventAt: 395 }),
+      session('d3', 'idle', undefined, { stoppedAt: 410 }),
+    ]
+    const rows = buildRows(done, [], NONE_SEEN)
+    expect(rows.map((r) => r.marker.tone)).toEqual(['done', 'done', 'done'])
+    expect(ids(rows)).toEqual(['d2', 'd1', 'd3'])
   })
 
   it('sorts the working group by name, not by its activity, which moves with every event', () => {
@@ -321,6 +340,40 @@ describe('waitsOutsideApp', () => {
   it('is false for a session that is not waiting', () => {
     const rows = buildRows([session('i', 'idle'), session('k', 'working')], [], NONE_SEEN)
     expect(rows.map(waitsOutsideApp)).toEqual([false, false])
+  })
+})
+
+describe('selectOnShow without a waiting row', () => {
+  it('selects the earliest unseen finish, the top green ✓, over the current selection', () => {
+    const sessions = [
+      session('late', 'idle', undefined, { stoppedAt: 300 }),
+      session('early', 'idle', undefined, { stoppedAt: 100 }),
+      session('busy', 'working'),
+      session('old', 'idle', undefined, { stoppedAt: 50 }),
+    ]
+    const rows = buildRows(sessions, [], new Map([['old', { stoppedAt: 50, cleared: false }]]))
+    expect(rows.map((r) => [r.sessionId, r.marker.tone])).toEqual([
+      ['early', 'done'],
+      ['late', 'done'],
+      ['busy', 'working'],
+      ['old', 'seen'],
+    ])
+    expect(selectOnShow(rows, [], 'busy')).toBe('early')
+  })
+
+  it('keeps a waiting row first: a released request wins over an unseen finish', () => {
+    const sessions = [session('r', 'waiting', 5), session('d', 'idle', undefined, { stoppedAt: 1 })]
+    const decisions = [decision('dr', 'r', 5, true)]
+    const rows = buildRows(sessions, decisions, NONE_SEEN)
+    expect(selectOnShow(rows, decisions, 'd')).toBe('r')
+  })
+
+  it('keeps the current selection without an unseen finish, and a notification still wins', () => {
+    const sessions = [session('busy', 'working'), session('i', 'idle'), session('d', 'idle', undefined, { stoppedAt: 1 })]
+    const rows = buildRows(sessions.slice(0, 2), [], NONE_SEEN)
+    expect(selectOnShow(rows, [], 'i')).toBe('i')
+    const withFinish = buildRows(sessions, [], NONE_SEEN)
+    expect(selectOnShow(withFinish, [], 'i', 'busy')).toBe('busy')
   })
 })
 
