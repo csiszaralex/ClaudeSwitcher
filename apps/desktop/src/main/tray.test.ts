@@ -1,16 +1,39 @@
 import type { MenuItemConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '../shared/settings.js'
+import { decodePng } from './png-testing.js'
 
 // `tray.ts` needs a running Electron: stand-ins record the menu template it builds and the images
-// it shows. An image stand-in carries the PNG it was made from, so a test can tell two apart.
+// it shows. An image stand-in carries the PNG it was made from and its scale factor, so a test can
+// tell two apart. The screen stand-in has a primary display whose scale a test can change.
 const built = vi.hoisted(() => ({
   templates: [] as MenuItemConstructorOptions[][],
   images: [] as Buffer[],
+  scaleFactors: [] as (number | undefined)[],
+}))
+const display = vi.hoisted(() => ({
+  scaleFactor: 1,
+  listeners: new Map<string, Set<() => void>>(),
 }))
 
 vi.mock('electron', () => ({
-  nativeImage: { createFromBuffer: (png: Buffer) => ({ isEmpty: () => false, png }) },
+  nativeImage: {
+    createFromBuffer: (png: Buffer, options?: { scaleFactor?: number }) => {
+      built.scaleFactors.push(options?.scaleFactor)
+      return { isEmpty: () => false, png }
+    },
+  },
+  screen: {
+    getPrimaryDisplay: () => ({ scaleFactor: display.scaleFactor }),
+    on: (event: string, listener: () => void) => {
+      const listeners = display.listeners.get(event) ?? new Set()
+      listeners.add(listener)
+      display.listeners.set(event, listeners)
+    },
+    off: (event: string, listener: () => void) => {
+      display.listeners.get(event)?.delete(listener)
+    },
+  },
   Menu: {
     buildFromTemplate: (template: MenuItemConstructorOptions[]) => {
       built.templates.push(template)
@@ -147,5 +170,47 @@ describe('createTray icon', () => {
     tray.setState(waiting)
     expect(built.images).toHaveLength(4)
     expect(built.images.at(-1)?.equals(normal ?? Buffer.alloc(0))).toBe(true)
+  })
+
+  /** The pixel size of the last image the tray showed. */
+  const shownSize = (): number => decodePng(built.images.at(-1) ?? Buffer.alloc(0)).width
+  /** Changes the primary display's scale and tells the listeners, as Electron's `screen` does. */
+  const rescale = (scaleFactor: number): void => {
+    display.scaleFactor = scaleFactor
+    for (const listener of display.listeners.get('display-metrics-changed') ?? []) listener()
+  }
+
+  it('draws the icon at the pixel size of the primary display, marked with its scale', () => {
+    display.scaleFactor = 1.5
+    const tray = newTray()
+    built.scaleFactors.length = 0
+    tray.setState({ ...IDLE_TRAY_STATE, waitingCount: 1, wait: 'choice' })
+    expect(shownSize()).toBe(24)
+    expect(built.scaleFactors).toEqual([1.5])
+    tray.destroy()
+    display.scaleFactor = 1
+  })
+
+  it('redraws the shown look at the new size when the scale changes, and stops listening once destroyed', () => {
+    display.scaleFactor = 1
+    // The other tests' trays are never destroyed: drop their listeners, so only this tray redraws.
+    display.listeners.clear()
+    const listening = (): number => [...display.listeners.values()].reduce((sum, listeners) => sum + listeners.size, 0)
+    const tray = newTray()
+    expect(listening()).toBeGreaterThan(0)
+    tray.setState({ ...IDLE_TRAY_STATE, waitingCount: 1, wait: 'yes-no' })
+    const atOne = built.images.at(-1)
+    expect(shownSize()).toBe(16)
+    rescale(2)
+    expect(shownSize()).toBe(32)
+    // The same scale again draws nothing new.
+    const count = built.images.length
+    rescale(2)
+    expect(built.images).toHaveLength(count)
+    // Back at 1x: the same look as before, drawn again at 16 px.
+    rescale(1)
+    expect(built.images.at(-1)?.equals(atOne ?? Buffer.alloc(0))).toBe(true)
+    tray.destroy()
+    expect(listening()).toBe(0)
   })
 })

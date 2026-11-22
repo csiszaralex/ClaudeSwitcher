@@ -1,8 +1,8 @@
-import { Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron'
+import { Menu, Tray, nativeImage, screen, type MenuItemConstructorOptions } from 'electron'
 import { INSTALLED_ONLY_NOTE, SETTINGS, isInstalledOnly, type BooleanSettingKey, type SettingDefinition } from '../shared/settings.js'
 import { hotkeyLabel, type HotkeyRegistration } from '../shared/hotkey-status.js'
 import type { SettingsSnapshot } from './settings-service.js'
-import { trayIconPng, trayLook, type TrayLook } from './tray-icon.js'
+import { trayIconPng, trayIconSize, trayLook, type TrayLook } from './tray-icon.js'
 import { IDLE_TRAY_STATE, trayTooltip, type TrayState } from './tray-state.js'
 import { updateItemLabel, type UpdateItem } from './updater.js'
 
@@ -34,7 +34,14 @@ function isBooleanSetting(setting: SettingDefinition): setting is SettingDefinit
 const TOGGLES = SETTINGS.filter(isBooleanSetting)
 
 /**
- * Makes the image of a look, and fails loudly if it is empty.
+ * Makes the image of a look for a display scale, and fails loudly if it is empty.
+ *
+ * The image holds one representation: the look drawn at the display's pixel size (`trayIconSize`),
+ * marked with its scale factor. Not one per scale: on Windows, Electron 45 makes the tray's icon
+ * handle from the image's 1x bitmap only (`Tray::SetImage` calls `NativeImage::GetHICON`, which
+ * converts `image_.AsBitmap()`; Chromium's `ImageSkia::bitmap()` is the 1x representation, else the
+ * one closest to 1x), so a 16 px representation next to the others would be the one shown, scaled up
+ * by Windows. With a single representation, the one closest to 1x is the right size.
  *
  * `nativeImage.createFromBuffer` does NOT throw on data it cannot decode but returns an empty image,
  * and a tray icon created with an empty image is invisible on Windows. The app would run and the
@@ -42,8 +49,8 @@ const TOGGLES = SETTINGS.filter(isBooleanSetting)
  * first image is made in `createTray`, so this throw reaches the `app.whenReady()` error handler,
  * which shows an error dialog.
  */
-function iconImage(look: TrayLook): Electron.NativeImage {
-  const image = nativeImage.createFromBuffer(trayIconPng(look))
+function iconImage(look: TrayLook, scaleFactor: number): Electron.NativeImage {
+  const image = nativeImage.createFromBuffer(trayIconPng(look, trayIconSize(scaleFactor)), { scaleFactor })
   if (image.isEmpty()) throw new Error(`Tray icon could not be made: ${JSON.stringify(look)}`)
   return image
 }
@@ -71,24 +78,39 @@ export function createTray(options: {
   /** The update item's `check` was clicked: check for an update now. */
   onCheckUpdate: () => void
 }): TrayHandle {
-  // One image per look, made once: the tick asks for the same few images again and again.
+  // The scale of the primary display: the notification area sits on its taskbar.
+  let scaleFactor = screen.getPrimaryDisplay().scaleFactor
+  // One image per look, made once for the current scale: the tick asks for the same few images again
+  // and again.
   const images = new Map<string, Electron.NativeImage>()
   const imageOf = (look: TrayLook): Electron.NativeImage => {
     const key = JSON.stringify(look)
     let image = images.get(key)
     if (image === undefined) {
-      image = iconImage(look)
+      image = iconImage(look, scaleFactor)
       images.set(key, image)
     }
     return image
   }
   // The first tick follows right after `createTray` (`syncTray` in index.ts); until then, idle.
-  let shownLook = JSON.stringify(trayLook(IDLE_TRAY_STATE, false))
+  let shownLook = trayLook(IDLE_TRAY_STATE, false)
+  let shownKey = JSON.stringify(shownLook)
   let shownTooltip = trayTooltip(IDLE_TRAY_STATE)
   // The flash alternates on each `setState`, that is on each one-second tick.
   let flashOn = false
 
-  const tray = new Tray(imageOf(trayLook(IDLE_TRAY_STATE, false)))
+  const tray = new Tray(imageOf(shownLook))
+  // A changed scaling (or another primary display) redraws the icon at the new size, without a restart.
+  const onDisplaysChanged = (): void => {
+    const next = screen.getPrimaryDisplay().scaleFactor
+    if (destroyed || next === scaleFactor) return
+    scaleFactor = next
+    images.clear()
+    tray.setImage(imageOf(shownLook))
+  }
+  screen.on('display-metrics-changed', onDisplaysChanged)
+  screen.on('display-added', onDisplaysChanged)
+  screen.on('display-removed', onDisplaysChanged)
   tray.setToolTip(shownTooltip)
   // The menu is rebuilt on every change (update item, notice, settings, hotkey), so its state lives here:
   // otherwise a rebuilt menu would show the startup state, not what holds now.
@@ -162,8 +184,9 @@ export function createTray(options: {
       flashOn = state.flash && !flashOn
       const look = trayLook(state, flashOn)
       const lookKey = JSON.stringify(look)
-      if (lookKey !== shownLook) {
-        shownLook = lookKey
+      if (lookKey !== shownKey) {
+        shownKey = lookKey
+        shownLook = look
         tray.setImage(imageOf(look))
       }
       const tooltip = trayTooltip(state)
@@ -195,6 +218,9 @@ export function createTray(options: {
     },
     destroy() {
       destroyed = true
+      screen.off('display-metrics-changed', onDisplaysChanged)
+      screen.off('display-added', onDisplaysChanged)
+      screen.off('display-removed', onDisplaysChanged)
       tray.destroy()
     },
   }
