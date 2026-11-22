@@ -4,7 +4,7 @@ This guide is for developers who want to run, change or trace the code. What the
 
 ## Running from the repository
 
-Prerequisites: Windows, Node.js 24 or newer (`engines` in `package.json`), and pnpm at the version pinned in `packageManager` (`corepack enable` provides it).
+Prerequisites: Windows, Node.js 26 or newer (`engines` in `package.json`), and pnpm at the version pinned in `packageManager`. Corepack provides it, but Node.js no longer bundles Corepack (since Node 25): install it with `npm install -g corepack`, then run `corepack enable`. CI does the same, with the Node.js and Corepack versions in `.github/actions/setup/action.yml`.
 
 ```sh
 pnpm install

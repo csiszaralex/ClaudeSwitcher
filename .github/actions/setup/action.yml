@@ -1,0 +1,21 @@
+name: setup
+description: Node.js, pnpm at the version pinned in `packageManager`, and the workspace's dependencies.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 26
+    # Node.js no longer bundles Corepack (since Node 25), so it is installed from npm. Corepack then
+    # provides the pnpm version pinned in `packageManager`, checked against its hash. The runner
+    # image has Yarn installed globally, whose `yarn.cmd` would block Corepack's own Yarn shims
+    # (npm EEXIST), so it goes first; on an image without it the uninstall does nothing.
+    - run: npm uninstall -g yarn
+      shell: bash
+    - run: npm install -g corepack@0.36.0
+      shell: bash
+    - run: corepack enable
+      shell: bash
+    - run: pnpm install --frozen-lockfile
+      shell: bash

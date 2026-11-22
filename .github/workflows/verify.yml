@@ -15,10 +15,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-      # Corepack provides the pnpm version pinned in `packageManager`.
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
+      # Node.js, pnpm and the dependencies: `.github/actions/setup`.
+      - uses: ./.github/actions/setup
       - run: pnpm verify
