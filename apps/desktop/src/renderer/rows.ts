@@ -177,12 +177,15 @@ function lastTouched(row: Row<SessionLike, DecisionLike>): number {
  * The order of two rows of one group: in a waiting group the longest waiting first
  * (`compareWaitStart`: nearest to the release, and the overlay preselects it); in the working group
  * none (so by name), because a working session's `activity.lastEventAt` moves with every new
- * transcript event and the rows would swap places every few seconds; in any other group the most
- * recently touched first (`lastTouched`).
+ * transcript event and the rows would swap places every few seconds; in the unseen finishes (the
+ * green ✓) the earliest touched first, so the finish waiting longest for the user is on top, where
+ * the overlay preselects it when nothing else waits (`selection.ts` `selectOnShow`); in any other
+ * group the most recently touched first (`lastTouched`).
  */
 function compareWithinGroup(a: Row<SessionLike, DecisionLike>, b: Row<SessionLike, DecisionLike>): number {
   if (WAITING_TONES.has(a.marker.tone)) return compareWaitStart(a, b)
   if (a.marker.tone === 'working') return 0
+  if (a.marker.tone === 'done') return lastTouched(a) - lastTouched(b)
   return lastTouched(b) - lastTouched(a)
 }
 

@@ -38,6 +38,8 @@ interface SessionLike {
    * only for a session without a held request the app can decide (`compareWaitStart`).
    */
   waitingSince?: number | undefined
+  /** The row's marker (rows.ts `Row.marker`): `selectOnShow` picks an unseen finish (`done`) by it. */
+  marker?: { tone: string } | undefined
 }
 
 interface DecisionLike {
@@ -100,10 +102,11 @@ function longestWaiting(
 /**
  * The selection when the overlay appears: the session waiting longest, matching the user's flow
  * "open it, decide the oldest". It jumps to a released request only if nothing else waits (see
- * `firstWaiting`). If nobody waits, the current selection stays while it is in the list; otherwise
- * the first row is selected by its id. An `undefined` selection would make the list highlight its
- * first row (`resolveSelectedIndex`), so the highlight would move whenever another row came to the
- * top.
+ * `firstWaiting`). If nobody waits, the first unseen finish in list order (the green ✓ that has
+ * waited longest, rows.ts `compareWithinGroup`): the next thing to look at. Without one the current
+ * selection stays while it is in the list; otherwise the first row is selected by its id. An
+ * `undefined` selection would make the list highlight its first row (`resolveSelectedIndex`), so
+ * the highlight would move whenever another row came to the top.
  *
  * `preferred` is the session a clicked notification asked for: it wins if it is still in the list.
  * Otherwise (it ended meanwhile) the rule above applies.
@@ -117,6 +120,8 @@ export function selectOnShow(
   if (preferred !== undefined && sessions.some((s) => s.sessionId === preferred)) return preferred
   const waiting = firstWaiting(sessions, decisions)
   if (waiting !== undefined) return waiting
+  const finished = sessions.find((s) => s.marker?.tone === 'done')
+  if (finished !== undefined) return finished.sessionId
   if (current !== undefined && sessions.some((s) => s.sessionId === current)) return current
   return sessions[0]?.sessionId
 }
