@@ -1,4 +1,4 @@
-import { crc32, deflateSync } from 'node:zlib'
+import { encodePng, rasterizeIcon, type IconPaint } from './icon-raster.js'
 import type { TrayState } from './tray-state.js'
 
 /**
@@ -7,7 +7,7 @@ import type { TrayState } from './tray-state.js'
  * `tray-icon.test.ts` checks that the two agree.
  */
 export const TRAY_COLORS = {
-  /** Nothing waits. The pixels of `resources/tray.png`, the source of the app icon (`scripts/make-icon.mjs`). */
+  /** Nothing waits. */
   idle: '#8a8880',
   /** A yes/no request or a Notification wait: `--accent`. */
   yesNo: '#d97757',
@@ -73,99 +73,102 @@ export function trayLook(state: TrayState, flashOn: boolean): TrayLook {
   return { fill: state.workingCount > 0 ? TRAY_COLORS.working : TRAY_COLORS.idle }
 }
 
-/** Only 16x16 for now: the size Windows shows in the taskbar at 100 % scaling. */
-export const TRAY_ICON_SIZE = 16
+/**
+ * The icon's size in device-independent pixels, the size Windows shows in the notification area at
+ * 100 % scaling. The shapes below are described in these units; `trayIconSize` gives the pixels.
+ */
+const TRAY_ICON_UNITS = 16
 
 /**
- * The disc: the pixels whose centre lies within this squared distance of the icon's centre. 41 (a
- * radius of about 6.4 px) gives the 12 px disc of `resources/tray.png` exactly.
+ * The icon's size in pixels on a display with this scale factor: 16 at 100 %, 20 at 125 %, 24 at
+ * 150 % and 32 at 200 %. Drawn at exactly that size, Windows shows the icon without scaling it.
  */
-const DISC_RADIUS_SQ = 41
+export function trayIconSize(scaleFactor: number): number {
+  return Math.round(TRAY_ICON_UNITS * scaleFactor)
+}
+
+/** The centre of the icon, on both axes. */
+const CENTER = TRAY_ICON_UNITS / 2
+
+/** The disc: 12 units across, the 12 px disc of the 16 px icon. */
+const DISC_RADIUS = 6
 
 /**
- * With a ring: the ring is the disc outside a radius of 5 px (about 1.4 px wide, one pixel along the
- * axes), and the centre a disc of 4 px radius (8 px across), with a 1 px transparent gap between
- * them, so the two colours do not blur into one at 16 px.
+ * With a ring: the ring is the disc outside a radius of 5 (1 unit wide), and the centre a disc of
+ * radius 4 (8 units across), with a 1 unit transparent gap between them, so the two colours do not
+ * blur into one even at 16 px.
  */
-const RING_INNER_RADIUS_SQ = 25
-const CORE_RADIUS_SQ = 16
+const RING_INNER_RADIUS = 5
+const CORE_RADIUS = 4
 
-/** The exclamation mark: 2 px wide in the middle columns, a bar and a dot below it. */
-const MARK_COLUMNS: readonly number[] = [7, 8]
-function isMarkRow(y: number): boolean {
-  return (y >= 3 && y <= 9) || y === 11 || y === 12
+/**
+ * The exclamation mark: 2 units wide in the middle, a bar and a dot below it, with a 1 unit gap. Its
+ * edges are whole units, so at 16 px it is drawn in whole pixels.
+ */
+const MARK_LEFT = 7
+const MARK_RIGHT = 9
+const MARK_BAR_TOP = 3
+const MARK_BAR_BOTTOM = 10
+const MARK_DOT_TOP = 11
+const MARK_DOT_BOTTOM = 13
+
+/** The mark's edges, in units. */
+interface MarkEdges {
+  left: number
+  right: number
+  barTop: number
+  barBottom: number
+  dotTop: number
+  dotBottom: number
 }
 
-const BYTES_PER_PIXEL = 4
-
-function rgb(hex: string): [number, number, number] {
-  const value = Number.parseInt(hex.slice(1), 16)
-  return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff]
-}
-
-/** The squared distance of a pixel's centre from the icon's centre. */
-function distanceSq(x: number, y: number): number {
-  const middle = TRAY_ICON_SIZE / 2
-  return (x + 0.5 - middle) ** 2 + (y + 0.5 - middle) ** 2
-}
-
-/** The colour of one pixel, `undefined` for a transparent one. */
-function pixelColor(look: TrayLook, x: number, y: number): string | undefined {
-  const distance = distanceSq(x, y)
-  if (distance > DISC_RADIUS_SQ) return undefined
-  if (look.mark === true && MARK_COLUMNS.includes(x) && isMarkRow(y)) return TRAY_COLORS.mark
-  if (look.ring === undefined) return look.fill
-  if (distance > RING_INNER_RADIUS_SQ) return look.ring
-  return distance <= CORE_RADIUS_SQ ? look.fill : undefined
-}
-
-/** The icon as `TRAY_ICON_SIZE` x `TRAY_ICON_SIZE` RGBA pixels, row by row; transparent pixels are all zero. */
-export function trayIconPixels(look: TrayLook): Buffer {
-  const pixels = Buffer.alloc(TRAY_ICON_SIZE * TRAY_ICON_SIZE * BYTES_PER_PIXEL)
-  for (let y = 0; y < TRAY_ICON_SIZE; y++) {
-    for (let x = 0; x < TRAY_ICON_SIZE; x++) {
-      const color = pixelColor(look, x, y)
-      if (color === undefined) continue
-      const [red, green, blue] = rgb(color)
-      pixels.set([red, green, blue, 0xff], (y * TRAY_ICON_SIZE + x) * BYTES_PER_PIXEL)
-    }
+/**
+ * The mark's edges snapped to whole pixels at `size`, so its thin white strokes stay crisp on the red
+ * at every size: at 20 and 24 px the unit edges fall on half pixels, which blurred the mark (seen in
+ * the previews, 2026-11-22). Its sides snap outwards, so it stays centred (every size is even, the
+ * centre a pixel boundary); its rows round to the nearest pixel, so the gap between the bar and the
+ * dot never closes. At 16 px nothing moves.
+ */
+function markEdges(size: number): MarkEdges {
+  const scale = size / TRAY_ICON_UNITS
+  const snap = (units: number, round: (pixels: number) => number): number => round(units * scale) / scale
+  return {
+    left: snap(MARK_LEFT, Math.floor),
+    right: snap(MARK_RIGHT, Math.ceil),
+    barTop: snap(MARK_BAR_TOP, Math.round),
+    barBottom: snap(MARK_BAR_BOTTOM, Math.round),
+    dotTop: snap(MARK_DOT_TOP, Math.round),
+    dotBottom: snap(MARK_DOT_BOTTOM, Math.round),
   }
-  return pixels
 }
 
-function pngChunk(type: string, data: Buffer): Buffer {
-  const typeAndData = Buffer.concat([Buffer.from(type, 'latin1'), data])
-  const length = Buffer.alloc(4)
-  length.writeUInt32BE(data.length)
-  const crc = Buffer.alloc(4)
-  crc.writeUInt32BE(crc32(typeAndData))
-  return Buffer.concat([length, typeAndData, crc])
+function onMark(mark: MarkEdges, x: number, y: number): boolean {
+  if (x < mark.left || x > mark.right) return false
+  return (y >= mark.barTop && y <= mark.barBottom) || (y >= mark.dotTop && y <= mark.dotBottom)
 }
 
-const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+/** The colour of a look at a point, in units, drawn at `size`; `undefined` where the icon is transparent. */
+function paintOf(look: TrayLook, size: number): IconPaint {
+  const mark = markEdges(size)
+  return (x, y) => {
+    const distance = Math.hypot(x - CENTER, y - CENTER)
+    if (distance > DISC_RADIUS) return undefined
+    if (look.mark === true && onMark(mark, x, y)) return TRAY_COLORS.mark
+    if (look.ring === undefined) return look.fill
+    if (distance > RING_INNER_RADIUS) return look.ring
+    return distance <= CORE_RADIUS ? look.fill : undefined
+  }
+}
 
 /**
- * The icon as a PNG file in memory, for `nativeImage.createFromBuffer`. A PNG, not raw pixels for
- * `createFromBitmap`: Electron documents the bitmap's byte order as platform-dependent, a PNG's is
- * fixed. 8-bit RGBA, no interlacing, filter 0 on every line.
+ * The icon as `size` x `size` RGBA pixels (`rasterizeIcon`: anti-aliased, straight alpha, row by
+ * row). Every size is the same drawing (`paintOf`).
  */
-export function trayIconPng(look: TrayLook): Buffer {
-  const header = Buffer.alloc(13)
-  header.writeUInt32BE(TRAY_ICON_SIZE, 0)
-  header.writeUInt32BE(TRAY_ICON_SIZE, 4)
-  // Bit depth 8, colour type 6 (RGBA), compression 0, filter 0, no interlacing.
-  header.set([8, 6, 0, 0, 0], 8)
-  const pixels = trayIconPixels(look)
-  const stride = TRAY_ICON_SIZE * BYTES_PER_PIXEL
-  const raw = Buffer.alloc((stride + 1) * TRAY_ICON_SIZE)
-  for (let y = 0; y < TRAY_ICON_SIZE; y++) {
-    // The filter byte of each line stays 0 (none).
-    pixels.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride)
-  }
-  return Buffer.concat([
-    PNG_SIGNATURE,
-    pngChunk('IHDR', header),
-    pngChunk('IDAT', deflateSync(raw)),
-    pngChunk('IEND', Buffer.alloc(0)),
-  ])
+export function trayIconPixels(look: TrayLook, size: number): Buffer {
+  return rasterizeIcon(size, TRAY_ICON_UNITS, paintOf(look, size))
+}
+
+/** The icon as a PNG file in memory (`encodePng`), for `nativeImage.createFromBuffer`. */
+export function trayIconPng(look: TrayLook, size: number): Buffer {
+  return encodePng(size, trayIconPixels(look, size))
 }
