@@ -791,8 +791,11 @@ the list; the ids are stored in `config.json`. Two decisions:
 - *A wait is never hidden.* A session with a pending request, or with a wait the app holds no
   request for (`status` `waiting`), stays in the list with a `kizárt` tag while it waits, and the
   tray and the request toast count it as any session's (`renderer/list-cleanup.ts`
-  `inExcludedGroup`). Excluding hides only what is noise: the finish in the tray, the finish toast
-  and the search. Otherwise an excluded session could block on a permission prompt nobody sees.
+  `inExcludedGroup`). Excluding hides only what is noise: the finish in the tray and the finish
+  toast. Otherwise an excluded session could block on a permission prompt nobody sees. (Since
+  changed: the search used to skip the group; now it finds the group's rows too, after the other
+  matches, dimmed and tagged, so the first match, which the search selects and Enter opens, is a
+  session the user did not exclude whenever one matches, `renderer/list-cleanup.ts` `listView`.)
 - *An id is dropped only from a complete enough picture.* The daemon's state lists only live
   sessions and does not say whether its picture is complete: it is empty before the first successful
   scan and while the process probe has no snapshot yet (every session counts as dead then), and a scan

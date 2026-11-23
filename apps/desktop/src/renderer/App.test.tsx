@@ -77,6 +77,36 @@ describe('the search', () => {
     expect(api.focusSession.mock.calls).toEqual([[sessionId(3)]])
   })
 
+  it('finds an excluded session after the others, dimmed and tagged, opens it on Enter, and brings it back on Delete', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: [...LIST, session(4, 'gamma-2')], excluded: [sessionId(3)] })
+    await user.keyboard('/gam')
+    expect(rowNames()).toEqual(['gamma-2', 'gamma'])
+    expect(header()).toBeNull()
+    expect(selectedName()).toBe('gamma-2')
+    expect(row('gamma').classList.contains('excluded')).toBe(true)
+    expect(row('gamma').querySelector('.excluded-tag')?.textContent).toBe(EXCLUDED_TEXT.tag)
+    expect(row('gamma-2').querySelector('.excluded-tag')).toBeNull()
+
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(3)]])
+
+    // A click takes the cursor out of the field, so Delete is the list's key again.
+    await user.click(row('gamma'))
+    await user.keyboard('{Delete}')
+    expect(api.setExcluded.mock.calls).toEqual([[sessionId(3), false]])
+    await settle()
+    expect(rowNames()).toEqual(['gamma', 'gamma-2'])
+    expect(row('gamma').classList.contains('excluded')).toBe(false)
+    expect(selectedName()).toBe('gamma')
+  })
+
+  it('selects an excluded match when it is the only one', async () => {
+    const { user } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
+    await user.keyboard('/gam')
+    expect(rowNames()).toEqual(['gamma'])
+    expect(selectedName()).toBe('gamma')
+  })
+
   it('opens on Ctrl+K with the field focused', async () => {
     const { user } = await renderOverlay({ sessions: LIST })
     await user.keyboard('{Control>}k{/Control}')
