@@ -16,6 +16,7 @@ import type { JSX } from 'react'
 import { onTestFinished, vi, type Mock } from 'vitest'
 import type { ClaudeSwitcherApi } from '../preload/api.js'
 import type { AutoAcceptEntry } from '../shared/auto-accept.js'
+import type { ExcludedReply } from '../shared/excluded-sessions.js'
 import type { ConversationReply } from '../shared/overlay-channels.js'
 import { clearFinish, seenFinishesReply, type SeenFinish } from '../shared/session-finished.js'
 import { App } from './App.js'
@@ -32,8 +33,12 @@ type FakeApi = { [K in keyof ClaudeSwitcherApi]: Mock<ClaudeSwitcherApi[K]> }
 export interface OverlaySetup {
   sessions?: SessionView[]
   decisions?: PendingDecisionView[]
-  /** The sessions already excluded from the list (`main/excluded-sessions.ts`). */
+  /** The sessions already excluded from the list (`main/excluded-sessions.ts`), while idle. */
   excluded?: readonly string[]
+  /** The sessions already excluded from the list while running, which stay out when they run again. */
+  excludedWhileRunning?: readonly string[]
+  /** The sessions that came back because they started running, until the first jump to each. */
+  returned?: readonly string[]
   /** The peek's reply (`OVERLAY_CHANNELS.conversation`); an empty history by default. */
   conversation?: ConversationReply
   /** The sessions already in the auto-accept mode, with their counts (`main/auto-accept.ts`). */
@@ -67,11 +72,38 @@ class FakeSocket {
   }
 }
 
+/** The fake main process's excluded sessions, and the overlay's listeners of their push. */
+interface FakeExclusion {
+  /** Session id to `whileRunning`, in the order they were excluded. */
+  excluded: Map<string, boolean>
+  returned: Set<string>
+  push: Set<(raw: unknown) => void>
+}
+
+function fakeExclusion(setup: OverlaySetup): FakeExclusion {
+  return {
+    excluded: new Map<string, boolean>([
+      ...(setup.excluded ?? []).map((id): [string, boolean] => [id, false]),
+      ...(setup.excludedWhileRunning ?? []).map((id): [string, boolean] => [id, true]),
+    ]),
+    returned: new Set(setup.returned ?? []),
+    push: new Set(),
+  }
+}
+
+/** The excluded sessions in their wire format (`ExcludedReply`). */
+function excludedReply({ excluded, returned }: FakeExclusion): ExcludedReply {
+  return { excluded: [...excluded].map(([sessionId, whileRunning]) => ({ sessionId, whileRunning })), returned: [...returned] }
+}
+
 /**
  * The fake preload API. It answers like the main process: the state over IPC, the seen finishes,
  * the excluded sessions and the auto-accept sessions in their wire formats, a clear, a Delete and a
  * completed Shift+A hold applied with the main process's rules (only a listed session;
- * `shared/session-finished.ts` `clearFinish`), and every decision accepted. The auto-accept toggle
+ * `shared/session-finished.ts` `clearFinish`; a Delete remembers whether the session was running
+ * and ends its returned mark, as `main/excluded-sessions.ts` `exclude`), and every decision
+ * accepted. A jump does not end a returned mark here: that is the main process's, which then pushes
+ * (`pushExcluded`). The auto-accept toggle
  * only records the session (its count starts at 0); the main side is `main/auto-accept.test.ts`'s.
  */
 function fakeApi(
@@ -79,9 +111,10 @@ function fakeApi(
   state: DaemonState,
   shown: Set<(preferred: string | undefined) => void>,
   autoAcceptPush: Set<(raw: unknown) => void>,
+  exclusion: FakeExclusion,
 ): FakeApi {
   const seen = new Map<string, SeenFinish>()
-  const excluded = new Set(setup.excluded ?? [])
+  const { excluded, returned } = exclusion
   const autoAccept = new Map((setup.autoAccept ?? []).map((entry) => [entry.sessionId, entry.allowed]))
   const autoAcceptReply = (): AutoAcceptEntry[] => [...autoAccept].map(([sessionId, allowed]) => ({ sessionId, allowed }))
   const listed = (sessionId: string): SessionView | undefined => state.sessions.find((s) => s.sessionId === sessionId)
@@ -94,11 +127,21 @@ function fakeApi(
       if (view !== undefined) clearFinish(seen, view, state.sessions)
       return Promise.resolve(seenFinishesReply(seen))
     }),
-    excludedSessions: vi.fn(() => Promise.resolve([...excluded])),
+    excludedSessions: vi.fn(() => Promise.resolve(excludedReply(exclusion))),
     setExcluded: vi.fn((sessionId: string, exclude: boolean) => {
-      if (exclude && listed(sessionId) !== undefined) excluded.add(sessionId)
+      const view = listed(sessionId)
+      if (exclude && view !== undefined && !excluded.has(sessionId)) {
+        excluded.set(sessionId, view.status !== 'idle')
+        returned.delete(sessionId)
+      }
       if (!exclude) excluded.delete(sessionId)
-      return Promise.resolve([...excluded])
+      return Promise.resolve(excludedReply(exclusion))
+    }),
+    onExcludedChanged: vi.fn((callback: (raw: unknown) => void) => {
+      exclusion.push.add(callback)
+      return () => {
+        exclusion.push.delete(callback)
+      }
     }),
     autoAccept: vi.fn(() => Promise.resolve(autoAcceptReply())),
     setAutoAccept: vi.fn((sessionId: string, on: boolean) => {
@@ -134,14 +177,14 @@ function fakeApi(
 function Overlay(): JSX.Element {
   const overlay = useDaemonState()
   const [seenFinishes, trackSeen] = useSeenFinishes()
-  const [excluded, trackExcluded] = useExcludedSessions()
+  const [exclusion, trackExcluded] = useExcludedSessions()
   const [autoAccept, trackAutoAccept] = useAutoAccept()
   return (
     <App
       overlay={overlay}
       seenFinishes={seenFinishes}
       trackSeen={trackSeen}
-      excluded={excluded}
+      exclusion={exclusion}
       trackExcluded={trackExcluded}
       autoAccept={autoAccept}
       trackAutoAccept={trackAutoAccept}
@@ -165,6 +208,11 @@ export interface RenderedOverlay {
   sendState: (next: DaemonState) => void
   /** The main process's push of the auto-accept sessions (`OVERLAY_CHANNELS.autoAcceptChanged`). */
   pushAutoAccept: (entries: readonly AutoAcceptEntry[]) => void
+  /**
+   * The main process's push of the excluded sessions (`OVERLAY_CHANNELS.excludedChanged`): the fake
+   * main process takes `reply` as its own value, then sends it.
+   */
+  pushExcluded: (reply: ExcludedReply) => void
   /** Moves the clock past the key letters' arming and the pause after typing (`key-guard.ts`). */
   armKeys: () => void
   /** Lets the replies in flight land. */
@@ -181,9 +229,10 @@ export async function renderOverlay(setup: OverlaySetup = {}): Promise<RenderedO
   vi.setSystemTime(START)
   const shown = new Set<(preferred: string | undefined) => void>()
   const autoAcceptPush = new Set<(raw: unknown) => void>()
+  const exclusion = fakeExclusion(setup)
   // The daemon's state, which the fake main process reads too; a live message replaces it.
   const state: DaemonState = { sessions: setup.sessions ?? [], decisions: setup.decisions ?? [] }
-  const api = fakeApi(setup, state, shown, autoAcceptPush)
+  const api = fakeApi(setup, state, shown, autoAcceptPush, exclusion)
   window.claudeswitcher = api
   vi.stubGlobal('WebSocket', FakeSocket)
   onTestFinished(() => {
@@ -218,6 +267,15 @@ export async function renderOverlay(setup: OverlaySetup = {}): Promise<RenderedO
     pushAutoAccept: (entries) => {
       act(() => {
         for (const callback of autoAcceptPush) callback(structuredClone(entries))
+      })
+    },
+    pushExcluded: (reply) => {
+      exclusion.excluded.clear()
+      for (const entry of reply.excluded) exclusion.excluded.set(entry.sessionId, entry.whileRunning)
+      exclusion.returned.clear()
+      for (const id of reply.returned) exclusion.returned.add(id)
+      act(() => {
+        for (const callback of exclusion.push) callback(excludedReply(exclusion))
       })
     },
     armKeys: () => {

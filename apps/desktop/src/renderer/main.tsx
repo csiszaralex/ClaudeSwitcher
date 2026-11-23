@@ -28,7 +28,7 @@ function overlayFailed(message: string, retries: boolean): JSX.Element {
 function Root(): JSX.Element {
   const overlay = useDaemonState()
   const [seenFinishes, trackSeen] = useSeenFinishes()
-  const [excluded, trackExcluded] = useExcludedSessions()
+  const [exclusion, trackExcluded] = useExcludedSessions()
   const [autoAccept, trackAutoAccept] = useAutoAccept()
   return (
     <ErrorBoundary
@@ -40,7 +40,7 @@ function Root(): JSX.Element {
         overlay={overlay}
         seenFinishes={seenFinishes}
         trackSeen={trackSeen}
-        excluded={excluded}
+        exclusion={exclusion}
         trackExcluded={trackExcluded}
         autoAccept={autoAccept}
         trackAutoAccept={trackAutoAccept}

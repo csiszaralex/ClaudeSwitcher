@@ -786,7 +786,7 @@ row shows the same text, `staleAdvice`. An `env` that is not an object gets its 
 hand edit before the reinstall, because the install cannot write the token into it.)
 
 **Excluded sessions** (issue #62). Delete moves a session into a collapsed group at the bottom of
-the list; the ids are stored in `config.json`. Two decisions:
+the list; the ids are stored in `config.json`. The decisions:
 
 - *A wait is never hidden.* A session with a pending request, or with a wait the app holds no
   request for (`status` `waiting`), stays in the list with a `kizárt` tag while it waits, and the
@@ -804,6 +804,20 @@ the list; the ids are stored in `config.json`. Two decisions:
   empty list counts as no picture and restarts every count (`main/excluded-sessions.ts`
   `createExcludedSessions`). A wrong drop only brings a session back into the list; a stale id
   could hide a later session that reuses the id.
+- *Excluded while idle comes back when it runs; excluded while running stays out* (the owner's
+  request, 2026-11-23). `exclude` reads the session's status from the daemon's state at the key
+  press and stores it with the id (`whileRunning`, `shared/excluded-sessions.ts` `ExcludedEntry`;
+  an older file's plain id reads as excluded while idle). Running means any status but `idle`:
+  `waiting` counts too (a pending request, a waiting Notification, daemon `session-store.ts`
+  `WAITING_TYPES`, or the registry's `waiting`): the session stands at a prompt of a turn it has
+  not finished, so a session excluded there was excluded mid-turn. Excluding a session
+  mid-turn says "not this one, even while it works", so its next runs do not undo the choice. The
+  return happens in the tray tick (`observe`), before the tray and the notifier read the set, so a
+  session that came back counts as any session's in that tick.
+- *The returned mark is memory only.* It only says why a row reappeared, until the user first
+  jumps to it from the overlay (the `focusSession` handler, whatever the outcome), excludes it
+  again, or its session is gone by the same rule as the excluded ids. After a restart the reason is
+  stale, so no row carries it; storing it would add a second file key for a hint.
 
 **Auto-accept per session** (issue #2). Holding Shift+A on a row for 3 s puts its session into a
 mode in which the app allows the session's requests by itself. The decisions:

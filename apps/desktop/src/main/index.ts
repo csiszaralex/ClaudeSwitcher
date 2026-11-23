@@ -481,12 +481,18 @@ async function startApp(): Promise<void> {
   // The watch that counts a finish as seen when its VS Code tab stays in front (`watchSeen` below);
   // here, before the jump handler, which holds it while a jump brings up a tab (`jumpedTo`).
   const seenWatch = createSeenWatch()
-  // The sessions the user moved out of the list (Delete), kept in `config.json`. A failed write is
-  // logged there (`saveExcludedSessions`); the list then holds until the app quits.
+  // The sessions the user moved out of the list (Delete), kept in `config.json`, and the ones that
+  // came back because they started running (in memory only). A failed write is logged there
+  // (`saveExcludedSessions`); the list then holds until the app quits. Its changes that the overlay
+  // did not ask for (the tray tick's `observe`, a jump's `acknowledgeReturn`) go to it as a push
+  // (`pushExcluded`, defined once the overlay exists).
   const excludedSessions = createExcludedSessions({
     initial: stored.excludedSessions,
-    persist: (ids) => {
-      void saveExcludedSessions(userData, ids)
+    persist: (entries) => {
+      void saveExcludedSessions(userData, entries)
+    },
+    log: (line) => {
+      console.log(line)
     },
   })
   // Whether a jump is bringing up a window now (`OVERLAY_CHANNELS.focusSession`): one at a time.
@@ -515,17 +521,17 @@ async function startApp(): Promise<void> {
     }
     return seenFinishesReply(finishesSeen)
   })
-  handleFrom(RENDERER, OVERLAY_CHANNELS.excludedSessions, () => excludedSessions.ids())
+  handleFrom(RENDERER, OVERLAY_CHANNELS.excludedSessions, () => excludedSessions.reply())
   handleFrom(RENDERER, OVERLAY_CHANNELS.setExcluded, (sessionId: unknown, exclude: unknown) => {
     // IPC input: the renderer may send anything, hence `unknown`, checked here. Only a session the
-    // daemon lists now can be excluded (`exclude`), and both directions are idempotent, so a key
-    // pressed twice, or a session that ended since the key, does no harm. The tray and the toasts
-    // follow on the next tick.
+    // daemon lists now can be excluded (`exclude`, which reads its status now too), and both
+    // directions are idempotent, so a key pressed twice, or a session that ended since the key, does
+    // no harm. The tray and the toasts follow on the next tick.
     if (typeof sessionId === 'string' && typeof exclude === 'boolean') {
       if (exclude) excludedSessions.exclude(sessionId, running.state().sessions)
       else excludedSessions.include(sessionId)
     }
-    return excludedSessions.ids()
+    return excludedSessions.reply()
   })
   handleFrom(RENDERER, OVERLAY_CHANNELS.autoAccept, () => autoAccept.entries())
   handleFrom(RENDERER, OVERLAY_CHANNELS.setAutoAccept, (sessionId: unknown, on: unknown) => {
@@ -589,6 +595,9 @@ async function startApp(): Promise<void> {
       // overlay reads the map on `shown` (`useSeenFinishes`), so its next pull has this finish. A
       // session that waits on the sessions it prompted records nothing (`acknowledgeFinish`).
       acknowledgeFinish(finishesSeen, view, sessions)
+      // The first jump ends the mark of a session that came back because it started running
+      // (`acknowledgeReturn`), whatever the outcome, as the finish above.
+      if (excludedSessions.acknowledgeReturn(view.sessionId)) pushExcluded()
       // The exact tab only AFTER the window, and only if every condition of `tabFocusUri` holds.
       // The decisions are read AFTER the focus: a file-write request may have arrived during the
       // wait. Not awaited: the renderer gets the result of the window focus, as before.
@@ -662,6 +671,12 @@ async function startApp(): Promise<void> {
   })
   pushAutoAccept = () => {
     overlay.send(OVERLAY_CHANNELS.autoAcceptChanged, autoAccept.entries())
+  }
+  // The excluded and the returned sessions, after a change the overlay did not ask for, so an open
+  // overlay moves the row at once. Called only from the jump handler and the tray tick, both after
+  // this line.
+  const pushExcluded = (): void => {
+    overlay.send(OVERLAY_CHANNELS.excludedChanged, excludedSessions.reply())
   }
 
   // The hotkey is registered BEFORE the tray, because the menu shows the result. An invalid
@@ -925,9 +940,11 @@ async function startApp(): Promise<void> {
     const started = performance.now()
     const state = running.state()
     const now = Date.now()
-    // Drops the ids of the excluded sessions that are gone (`EXCLUDED_GONE_AFTER_MS`). The overlay
-    // reads the list again on its next `shown`; a gone session has no row meanwhile anyway.
-    excludedSessions.observe(state.sessions, now)
+    // Brings back the sessions excluded while idle that started running, and drops the excluded and
+    // returned ids whose session is gone (`EXCLUDED_GONE_AFTER_MS`); the overlay gets the change at
+    // once. Before the tray and the notifier read the set: a session that came back counts as any
+    // session's in this very tick.
+    if (excludedSessions.observe(state.sessions, now)) pushExcluded()
     // Ends the auto-accept mode of a session that is gone (`AUTO_ACCEPT_GONE_AFTER_MS`), and pushes it.
     autoAccept.observe(state, now)
     const excluded = excludedSessions.set()

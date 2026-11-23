@@ -224,6 +224,9 @@ describe('excluded sessions', () => {
   // Invented session ids in the registry's UUID shape.
   const ALPHA = '6f1c2a3e-0000-4000-8000-000000000051'
   const BETA = '6f1c2a3e-0000-4000-8000-000000000052'
+  const GAMMA = '6f1c2a3e-0000-4000-8000-000000000053'
+  const alpha = { sessionId: ALPHA, whileRunning: false }
+  const beta = { sessionId: BETA, whileRunning: true }
 
   it('an older config without the key excludes nothing, and loads without a rewrite', async () => {
     const dir = await freshDir()
@@ -237,10 +240,23 @@ describe('excluded sessions', () => {
     expect((await loadConfig(await freshDir())).excludedSessions).toEqual([])
   })
 
-  it('keeps the non-empty strings of an array, each once, and drops anything else', async () => {
+  it('reads the entries, each session once, the first one kept', async () => {
     const dir = await freshDir()
-    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [ALPHA, 42, '', null, BETA, ALPHA, { id: BETA }] }))
-    expect((await loadConfig(dir)).excludedSessions).toEqual([ALPHA, BETA])
+    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [alpha, beta, { sessionId: ALPHA, whileRunning: true }] }))
+    expect((await loadConfig(dir)).excludedSessions).toEqual([alpha, beta])
+  })
+
+  it('reads a plain session id of an older file as excluded while idle, beside the entries', async () => {
+    const dir = await freshDir()
+    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [ALPHA, beta, ALPHA] }))
+    expect((await loadConfig(dir)).excludedSessions).toEqual([alpha, beta])
+  })
+
+  it('drops a malformed item and keeps the rest, and reads anything but an array as none', async () => {
+    const dir = await freshDir()
+    const malformed = [42, '', null, true, [ALPHA], { id: BETA }, { sessionId: GAMMA }, { sessionId: GAMMA, whileRunning: 'yes' }, { sessionId: '', whileRunning: false }, { sessionId: 7, whileRunning: false }]
+    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [...malformed, beta] }))
+    expect((await loadConfig(dir)).excludedSessions).toEqual([beta])
     for (const bad of [ALPHA, 42, null, { 0: ALPHA }, true]) {
       await writeFile(configPath(dir), JSON.stringify({ excludedSessions: bad }))
       expect((await loadConfig(dir)).excludedSessions).toEqual([])
@@ -258,29 +274,37 @@ describe('excluded sessions', () => {
   it('saveExcludedSessions changes only that key, and a later settings save keeps it', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', note: 'kézzel', skippedVersion: '0.2.0' }))
-    expect(await saveExcludedSessions(dir, [ALPHA, BETA])).toBe(true)
+    expect(await saveExcludedSessions(dir, [alpha, beta])).toBe(true)
     expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual({
       hotkey: 'F9',
       note: 'kézzel',
       skippedVersion: '0.2.0',
-      excludedSessions: [ALPHA, BETA],
+      excludedSessions: [alpha, beta],
     })
 
     // The setup window's save goes through `saveSettings`.
     expect(await saveSettings(dir, { jumpToTab: false }, ['jumpToTab'])).toBe(true)
-    expect((await loadConfig(dir)).excludedSessions).toEqual([ALPHA, BETA])
+    expect((await loadConfig(dir)).excludedSessions).toEqual([alpha, beta])
+  })
+
+  it('stores only the two fields of an entry, so what it stores loads back the same', async () => {
+    const dir = await freshDir()
+    const wider = { ...beta, extra: 'nem kell' }
+    expect(await saveExcludedSessions(dir, [alpha, wider])).toBe(true)
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toMatchObject({ excludedSessions: [alpha, beta] })
+    expect((await loadConfig(dir)).excludedSessions).toEqual([alpha, beta])
   })
 
   it('keeps the list of the last of two saves started without waiting', async () => {
     const dir = await freshDir()
-    await Promise.all([saveExcludedSessions(dir, [ALPHA, BETA]), saveExcludedSessions(dir, [BETA])])
-    expect((await loadConfig(dir)).excludedSessions).toEqual([BETA])
+    await Promise.all([saveExcludedSessions(dir, [alpha, beta]), saveExcludedSessions(dir, [beta])])
+    expect((await loadConfig(dir)).excludedSessions).toEqual([beta])
   })
 
   it('saveExcludedSessions never writes into a broken file and never throws', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), '{ broken')
-    expect(await saveExcludedSessions(dir, [ALPHA])).toBe(false)
+    expect(await saveExcludedSessions(dir, [alpha])).toBe(false)
     expect(await readFile(configPath(dir), 'utf8')).toBe('{ broken')
   })
 })

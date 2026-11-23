@@ -22,8 +22,9 @@ export const OVERLAY_CHANNELS = {
    */
   clearFinish: 'session:clear-finish',
   /**
-   * The sessions the user moved out of the list (main `excluded-sessions.ts`), as an array of
-   * session ids; the renderer reads it with a check (`readExcludedSessions`).
+   * The sessions the user moved out of the list and the ones that came back because they started
+   * running (main `excluded-sessions.ts`), as a `shared/excluded-sessions.ts` `ExcludedReply`; the
+   * renderer reads it with a check (`readExcludedSessions`).
    */
   excludedSessions: 'session:excluded',
   /**
@@ -32,6 +33,12 @@ export const OVERLAY_CHANNELS = {
    * pressed twice before the reply does the same thing twice. Answers like `excludedSessions`.
    */
   setExcluded: 'session:set-excluded',
+  /**
+   * Pushed by the main process whenever the excluded or the returned sessions change without a
+   * request of the overlay (a session that came back because it started running, a mark the first
+   * jump ended, a session gone), with the same reply as `excludedSessions`.
+   */
+  excludedChanged: 'session:excluded-changed',
   /**
    * The sessions in the auto-accept mode and their counts (main `auto-accept.ts`), as an array of
    * `AutoAcceptEntry`; the renderer reads it with a check (`readAutoAccept`).

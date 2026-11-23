@@ -81,7 +81,23 @@ export const EXCLUDED_TEXT = {
   tagTitle: 'Kizártad a listából, de amíg vár rád, itt marad. Delete: visszahozás.',
   /** The title of the tag on a row the search found in the group (`ListView.excludedMatches`). */
   matchTitle: 'Kizártad a listából, de a keresés megtalálja. Delete: visszahozás.',
+  /** The tag of a session that came back because it started running, until the first jump to it. */
+  returnedTag: 'kizárt, de fut',
+  returnedTitle: 'Kizártad, de elkezdett futni, ezért visszakerült a listába. Az első Enter után eltűnik ez a jelölés.',
+  /** The tag of a session excluded while running, wherever its row shows. */
+  whileRunningTag: 'futáskor se jön vissza',
+  whileRunningTitle: 'Futás közben zártad ki, ezért akkor sem jön vissza, ha újra elindul. Delete: visszahozás.',
 } as const
+
+/** The excluded sessions as the list reads them (`renderer/useExcludedSessions.ts` `readExcludedSessions`). */
+export interface ExclusionState {
+  /** The excluded session ids. */
+  excluded: ReadonlySet<string>
+  /** Those of them excluded while running (`whileRunning`), which stay out when they run again. */
+  whileRunning: ReadonlySet<string>
+  /** The sessions that came back because they started running, until the first jump to each. */
+  returned: ReadonlySet<string>
+}
 
 /**
  * The selection id of the excluded group's header. Not a session id: the registry's ids are UUIDs,
@@ -123,15 +139,26 @@ export interface RowTag {
 }
 
 /**
- * The tags a row carries for its exclusion, in their order: the `kizárt` tag on an excluded row that
- * stays in the list because something of it waits (`showsExcludedTag`), and on a row the search
- * found in the group, which shows dimmed among the matches; none in the open group, whose header
- * says it already.
+ * The tags a row carries for its exclusion, in their order. The `kizárt` tag on an excluded row
+ * that stays in the list because something of it waits (`showsExcludedTag`), and on a row the
+ * search found in the group, which shows dimmed among the matches; none in the open group, whose
+ * header says it already. After it, on a session excluded while running, the `futáskor se jön
+ * vissza` tag, wherever its row shows, so in the group alone. And on a session that came back
+ * because it started running (not excluded any more), the `kizárt, de fut` tag. A row without a
+ * session carries none.
  */
-export function exclusionTags(row: GroupableRow, place: RowPlace, excluded: ReadonlySet<string>): RowTag[] {
-  if (place === 'match') return [{ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle }]
-  if (place === 'list' && showsExcludedTag(row, excluded)) return [{ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle }]
-  return []
+export function exclusionTags(row: GroupableRow, place: RowPlace, exclusion: ExclusionState): RowTag[] {
+  if (row.session === undefined) return []
+  const tags: RowTag[] = []
+  if (place === 'match') tags.push({ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle })
+  else if (place === 'list' && showsExcludedTag(row, exclusion.excluded)) tags.push({ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle })
+  if (exclusion.excluded.has(row.sessionId) && exclusion.whileRunning.has(row.sessionId)) {
+    tags.push({ text: EXCLUDED_TEXT.whileRunningTag, title: EXCLUDED_TEXT.whileRunningTitle })
+  }
+  if (!exclusion.excluded.has(row.sessionId) && exclusion.returned.has(row.sessionId)) {
+    tags.push({ text: EXCLUDED_TEXT.returnedTag, title: EXCLUDED_TEXT.returnedTitle })
+  }
+  return tags
 }
 
 /** The rows the list shows above the excluded group, in their order: every row not in the group. */

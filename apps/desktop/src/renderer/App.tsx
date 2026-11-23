@@ -36,6 +36,7 @@ import {
   listView,
   selectionAfterChange,
   showsFinishMark,
+  type ExclusionState,
   type RowPlace,
 } from './list-cleanup.js'
 import { isPeekKey, PEEK_TEXT, peekRequest, peekScrollTop } from './peek.js'
@@ -106,7 +107,8 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * @param seenFinishes The finishes the user has seen (`useSeenFinishes`), for the ✓ marker's color.
  * @param trackSeen Takes the reply of a request that answers with the seen finishes (a cleared ✓), so
  * the list redraws at once (`useSeenFinishes`).
- * @param excluded The sessions moved out of the list (`useExcludedSessions`), for the excluded group.
+ * @param exclusion The sessions moved out of the list, and the ones that came back because they
+ * started running (`useExcludedSessions`), for the excluded group and the rows' tags.
  * @param trackExcluded Takes the reply of a Delete, which answers with the excluded sessions, and
  * calls `onApplied` with them in the same update (`useExcludedSessions`).
  * @param autoAccept The sessions in the auto-accept mode and their counts (`useAutoAccept`).
@@ -116,7 +118,7 @@ export function App({
   overlay,
   seenFinishes,
   trackSeen,
-  excluded,
+  exclusion,
   trackExcluded,
   autoAccept,
   trackAutoAccept,
@@ -124,12 +126,13 @@ export function App({
   overlay: OverlayState
   seenFinishes: SeenFinishes
   trackSeen: (reply: Promise<unknown>) => void
-  excluded: ReadonlySet<string>
-  trackExcluded: (reply: Promise<unknown>, onApplied: (excluded: ReadonlySet<string>) => void) => void
+  exclusion: ExclusionState
+  trackExcluded: (reply: Promise<unknown>, onApplied: (exclusion: ExclusionState) => void) => void
   autoAccept: ReadonlyMap<string, number>
   trackAutoAccept: (reply: Promise<unknown>) => void
 }): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
+  const excluded = exclusion.excluded
   // A session id, not an index: when the list reorders, the selection moves with the session.
   // See the selection.ts documentation.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -399,7 +402,7 @@ export function App({
   function setExcluded(sessionId: string, exclude: boolean): void {
     trackExcluded(window.claudeswitcher.setExcluded(sessionId, exclude), (next) => {
       const { allRows: rowsNow, ids: before, query: queryNow, groupOpen: openNow } = latest.current
-      const after = listView(rowsNow, next, queryNow, openNow).ids
+      const after = listView(rowsNow, next.excluded, queryNow, openNow).ids
       setSelectedId((current) => selectionAfterChange(before, after, current, sessionId))
     })
   }
@@ -597,7 +600,7 @@ export function App({
               {autoTagText(autoAllowed)}
             </span>
           )}
-          {exclusionTags(row, place, excluded).map((tag) => (
+          {exclusionTags(row, place, exclusion).map((tag) => (
             <span key={tag.text} className="excluded-tag" title={tag.title}>
               {tag.text}
             </span>

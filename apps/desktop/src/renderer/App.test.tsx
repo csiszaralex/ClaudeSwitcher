@@ -327,6 +327,44 @@ describe('the cleanup keys', () => {
     expect(header()?.textContent).toContain('▾')
   })
 
+  it('moves a session that came back because it started running into the list at the push, with its tag until the next push', async () => {
+    const { pushExcluded, settle } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
+    expect(rowNames()).toEqual(['alpha', 'beta'])
+
+    pushExcluded({ excluded: [], returned: [sessionId(3)] })
+    await settle()
+    expect(header()).toBeNull()
+    expect(rowNames()).toEqual(['alpha', 'beta', 'gamma'])
+    expect(row('gamma').classList.contains('excluded')).toBe(false)
+    expect(row('gamma').querySelector('.excluded-tag')?.textContent).toBe(EXCLUDED_TEXT.returnedTag)
+
+    // The first jump ends the mark in the main process, which pushes again.
+    pushExcluded({ excluded: [], returned: [] })
+    await settle()
+    expect(row('gamma').querySelector('.excluded-tag')).toBeNull()
+  })
+
+  it('tags a session excluded while running in the group alone, and beside the kizárt tag in the search', async () => {
+    const { user } = await renderOverlay({ sessions: LIST, excludedWhileRunning: [sessionId(3)] })
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+    const tags = (): string[] => [...row('gamma').querySelectorAll('.excluded-tag')].map((tag) => tag.textContent)
+    expect(tags()).toEqual([EXCLUDED_TEXT.whileRunningTag])
+
+    await user.keyboard('/gam')
+    expect(tags()).toEqual([EXCLUDED_TEXT.tag, EXCLUDED_TEXT.whileRunningTag])
+  })
+
+  it('excludes a working session as excluded while running: its row carries that tag in the group', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: [session(1, 'alpha'), session(2, 'beta', { status: 'working' })] })
+    // The working session is the first row.
+    expect(selectedName()).toBe('beta')
+    await user.keyboard('{Delete}')
+    expect(api.setExcluded.mock.calls).toEqual([[sessionId(2), true]])
+    await settle()
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(row('beta').querySelector('.excluded-tag')?.textContent).toBe(EXCLUDED_TEXT.whileRunningTag)
+  })
+
   it('keeps an excluded session with a pending request in the list, with the tag, out of the group', async () => {
     await renderOverlay({
       sessions: [session(1, 'alpha'), session(2, 'beta')],

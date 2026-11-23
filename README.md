@@ -152,7 +152,9 @@ Keys in the peek (the status bar shows **"Vissza: Szóköz vagy Esc · Ugrás: E
 
 An excluded session that waits for you is never hidden: while a request of it waits, or it waits at its own prompt, its row stays in the list as usual, with a small **"kizárt"** tag, and goes back into the group once nothing waits. Its requests notify and colour the tray as any session's. What excluding hides is its finish: no green in the tray, no **"végzett"** toast. The search still finds an excluded session: while the search is open the group's header does not show, and its rows that match follow the other matches, dimmed, with the **"kizárt"** tag. On such a row **Enter** jumps, **Space** peeks and **Delete** brings it back, as in the group; the row then stays selected among the matches.
 
-The excluded sessions are kept in `config.json` next to the settings (`excludedSessions`), so they survive a restart; the settings window does not show them, and saving it keeps them. A session that has been gone for ten minutes without a break, while the app sees other sessions, is dropped from the stored list.
+How a session comes back depends on when you excluded it. Excluded while it was idle, it comes back into the list by itself as soon as it starts running (it works, or it waits for you): its row carries a **"kizárt, de fut"** tag (excluded, but running) until you first jump to it from the list (Enter or a double click), or until the app restarts. Excluded while it was working or waiting, it stays out however often it runs again; its row carries a **"futáskor se jön vissza"** tag (does not come back when running) wherever it shows, in the group, in the search, and while it waits for you, there next to **"kizárt"**. Only **Delete** brings such a session back.
+
+The excluded sessions are kept in `config.json` next to the settings (`excludedSessions`, each with whether it was excluded while running), so they survive a restart; the settings window does not show them, and saving it keeps them. A session that has been gone for ten minutes without a break, while the app sees other sessions, is dropped from the stored list.
 
 ### Deciding a request
 

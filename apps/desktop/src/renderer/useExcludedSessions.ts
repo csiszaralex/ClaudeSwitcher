@@ -1,31 +1,51 @@
+import { isRecord } from '@claudeswitcher/core/browser'
+import { useEffect } from 'react'
+import { readExcludedEntries, readSessionIds } from '../shared/excluded-sessions.js'
+import type { ExclusionState } from './list-cleanup.js'
 import { useShownValue } from './useShownValue.js'
 
-/**
- * The excluded session ids from the IPC reply (`OVERLAY_CHANNELS.excludedSessions`, `setExcluded`):
- * an array of session ids. Never throws: an item that is not a non-empty string drops out, anything
- * else gives an empty set, so the worst case is an excluded session shown in the list.
- */
-export function readExcludedSessions(raw: unknown): ReadonlySet<string> {
-  if (!Array.isArray(raw)) return new Set()
-  return new Set((raw as unknown[]).filter((id): id is string => typeof id === 'string' && id !== ''))
-}
+const NONE_EXCLUDED: ExclusionState = { excluded: new Set(), whileRunning: new Set(), returned: new Set() }
 
-const NONE_EXCLUDED: ReadonlySet<string> = new Set()
+/**
+ * The excluded sessions from the IPC reply and the push (`OVERLAY_CHANNELS.excludedSessions`,
+ * `setExcluded`, `excludedChanged`): a `shared/excluded-sessions.ts` `ExcludedReply`. Never throws:
+ * an item that is not an entry or a session id drops out (`readExcludedEntries`, `readSessionIds`),
+ * and anything that is not such an object gives nothing excluded, so the worst case is an excluded
+ * session shown in the list.
+ */
+export function readExcludedSessions(raw: unknown): ExclusionState {
+  if (!isRecord(raw)) return NONE_EXCLUDED
+  const entries = readExcludedEntries(raw['excluded'])
+  return {
+    excluded: new Set(entries.map((entry) => entry.sessionId)),
+    whileRunning: new Set(entries.filter((entry) => entry.whileRunning).map((entry) => entry.sessionId)),
+    returned: new Set(readSessionIds(raw['returned'])),
+  }
+}
 
 function fetchExcludedSessions(): Promise<unknown> {
   return window.claudeswitcher.excludedSessions()
 }
 
 /**
- * The sessions the user moved out of the list, as the main process keeps them
- * (`main/excluded-sessions.ts`). Read when the page loads and on every `shown`; the reply of a
- * Delete (`setExcluded`) answers with the whole list, which App passes to the returned function, so
- * the row moves at once. The main process also drops the ids of gone sessions, between two `shown`s;
- * such an id has no row meanwhile anyway.
+ * The sessions the user moved out of the list, and the ones that came back because they started
+ * running, as the main process keeps them (`main/excluded-sessions.ts`). Read when the page loads
+ * and on every `shown`; the reply of a Delete (`setExcluded`) answers with the whole value, which
+ * App passes to the returned function, so the row moves at once; and every push of the main process
+ * (a session that came back, a mark the first jump ended, a session gone) goes through the same
+ * reply order (`useShownValue`), as `useAutoAccept`'s.
  */
 export function useExcludedSessions(): [
-  ReadonlySet<string>,
-  (reply: Promise<unknown>, onApplied?: (excluded: ReadonlySet<string>) => void) => void,
+  ExclusionState,
+  (reply: Promise<unknown>, onApplied?: (exclusion: ExclusionState) => void) => void,
 ] {
-  return useShownValue(fetchExcludedSessions, readExcludedSessions, NONE_EXCLUDED, 'the excluded sessions')
+  const [exclusion, track] = useShownValue(fetchExcludedSessions, readExcludedSessions, NONE_EXCLUDED, 'the excluded sessions')
+  useEffect(
+    () =>
+      window.claudeswitcher.onExcludedChanged((raw) => {
+        track(Promise.resolve(raw))
+      }),
+    [track],
+  )
+  return [exclusion, track]
 }

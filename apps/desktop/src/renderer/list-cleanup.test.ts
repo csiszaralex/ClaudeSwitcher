@@ -173,12 +173,52 @@ describe('the excluded group', () => {
     expect(listView(rows, new Set([B]), undefined, false).excludedMatches).toEqual([])
   })
 
-  it('tags an excluded row outside the open group: one that waits, and one the search found', () => {
-    const excluded = new Set([A])
-    expect(exclusionTags(row(A, 'alpha', { status: 'waiting' }), 'list', excluded)).toEqual([{ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle }])
-    expect(exclusionTags(row(A, 'alpha'), 'match', excluded)).toEqual([{ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle }])
-    expect(exclusionTags(row(A, 'alpha'), 'group', excluded)).toEqual([])
-    expect(exclusionTags(row(B, 'beta'), 'list', excluded)).toEqual([])
+  describe('the tags of a row', () => {
+    const none: ReadonlySet<string> = new Set()
+    const state = (excluded: string[], whileRunning: string[] = [], returned: string[] = []) => ({
+      excluded: new Set(excluded),
+      whileRunning: new Set(whileRunning),
+      returned: new Set(returned),
+    })
+    const KIZART = { text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle }
+    const FOUND = { text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle }
+    const STAYS_OUT = { text: EXCLUDED_TEXT.whileRunningTag, title: EXCLUDED_TEXT.whileRunningTitle }
+    const RETURNED = { text: EXCLUDED_TEXT.returnedTag, title: EXCLUDED_TEXT.returnedTitle }
+
+    it('tags an excluded row outside the open group: one that waits, and one the search found', () => {
+      const exclusion = state([A])
+      expect(exclusionTags(row(A, 'alpha', { status: 'waiting' }), 'list', exclusion)).toEqual([KIZART])
+      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion)).toEqual([FOUND])
+      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion)).toEqual([])
+      expect(exclusionTags(row(B, 'beta'), 'list', exclusion)).toEqual([])
+    })
+
+    it('adds the tag of a session excluded while running wherever it shows, in the group alone', () => {
+      const exclusion = state([A], [A])
+      expect(exclusionTags(row(A, 'alpha', { decisions: [{}] }), 'list', exclusion)).toEqual([KIZART, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion)).toEqual([FOUND, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion)).toEqual([STAYS_OUT])
+      // Only an excluded id counts: a stale flag without the exclusion tags nothing.
+      expect(exclusionTags(row(A, 'alpha'), 'list', { ...state([]), whileRunning: new Set([A]) })).toEqual([])
+    })
+
+    it('tags a session that came back because it started running, only while it is not excluded', () => {
+      expect(exclusionTags(row(A, 'alpha', { status: 'working' }), 'list', state([], [], [A]))).toEqual([RETURNED])
+      expect(exclusionTags(row(A, 'alpha'), 'group', state([A], [], [A]))).toEqual([])
+      expect(exclusionTags(row(B, 'beta'), 'list', state([], [], [A]))).toEqual([])
+    })
+
+    it('tags no row without a session', () => {
+      const orphan = row(A, 'alpha', { session: false, decisions: [{}] })
+      expect(exclusionTags(orphan, 'list', { excluded: new Set([A]), whileRunning: new Set([A]), returned: none })).toEqual([])
+      expect(exclusionTags(orphan, 'list', state([], [], [A]))).toEqual([])
+    })
+
+    it('keeps its texts free of an en or em dash', () => {
+      for (const text of Object.values(EXCLUDED_TEXT)) {
+        if (typeof text === 'string') expect(text).not.toMatch(/[–—]/)
+      }
+    })
   })
 
   it('names the header with the number of its rows', () => {
