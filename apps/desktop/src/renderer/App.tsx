@@ -28,21 +28,23 @@ import { armUntil, type KeyHistory } from './key-guard.js'
 import {
   EXCLUDED_GROUP_ID,
   EXCLUDED_TEXT,
+  exclusionTags,
   groupArrow,
   isClearFinishKey,
   isExcludeKey,
   keptRows,
   listView,
   selectionAfterChange,
-  showsExcludedTag,
   showsFinishMark,
+  type ExclusionState,
+  type RowPlace,
 } from './list-cleanup.js'
 import { isPeekKey, PEEK_TEXT, peekRequest, peekScrollTop } from './peek.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
 import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
-import { filterRows, isSearchChord, isSearchKey, SEARCH_KEYS_LABEL } from './session-search.js'
+import { isSearchChord, isSearchKey, SEARCH_KEYS_LABEL } from './session-search.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
 import { usageLimitStatusText } from './usage-limit.js'
@@ -105,7 +107,8 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * @param seenFinishes The finishes the user has seen (`useSeenFinishes`), for the ✓ marker's color.
  * @param trackSeen Takes the reply of a request that answers with the seen finishes (a cleared ✓), so
  * the list redraws at once (`useSeenFinishes`).
- * @param excluded The sessions moved out of the list (`useExcludedSessions`), for the excluded group.
+ * @param exclusion The sessions moved out of the list, and the ones that came back because they
+ * started running (`useExcludedSessions`), for the excluded group and the rows' tags.
  * @param trackExcluded Takes the reply of a Delete, which answers with the excluded sessions, and
  * calls `onApplied` with them in the same update (`useExcludedSessions`).
  * @param autoAccept The sessions in the auto-accept mode and their counts (`useAutoAccept`).
@@ -115,7 +118,7 @@ export function App({
   overlay,
   seenFinishes,
   trackSeen,
-  excluded,
+  exclusion,
   trackExcluded,
   autoAccept,
   trackAutoAccept,
@@ -123,12 +126,13 @@ export function App({
   overlay: OverlayState
   seenFinishes: SeenFinishes
   trackSeen: (reply: Promise<unknown>) => void
-  excluded: ReadonlySet<string>
-  trackExcluded: (reply: Promise<unknown>, onApplied: (excluded: ReadonlySet<string>) => void) => void
+  exclusion: ExclusionState
+  trackExcluded: (reply: Promise<unknown>, onApplied: (exclusion: ExclusionState) => void) => void
   autoAccept: ReadonlyMap<string, number>
   trackAutoAccept: (reply: Promise<unknown>) => void
 }): JSX.Element {
   const { sessions, connected, checkedAt, decisions } = overlay
+  const excluded = exclusion.excluded
   // A session id, not an index: when the list reorders, the selection moves with the session.
   // See the selection.ts documentation.
   const [selectedId, setSelectedId] = useState<string | undefined>()
@@ -152,8 +156,9 @@ export function App({
   // snapshot does not know yet, in the list's order (rows.ts).
   const allRows = buildRows(sessions, decisions, seenFinishes)
   // What the list shows (list-cleanup.ts `listView`): the rows not in the excluded group, or while
-  // the search is open its matches among them, in the same order; then the group's header and,
-  // while it is open, its rows. The selection and the stepping work on its items (`ids`).
+  // the search is open its matches among them and then its matches in the group, in the same order;
+  // then, while the search is closed, the group's header and, while it is open, its rows. The
+  // selection and the stepping work on its items (`ids`).
   const list = listView(allRows, excluded, query, groupOpen)
   const rows = list.rows
   const ids = list.ids
@@ -165,7 +170,7 @@ export function App({
   const selectedRowView =
     selectedItem === undefined || headerSelected
       ? undefined
-      : [...rows, ...list.group].find((row) => row.sessionId === selectedItem)
+      : [...rows, ...list.excludedMatches, ...list.group].find((row) => row.sessionId === selectedItem)
   // The peeked row, among all rows: the search does not hide it. Only a row with a session has a
   // conversation; a row that only holds requests opens nothing.
   const peekRow = peekId === undefined ? undefined : allRows.find((row) => row.sessionId === peekId && row.session !== undefined)
@@ -183,13 +188,14 @@ export function App({
   // The latest state for the async handlers (show, the step after a decision, the search's typing).
   // A closure from render time can go stale before the decision's reply or the show: the step has
   // to be computed on the freshest list, else it could jump to a session that has disappeared
-  // meanwhile. All rows above the excluded group, not only the search's matches: the search and the
-  // group close on show, and a row in the group waits for nothing (list-cleanup.ts
-  // `inExcludedGroup`). `allRows`, `ids`, `query` and `groupOpen` are for the selection after a
-  // Delete's reply (`setExcluded`).
-  const latest = useRef({ rows: keptRows(allRows, excluded), decisions, allRows, ids, query, groupOpen })
+  // meanwhile. `rows` holds all rows above the excluded group, not only the search's matches: the
+  // search and the group close on show, and a row in the group waits for nothing (list-cleanup.ts
+  // `inExcludedGroup`), so neither the show nor the step after a decision selects one. `allRows`,
+  // `excluded`, `ids`, `query` and `groupOpen` are for the search's first match (`onQuery`) and the
+  // selection after a Delete's reply (`setExcluded`).
+  const latest = useRef({ rows: keptRows(allRows, excluded), decisions, allRows, excluded, ids, query, groupOpen })
   useEffect(() => {
-    latest.current = { rows: keptRows(allRows, excluded), decisions, allRows, ids, query, groupOpen }
+    latest.current = { rows: keptRows(allRows, excluded), decisions, allRows, excluded, ids, query, groupOpen }
   })
 
   // For the guard on the panel's key letters (key-guard.ts): when the overlay appeared, and when
@@ -376,11 +382,15 @@ export function App({
     }
   }
 
-  /** Typing in the search: the list shows the matches, and the first match is selected. */
+  /**
+   * Typing in the search: the list shows the matches, and the first match is selected, an excluded
+   * one only when no other session matches (list-cleanup.ts `listView`).
+   */
   function onQuery(next: string): void {
     setQuery(next)
-    const first = filterRows(latest.current.rows, next)[0]
-    if (next.trim() !== '' && first !== undefined) setSelectedId(first.sessionId)
+    const { allRows: rowsNow, excluded: excludedNow } = latest.current
+    const first = listView(rowsNow, excludedNow, next, false).ids[0]
+    if (next.trim() !== '' && first !== undefined) setSelectedId(first)
   }
 
   /**
@@ -392,7 +402,7 @@ export function App({
   function setExcluded(sessionId: string, exclude: boolean): void {
     trackExcluded(window.claudeswitcher.setExcluded(sessionId, exclude), (next) => {
       const { allRows: rowsNow, ids: before, query: queryNow, groupOpen: openNow } = latest.current
-      const after = listView(rowsNow, next, queryNow, openNow).ids
+      const after = listView(rowsNow, next.excluded, queryNow, openNow).ids
       setSelectedId((current) => selectionAfterChange(before, after, current, sessionId))
     })
   }
@@ -531,11 +541,11 @@ export function App({
   })
 
   /**
-   * One row of the list: above the excluded group, or in it (`inGroup`, dimmed). A row above the
-   * group whose session is excluded, because something of it waits, carries the `kizárt` tag
-   * (list-cleanup.ts `showsExcludedTag`).
+   * One row of the list, at its `place`: above the excluded group, among the search's matches in the
+   * group, or in the open group. The last two are dimmed. The tags of its exclusion
+   * (list-cleanup.ts `exclusionTags`) follow its name.
    */
-  function renderRow(row: (typeof allRows)[number], inGroup: boolean): JSX.Element {
+  function renderRow(row: (typeof allRows)[number], place: RowPlace): JSX.Element {
     const pending = activeDecision(row.decisions)
     const marker = row.marker
     const badge = pendingBadge(row.decisions)
@@ -551,7 +561,7 @@ export function App({
       <li
         key={row.sessionId}
         ref={isSelected ? selectedRow : null}
-        className={`session ${row.status} ${inGroup ? 'excluded' : ''} ${isSelected ? 'selected' : ''} ${autoAllowed === undefined ? '' : 'auto-accept'}`}
+        className={`session ${row.status} ${place === 'list' ? '' : 'excluded'} ${isSelected ? 'selected' : ''} ${autoAllowed === undefined ? '' : 'auto-accept'}`}
         onClick={() => {
           setSelectedId(row.sessionId)
         }}
@@ -590,11 +600,11 @@ export function App({
               {autoTagText(autoAllowed)}
             </span>
           )}
-          {!inGroup && showsExcludedTag(row, excluded) && (
-            <span className="excluded-tag" title={EXCLUDED_TEXT.tagTitle}>
-              {EXCLUDED_TEXT.tag}
+          {exclusionTags(row, place, exclusion).map((tag) => (
+            <span key={tag.text} className="excluded-tag" title={tag.title}>
+              {tag.text}
             </span>
-          )}
+          ))}
         </span>
         <span
           className="summary"
@@ -667,14 +677,15 @@ export function App({
             </div>
           )}
           <ul className="sessions">
-            {rows.length === 0 && !list.groupShown && (
+            {rows.length === 0 && list.excludedMatches.length === 0 && !list.groupShown && (
               // "No session", "the daemon cannot be reached" and "the search finds none" are not the
               // same: the user has to see which one it is.
               <li className="empty">
                 {allRows.length > 0 ? 'Nincs találat' : connected ? 'Nincs futó session' : 'Nincs kapcsolat a daemonnal…'}
               </li>
             )}
-            {rows.map((row) => renderRow(row, false))}
+            {rows.map((row) => renderRow(row, 'list'))}
+            {list.excludedMatches.map((row) => renderRow(row, 'match'))}
             {list.groupShown && (
               <li
                 key={EXCLUDED_GROUP_ID}
@@ -690,7 +701,7 @@ export function App({
                 <span>{EXCLUDED_TEXT.group(list.group.length)}</span>
               </li>
             )}
-            {list.groupOpen && list.group.map((row) => renderRow(row, true))}
+            {list.groupOpen && list.group.map((row) => renderRow(row, 'group'))}
           </ul>
 
           {panel !== undefined && (

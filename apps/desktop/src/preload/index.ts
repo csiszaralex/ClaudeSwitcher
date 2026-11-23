@@ -6,7 +6,7 @@ import type { ClaudeSwitcherApi } from './api.js'
  * The implementation of `ClaudeSwitcherApi`. The request channels belong to the handlers the main
  * process registers on `ipcMain` (main `ipc-handle.ts` `createHandleFrom`), `overlay:shown` to the
  * main process's `webContents.send` call (main `overlay-window.ts` `createOverlay`), and the
- * auto-accept push to its `send` (main `index.ts`).
+ * excluded and the auto-accept pushes to its `send` (main `index.ts`).
  */
 const api: ClaudeSwitcherApi = {
   connection: () => ipcRenderer.invoke(OVERLAY_CHANNELS.connection),
@@ -15,6 +15,15 @@ const api: ClaudeSwitcherApi = {
   clearFinish: (sessionId) => ipcRenderer.invoke(OVERLAY_CHANNELS.clearFinish, sessionId),
   excludedSessions: () => ipcRenderer.invoke(OVERLAY_CHANNELS.excludedSessions),
   setExcluded: (sessionId, excluded) => ipcRenderer.invoke(OVERLAY_CHANNELS.setExcluded, sessionId, excluded),
+  onExcludedChanged: (callback) => {
+    const listener = (_event: unknown, raw: unknown): void => {
+      callback(raw)
+    }
+    ipcRenderer.on(OVERLAY_CHANNELS.excludedChanged, listener)
+    return () => {
+      ipcRenderer.removeListener(OVERLAY_CHANNELS.excludedChanged, listener)
+    }
+  },
   autoAccept: () => ipcRenderer.invoke(OVERLAY_CHANNELS.autoAccept),
   setAutoAccept: (sessionId, on) => ipcRenderer.invoke(OVERLAY_CHANNELS.setAutoAccept, sessionId, on),
   onAutoAcceptChanged: (callback) => {

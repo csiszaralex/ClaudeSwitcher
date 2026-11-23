@@ -3,6 +3,7 @@ import type { SessionStatus } from '@claudeswitcher/core'
 import {
   EXCLUDED_GROUP_ID,
   EXCLUDED_TEXT,
+  exclusionTags,
   groupArrow,
   inExcludedGroup,
   isClearFinishKey,
@@ -104,6 +105,7 @@ describe('the excluded group', () => {
   const B = '6f1c2a3e-0000-4000-8000-000000000082'
   const C = '6f1c2a3e-0000-4000-8000-000000000083'
   const D = '6f1c2a3e-0000-4000-8000-000000000084'
+  const E = '6f1c2a3e-0000-4000-8000-000000000085'
   const row = (sessionId: string, name: string, extra: { status?: SessionStatus; decisions?: unknown[]; session?: boolean } = {}) => ({
     sessionId,
     name,
@@ -153,12 +155,70 @@ describe('the excluded group', () => {
     expect(view.ids).toEqual([A, B])
   })
 
-  it('searches only the kept rows, and hides the group while the search is open', () => {
-    const rows = [row(A, 'alpha'), row(B, 'alpine'), row(C, 'altitude', { decisions: [{}] })]
-    const view = listView(rows, new Set([B, C]), 'al', true)
+  it('searches the kept rows first, then the rows of the group, and hides the header while the search is open', () => {
+    const rows = [row(D, 'alder'), row(A, 'alpha'), row(B, 'alpine'), row(C, 'altitude', { decisions: [{}] }), row(E, 'beta')]
+    const view = listView(rows, new Set([D, B, C]), 'al', true)
     expect(view.rows.map((r) => r.sessionId)).toEqual([A, C])
+    expect(view.excludedMatches.map((r) => r.sessionId)).toEqual([D, B])
     expect(view.groupShown).toBe(false)
-    expect(view.ids).toEqual([A, C])
+    expect(view.groupOpen).toBe(false)
+    expect(view.group).toEqual([])
+    expect(view.ids).toEqual([A, C, D, B])
+  })
+
+  it('lists only an excluded match when no other row matches, and none with the search closed', () => {
+    const rows = [row(A, 'alpha'), row(B, 'beta')]
+    expect(listView(rows, new Set([B]), 'bet', false).ids).toEqual([B])
+    expect(listView(rows, new Set([B]), 'zeta', false).ids).toEqual([])
+    expect(listView(rows, new Set([B]), undefined, false).excludedMatches).toEqual([])
+  })
+
+  describe('the tags of a row', () => {
+    const none: ReadonlySet<string> = new Set()
+    const state = (excluded: string[], whileRunning: string[] = [], returned: string[] = []) => ({
+      excluded: new Set(excluded),
+      whileRunning: new Set(whileRunning),
+      returned: new Set(returned),
+    })
+    const KIZART = { text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle }
+    const FOUND = { text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle }
+    const STAYS_OUT = { text: EXCLUDED_TEXT.whileRunningTag, title: EXCLUDED_TEXT.whileRunningTitle }
+    const RETURNED = { text: EXCLUDED_TEXT.returnedTag, title: EXCLUDED_TEXT.returnedTitle }
+
+    it('tags an excluded row outside the open group: one that waits, and one the search found', () => {
+      const exclusion = state([A])
+      expect(exclusionTags(row(A, 'alpha', { status: 'waiting' }), 'list', exclusion)).toEqual([KIZART])
+      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion)).toEqual([FOUND])
+      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion)).toEqual([])
+      expect(exclusionTags(row(B, 'beta'), 'list', exclusion)).toEqual([])
+    })
+
+    it('adds the tag of a session excluded while running wherever it shows, in the group alone', () => {
+      const exclusion = state([A], [A])
+      expect(exclusionTags(row(A, 'alpha', { decisions: [{}] }), 'list', exclusion)).toEqual([KIZART, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion)).toEqual([FOUND, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion)).toEqual([STAYS_OUT])
+      // Only an excluded id counts: a stale flag without the exclusion tags nothing.
+      expect(exclusionTags(row(A, 'alpha'), 'list', { ...state([]), whileRunning: new Set([A]) })).toEqual([])
+    })
+
+    it('tags a session that came back because it started running, only while it is not excluded', () => {
+      expect(exclusionTags(row(A, 'alpha', { status: 'working' }), 'list', state([], [], [A]))).toEqual([RETURNED])
+      expect(exclusionTags(row(A, 'alpha'), 'group', state([A], [], [A]))).toEqual([])
+      expect(exclusionTags(row(B, 'beta'), 'list', state([], [], [A]))).toEqual([])
+    })
+
+    it('tags no row without a session', () => {
+      const orphan = row(A, 'alpha', { session: false, decisions: [{}] })
+      expect(exclusionTags(orphan, 'list', { excluded: new Set([A]), whileRunning: new Set([A]), returned: none })).toEqual([])
+      expect(exclusionTags(orphan, 'list', state([], [], [A]))).toEqual([])
+    })
+
+    it('keeps its texts free of an en or em dash', () => {
+      for (const text of Object.values(EXCLUDED_TEXT)) {
+        if (typeof text === 'string') expect(text).not.toMatch(/[–—]/)
+      }
+    })
   })
 
   it('names the header with the number of its rows', () => {
@@ -205,6 +265,12 @@ describe('selectionAfterChange', () => {
   it('goes to the nearest one before when nothing after it is listed', () => {
     expect(selectionAfterChange(['a', 'b'], ['a'], 'b', 'b')).toBe('a')
     expect(selectionAfterChange(['a'], [], 'a', 'a')).toBeUndefined()
+  })
+
+  it('stays on a row Delete moved while the search is open: without a header it stays among the matches', () => {
+    // Brought back: from the excluded matches to the kept ones; excluded: the other way.
+    expect(selectionAfterChange(['a', 'x'], ['a', 'x'], 'x', 'x')).toBe('x')
+    expect(selectionAfterChange(['a', 'b', 'x'], ['a', 'x', 'b'], 'b', 'b')).toBe('b')
   })
 
   it('leaves a selection it does not know', () => {

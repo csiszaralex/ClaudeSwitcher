@@ -77,6 +77,36 @@ describe('the search', () => {
     expect(api.focusSession.mock.calls).toEqual([[sessionId(3)]])
   })
 
+  it('finds an excluded session after the others, dimmed and tagged, opens it on Enter, and brings it back on Delete', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: [...LIST, session(4, 'gamma-2')], excluded: [sessionId(3)] })
+    await user.keyboard('/gam')
+    expect(rowNames()).toEqual(['gamma-2', 'gamma'])
+    expect(header()).toBeNull()
+    expect(selectedName()).toBe('gamma-2')
+    expect(row('gamma').classList.contains('excluded')).toBe(true)
+    expect(row('gamma').querySelector('.excluded-tag')?.textContent).toBe(EXCLUDED_TEXT.tag)
+    expect(row('gamma-2').querySelector('.excluded-tag')).toBeNull()
+
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(3)]])
+
+    // A click takes the cursor out of the field, so Delete is the list's key again.
+    await user.click(row('gamma'))
+    await user.keyboard('{Delete}')
+    expect(api.setExcluded.mock.calls).toEqual([[sessionId(3), false]])
+    await settle()
+    expect(rowNames()).toEqual(['gamma', 'gamma-2'])
+    expect(row('gamma').classList.contains('excluded')).toBe(false)
+    expect(selectedName()).toBe('gamma')
+  })
+
+  it('selects an excluded match when it is the only one', async () => {
+    const { user } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
+    await user.keyboard('/gam')
+    expect(rowNames()).toEqual(['gamma'])
+    expect(selectedName()).toBe('gamma')
+  })
+
   it('opens on Ctrl+K with the field focused', async () => {
     const { user } = await renderOverlay({ sessions: LIST })
     await user.keyboard('{Control>}k{/Control}')
@@ -295,6 +325,44 @@ describe('the cleanup keys', () => {
     await user.keyboard('{ArrowLeft>4/}')
     expect(header()?.classList.contains('selected')).toBe(true)
     expect(header()?.textContent).toContain('▾')
+  })
+
+  it('moves a session that came back because it started running into the list at the push, with its tag until the next push', async () => {
+    const { pushExcluded, settle } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
+    expect(rowNames()).toEqual(['alpha', 'beta'])
+
+    pushExcluded({ excluded: [], returned: [sessionId(3)] })
+    await settle()
+    expect(header()).toBeNull()
+    expect(rowNames()).toEqual(['alpha', 'beta', 'gamma'])
+    expect(row('gamma').classList.contains('excluded')).toBe(false)
+    expect(row('gamma').querySelector('.excluded-tag')?.textContent).toBe(EXCLUDED_TEXT.returnedTag)
+
+    // The first jump ends the mark in the main process, which pushes again.
+    pushExcluded({ excluded: [], returned: [] })
+    await settle()
+    expect(row('gamma').querySelector('.excluded-tag')).toBeNull()
+  })
+
+  it('tags a session excluded while running in the group alone, and beside the kizárt tag in the search', async () => {
+    const { user } = await renderOverlay({ sessions: LIST, excludedWhileRunning: [sessionId(3)] })
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
+    const tags = (): string[] => [...row('gamma').querySelectorAll('.excluded-tag')].map((tag) => tag.textContent)
+    expect(tags()).toEqual([EXCLUDED_TEXT.whileRunningTag])
+
+    await user.keyboard('/gam')
+    expect(tags()).toEqual([EXCLUDED_TEXT.tag, EXCLUDED_TEXT.whileRunningTag])
+  })
+
+  it('excludes a working session as excluded while running: its row carries that tag in the group', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: [session(1, 'alpha'), session(2, 'beta', { status: 'working' })] })
+    // The working session is the first row.
+    expect(selectedName()).toBe('beta')
+    await user.keyboard('{Delete}')
+    expect(api.setExcluded.mock.calls).toEqual([[sessionId(2), true]])
+    await settle()
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(row('beta').querySelector('.excluded-tag')?.textContent).toBe(EXCLUDED_TEXT.whileRunningTag)
   })
 
   it('keeps an excluded session with a pending request in the list, with the tag, out of the group', async () => {

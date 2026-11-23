@@ -110,7 +110,7 @@ body {
   font-weight: 400;
   cursor: default;
 }
-/* The tag of an excluded session's row that shows in the list while something of it waits (list-cleanup.ts `showsExcludedTag`). */
+/* The tags of a row's exclusion, such as `kizárt` (list-cleanup.ts `exclusionTags`). */
 .excluded-tag {
   flex: none;
   margin-left: 4px;

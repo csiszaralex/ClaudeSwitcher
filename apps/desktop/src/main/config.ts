@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isNotFoundError, isRecord, transformSettingsFile } from '@claudeswitcher/core'
+import { readExcludedEntries, type ExcludedEntry } from '../shared/excluded-sessions.js'
 import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isHotkeyValue, isSettingKey } from '../shared/settings.js'
 import type { SettingKey, SettingValues } from '../shared/settings.js'
 
@@ -19,11 +20,12 @@ export interface StoredConfig {
   skippedVersion: string | undefined
   /**
    * The sessions the user moved out of the list (`saveExcludedSessions`, `main/excluded-sessions.ts`),
-   * by session id. Not a setting either, the same way as `skippedVersion`. An older file without it,
-   * or a value that is not an array, excludes nothing; an item that is not a non-empty string drops
-   * out.
+   * as `shared/excluded-sessions.ts` `ExcludedEntry` items. Not a setting either, the same way as
+   * `skippedVersion`. An older file without it, or a value that is not an array, excludes nothing;
+   * an older file's plain session id reads as `whileRunning: false`, and any other item that is not
+   * an entry drops out (`readExcludedEntries`).
    */
-  excludedSessions: readonly string[]
+  excludedSessions: readonly ExcludedEntry[]
 }
 
 const DEFAULT_VALUES: StoredValues = {
@@ -45,12 +47,6 @@ const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?
 /** The stored skipped version, or `undefined` if it is missing or not a version string. */
 function versionOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' && VERSION_PATTERN.test(value) ? value : undefined
-}
-
-/** The stored excluded session ids: the non-empty strings of an array, each once; anything else gives none. */
-function sessionIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return [...new Set((value as unknown[]).filter((id): id is string => typeof id === 'string' && id !== ''))]
 }
 
 /** The value of a boolean key, or its default if it is missing or not a boolean. */
@@ -165,7 +161,7 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
       },
       confirmed: confirmedKeys(confirmed),
       skippedVersion: versionOrUndefined(skippedVersion),
-      excludedSessions: sessionIds(excludedSessions),
+      excludedSessions: readExcludedEntries(excludedSessions),
     }
   }
 
@@ -232,9 +228,11 @@ export async function saveSkippedVersion(dir: string, version: string): Promise<
  * file is not written to, and the calls queue per file, so the last call's list is the one that
  * stays. Never throws; true if it was written.
  */
-export async function saveExcludedSessions(dir: string, ids: readonly string[]): Promise<boolean> {
+export async function saveExcludedSessions(dir: string, entries: readonly ExcludedEntry[]): Promise<boolean> {
+  // Only the entry's two fields, so the file holds exactly the shape `readExcludedEntries` reads.
+  const stored = entries.map(({ sessionId, whileRunning }) => ({ sessionId, whileRunning }))
   try {
-    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), excludedSessions: [...ids] }))
+    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), excludedSessions: stored }))
     return true
   } catch (error) {
     console.error('[claudeswitcher] could not save the excluded sessions; not overwriting the config file', error)

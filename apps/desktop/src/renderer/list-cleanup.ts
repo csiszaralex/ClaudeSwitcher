@@ -76,10 +76,28 @@ export const EXCLUDED_TEXT = {
   /** The group's header, with the number of its rows. */
   group: (count: number): string => `Kizárt (${String(count)})`,
   groupTitle: 'Enter: kinyitás vagy becsukás. Egy kizárt soron a Delete visszahozza a sessiont.',
-  /** The tag of an excluded session's row that shows in the list while something waits. */
+  /** The tag of an excluded session's row outside the group: one that waits, or one the search found. */
   tag: 'kizárt',
   tagTitle: 'Kizártad a listából, de amíg vár rád, itt marad. Delete: visszahozás.',
+  /** The title of the tag on a row the search found in the group (`ListView.excludedMatches`). */
+  matchTitle: 'Kizártad a listából, de a keresés megtalálja. Delete: visszahozás.',
+  /** The tag of a session that came back because it started running, until the first jump to it. */
+  returnedTag: 'kizárt, de fut',
+  returnedTitle: 'Kizártad, de elkezdett futni, ezért visszakerült a listába. Az első Enter után eltűnik ez a jelölés.',
+  /** The tag of a session excluded while running, wherever its row shows. */
+  whileRunningTag: 'futáskor se jön vissza',
+  whileRunningTitle: 'Futás közben zártad ki, ezért akkor sem jön vissza, ha újra elindul. Delete: visszahozás.',
 } as const
+
+/** The excluded sessions as the list reads them (`renderer/useExcludedSessions.ts` `readExcludedSessions`). */
+export interface ExclusionState {
+  /** The excluded session ids. */
+  excluded: ReadonlySet<string>
+  /** Those of them excluded while running (`whileRunning`), which stay out when they run again. */
+  whileRunning: ReadonlySet<string>
+  /** The sessions that came back because they started running, until the first jump to each. */
+  returned: ReadonlySet<string>
+}
 
 /**
  * The selection id of the excluded group's header. Not a session id: the registry's ids are UUIDs,
@@ -111,6 +129,38 @@ export function showsExcludedTag(row: GroupableRow, excluded: ReadonlySet<string
   return row.session !== undefined && excluded.has(row.sessionId) && !inExcludedGroup(row, excluded)
 }
 
+/** Where a row shows (`listView`): above the group, among the search's matches in the group, or in the open group. */
+export type RowPlace = 'list' | 'match' | 'group'
+
+/** A small tag after a row's name, with its tooltip. */
+export interface RowTag {
+  text: string
+  title: string
+}
+
+/**
+ * The tags a row carries for its exclusion, in their order. The `kizárt` tag on an excluded row
+ * that stays in the list because something of it waits (`showsExcludedTag`), and on a row the
+ * search found in the group, which shows dimmed among the matches; none in the open group, whose
+ * header says it already. After it, on a session excluded while running, the `futáskor se jön
+ * vissza` tag, wherever its row shows, so in the group alone. And on a session that came back
+ * because it started running (not excluded any more), the `kizárt, de fut` tag. A row without a
+ * session carries none.
+ */
+export function exclusionTags(row: GroupableRow, place: RowPlace, exclusion: ExclusionState): RowTag[] {
+  if (row.session === undefined) return []
+  const tags: RowTag[] = []
+  if (place === 'match') tags.push({ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle })
+  else if (place === 'list' && showsExcludedTag(row, exclusion.excluded)) tags.push({ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle })
+  if (exclusion.excluded.has(row.sessionId) && exclusion.whileRunning.has(row.sessionId)) {
+    tags.push({ text: EXCLUDED_TEXT.whileRunningTag, title: EXCLUDED_TEXT.whileRunningTitle })
+  }
+  if (!exclusion.excluded.has(row.sessionId) && exclusion.returned.has(row.sessionId)) {
+    tags.push({ text: EXCLUDED_TEXT.returnedTag, title: EXCLUDED_TEXT.returnedTitle })
+  }
+  return tags
+}
+
 /** The rows the list shows above the excluded group, in their order: every row not in the group. */
 export function keptRows<R extends GroupableRow>(rows: readonly R[], excluded: ReadonlySet<string>): R[] {
   return rows.filter((row) => !inExcludedGroup(row, excluded))
@@ -120,6 +170,11 @@ export function keptRows<R extends GroupableRow>(rows: readonly R[], excluded: R
 export interface ListView<R> {
   /** The rows above the group (`keptRows`), or while the search is open, its matches among them. */
   rows: R[]
+  /**
+   * While the search is open, its matches among the excluded group's rows, in the list's order,
+   * after `rows`; empty while it is closed.
+   */
+  excludedMatches: R[]
   /** The excluded group's rows, in the list's order; empty while the group's header does not show. */
   group: R[]
   /** Whether the group's header shows: it has rows, and the search is closed. */
@@ -127,18 +182,19 @@ export interface ListView<R> {
   /** Whether the group's rows show under the header. */
   groupOpen: boolean
   /**
-   * The selectable items in order (`selection.ts` works on them): the rows, the header
-   * (`EXCLUDED_GROUP_ID`), then the group's rows while it is open.
+   * The selectable items in order (`selection.ts` works on them): the rows, the search's matches
+   * in the group, the header (`EXCLUDED_GROUP_ID`), then the group's rows while it is open.
    */
   ids: string[]
 }
 
 /**
  * The list from all rows (`rows.ts` `buildRows`), the excluded session ids, the search's query
- * (`undefined` while it is closed) and whether the group is open. The search finds only the rows
- * above the group, the tagged ones included, and the group does not show while it is open: an
- * excluded session is out of the way on purpose, and Enter in the search must open what the user
- * sees.
+ * (`undefined` while it is closed) and whether the group is open. The search finds the rows above
+ * the group first, the tagged ones included, then the group's rows (`excludedMatches`, which App
+ * dims and tags), so the first match, the one the search selects and Enter opens, is a session
+ * that is not excluded whenever one matches. The group's header does not show while the search is
+ * open: its matches are among the search's rows already.
  */
 export function listView<R extends GroupableRow>(
   allRows: readonly R[],
@@ -147,16 +203,18 @@ export function listView<R extends GroupableRow>(
   open: boolean,
 ): ListView<R> {
   const kept = keptRows(allRows, excluded)
-  const rows = query === undefined ? kept : filterRows(kept, query)
   const inGroup = allRows.filter((row) => inExcludedGroup(row, excluded))
+  const rows = query === undefined ? kept : filterRows(kept, query)
+  const excludedMatches = query === undefined ? [] : filterRows(inGroup, query)
   const groupShown = query === undefined && inGroup.length > 0
   const groupOpen = groupShown && open
   const ids = [
     ...rows.map((row) => row.sessionId),
+    ...excludedMatches.map((row) => row.sessionId),
     ...(groupShown ? [EXCLUDED_GROUP_ID] : []),
     ...(groupOpen ? inGroup.map((row) => row.sessionId) : []),
   ]
-  return { rows, group: groupShown ? inGroup : [], groupShown, groupOpen, ids }
+  return { rows, excludedMatches, group: groupShown ? inGroup : [], groupShown, groupOpen, ids }
 }
 
 /** Where an item is among the list's items (`ListView.ids`): above the group's header, in the group, or not listed. */
@@ -177,7 +235,10 @@ function sideOf(ids: readonly string[], id: string): 'list' | 'group' | 'gone' {
  * the last row it is on the group's header when the group was there already (where a second Delete
  * does nothing), else, on the first exclusion, which only now adds the header, on the row above.
  * Never on a row the user did not see selected, and a second Delete does not undo the first, except
- * on a row that stays in place (a waiting one, whose tag shows the change).
+ * on a row that stays in place (a waiting one, whose tag shows the change). While the search is open
+ * there is no header, so a row moved by Delete stays among the matches, on the same side, and keeps
+ * the selection: it only changes between the kept matches and the excluded ones, and its look and
+ * tag show the change.
  */
 export function selectionAfterChange(
   before: readonly string[],
