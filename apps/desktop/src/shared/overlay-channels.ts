@@ -22,9 +22,10 @@ export const OVERLAY_CHANNELS = {
    */
   clearFinish: 'session:clear-finish',
   /**
-   * The sessions the user moved out of the list and the ones that came back because they started
-   * running (main `excluded-sessions.ts`), as a `shared/excluded-sessions.ts` `ExcludedReply`; the
-   * renderer reads it with a check (`readExcludedSessions`).
+   * The sessions the user moved out of the list, the ones that came back because they started
+   * running or because their time passed, and the weekly reset (main `excluded-sessions.ts`), as a
+   * `shared/excluded-sessions.ts` `ExcludedReply`; the renderer reads it with a check
+   * (`readExcludedSessions`).
    */
   excludedSessions: 'session:excluded',
   /**
@@ -34,9 +35,22 @@ export const OVERLAY_CHANNELS = {
    */
   setExcluded: 'session:set-excluded',
   /**
-   * Pushed by the main process whenever the excluded or the returned sessions change without a
-   * request of the overlay (a session that came back because it started running, a mark the first
-   * jump ended, a session gone), with the same reply as `excludedSessions`.
+   * Excludes a session until a time, or sets a new time for an excluded one (Shift+Delete on its
+   * row, then the time bar). The arguments are the session id and the time (epoch ms), which the
+   * main process refuses unless it is a finite number in the future (`excludeUntil`). Answers like
+   * `excludedSessions`.
+   */
+  setExcludedUntil: 'session:set-excluded-until',
+  /**
+   * Ends the due mark of a session whose exclusion time passed (Backspace on its row); the argument
+   * is the session id. Answers like `excludedSessions`.
+   */
+  clearDue: 'session:clear-due',
+  /**
+   * Pushed by the main process whenever the excluded, the returned or the due sessions change
+   * without a request of the overlay (a session that came back because it started running or
+   * because its time passed, a mark the first jump ended, a session gone), with the same reply as
+   * `excludedSessions`.
    */
   excludedChanged: 'session:excluded-changed',
   /**

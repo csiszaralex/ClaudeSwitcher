@@ -274,12 +274,13 @@ describe('excluded sessions', () => {
   it('saveExcludedSessions changes only that key, and a later settings save keeps it', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', note: 'kézzel', skippedVersion: '0.2.0' }))
-    expect(await saveExcludedSessions(dir, [alpha, beta])).toBe(true)
+    expect(await saveExcludedSessions(dir, { excluded: [alpha, beta], due: [] })).toBe(true)
     expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toEqual({
       hotkey: 'F9',
       note: 'kézzel',
       skippedVersion: '0.2.0',
       excludedSessions: [alpha, beta],
+      dueSessions: [],
     })
 
     // The setup window's save goes through `saveSettings`.
@@ -290,21 +291,21 @@ describe('excluded sessions', () => {
   it('stores only the two fields of an entry, so what it stores loads back the same', async () => {
     const dir = await freshDir()
     const wider = { ...beta, extra: 'nem kell' }
-    expect(await saveExcludedSessions(dir, [alpha, wider])).toBe(true)
+    expect(await saveExcludedSessions(dir, { excluded: [alpha, wider], due: [] })).toBe(true)
     expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toMatchObject({ excludedSessions: [alpha, beta] })
     expect((await loadConfig(dir)).excludedSessions).toEqual([alpha, beta])
   })
 
   it('keeps the list of the last of two saves started without waiting', async () => {
     const dir = await freshDir()
-    await Promise.all([saveExcludedSessions(dir, [alpha, beta]), saveExcludedSessions(dir, [beta])])
+    await Promise.all([saveExcludedSessions(dir, { excluded: [alpha, beta], due: [] }), saveExcludedSessions(dir, { excluded: [beta], due: [] })])
     expect((await loadConfig(dir)).excludedSessions).toEqual([beta])
   })
 
   it('saveExcludedSessions never writes into a broken file and never throws', async () => {
     const dir = await freshDir()
     await writeFile(configPath(dir), '{ broken')
-    expect(await saveExcludedSessions(dir, [alpha])).toBe(false)
+    expect(await saveExcludedSessions(dir, { excluded: [alpha], due: [] })).toBe(false)
     expect(await readFile(configPath(dir), 'utf8')).toBe('{ broken')
   })
 })
@@ -409,5 +410,105 @@ describe('saveSettings', () => {
     await expect(saveSettings(dir, { jumpToTab: false }, [])).resolves.toBe(false)
     await expect(loadValues(dir)).resolves.toEqual(DEFAULTS)
     expect(await readdir(dir)).toEqual(['config.json'])
+  })
+})
+
+describe('timed exclusions, due marks and the weekly reset', () => {
+  // Invented session ids in the registry's UUID shape, and an invented time.
+  const ALPHA = '6f1c2a3e-0000-4000-8000-000000000054'
+  const BETA = '6f1c2a3e-0000-4000-8000-000000000055'
+  const T = Date.parse('2026-11-26T07:00:00.000Z')
+
+  it('reads an entry with a time, and a v0.26.0 entry without one as an exclusion without a time', async () => {
+    const dir = await freshDir()
+    const timed = { sessionId: ALPHA, whileRunning: true, until: T }
+    const plain = { sessionId: BETA, whileRunning: false }
+    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [timed, plain] }))
+    expect((await loadConfig(dir)).excludedSessions).toEqual([timed, plain])
+  })
+
+  it('drops an entry whose time is there but not a finite number, so a misread time hides nothing', async () => {
+    const dir = await freshDir()
+    const plain = { sessionId: BETA, whileRunning: false }
+    const bad = ['2026-11-26', null, true, { at: T }].map((until) => ({ sessionId: ALPHA, whileRunning: false, until }))
+    await writeFile(configPath(dir), JSON.stringify({ excludedSessions: [...bad, plain] }))
+    expect((await loadConfig(dir)).excludedSessions).toEqual([plain])
+  })
+
+  it('reads the due marks, each session once, and drops a malformed one', async () => {
+    const dir = await freshDir()
+    const mark = { sessionId: ALPHA, until: T }
+    const malformed = [ALPHA, { sessionId: BETA }, { sessionId: BETA, until: 'holnap' }, { sessionId: '', until: T }, null]
+    await writeFile(configPath(dir), JSON.stringify({ dueSessions: [...malformed, mark, { sessionId: ALPHA, until: T + 1 }] }))
+    expect((await loadConfig(dir)).dueSessions).toEqual([mark])
+    await writeFile(configPath(dir), JSON.stringify({ dueSessions: mark }))
+    expect((await loadConfig(dir)).dueSessions).toEqual([])
+  })
+
+  it('an older config without the new keys has no due marks and no weekly reset, and loads without a rewrite', async () => {
+    const dir = await freshDir()
+    const older = JSON.stringify({ hotkey: 'F9', excludedSessions: [{ sessionId: ALPHA, whileRunning: false }] })
+    await writeFile(configPath(dir), older)
+    const config = await loadConfig(dir)
+    expect(config.dueSessions).toEqual([])
+    expect(config.weeklyReset).toBeUndefined()
+    expect(await readFile(configPath(dir), 'utf8')).toBe(older)
+  })
+
+  it('stores the time and the due marks in one write, and what it stores loads back the same', async () => {
+    const dir = await freshDir()
+    const timed = { sessionId: ALPHA, whileRunning: false, until: T }
+    const mark = { sessionId: BETA, until: T - 60_000 }
+    const wider = { ...mark, extra: 'nem kell' }
+    expect(await saveExcludedSessions(dir, { excluded: [timed], due: [wider] })).toBe(true)
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toMatchObject({ excludedSessions: [timed], dueSessions: [mark] })
+    const config = await loadConfig(dir)
+    expect(config.excludedSessions).toEqual([timed])
+    expect(config.dueSessions).toEqual([mark])
+  })
+
+  it('reads the weekly reset the user wrote, with Sunday as 0 or 7', async () => {
+    const dir = await freshDir()
+    for (const [stored, read] of [
+      [{ weekday: 4, time: '07:00' }, { weekday: 4, hour: 7, minute: 0 }],
+      [{ weekday: 1, time: '9:30' }, { weekday: 1, hour: 9, minute: 30 }],
+      [{ weekday: 7, time: '23:59' }, { weekday: 0, hour: 23, minute: 59 }],
+      [{ weekday: 0, time: '00:00' }, { weekday: 0, hour: 0, minute: 0 }],
+    ] as const) {
+      await writeFile(configPath(dir), JSON.stringify({ weeklyReset: stored }))
+      expect((await loadConfig(dir)).weeklyReset).toEqual(read)
+    }
+  })
+
+  it('reads a malformed weekly reset as not set', async () => {
+    const dir = await freshDir()
+    const bad = [
+      'csütörtök 7:00',
+      4,
+      { weekday: 4 },
+      { time: '07:00' },
+      { weekday: 8, time: '07:00' },
+      { weekday: -1, time: '07:00' },
+      { weekday: 4.5, time: '07:00' },
+      { weekday: '4', time: '07:00' },
+      { weekday: 4, time: '24:00' },
+      { weekday: 4, time: '7:60' },
+      { weekday: 4, time: '7' },
+      { weekday: 4, time: 700 },
+    ]
+    for (const weeklyReset of bad) {
+      await writeFile(configPath(dir), JSON.stringify({ weeklyReset }))
+      expect((await loadConfig(dir)).weeklyReset).toBeUndefined()
+    }
+  })
+
+  it('keeps the weekly reset through a settings save and a save of the excluded sessions', async () => {
+    const dir = await freshDir()
+    const weeklyReset = { weekday: 4, time: '07:00' }
+    await writeFile(configPath(dir), JSON.stringify({ hotkey: 'F9', weeklyReset }))
+    expect(await saveSettings(dir, { jumpToTab: false }, ['jumpToTab'])).toBe(true)
+    expect(await saveExcludedSessions(dir, { excluded: [], due: [{ sessionId: ALPHA, until: T }] })).toBe(true)
+    expect(JSON.parse(await readFile(configPath(dir), 'utf8'))).toMatchObject({ weeklyReset })
+    expect((await loadConfig(dir)).weeklyReset).toEqual({ weekday: 4, hour: 7, minute: 0 })
   })
 })

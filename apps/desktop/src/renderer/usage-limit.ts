@@ -1,20 +1,15 @@
 import type { SessionStatus, UsageLimit } from '@claudeswitcher/core'
 import { isRecord, USAGE_LIMIT_KIND } from '@claudeswitcher/core/browser'
+import { WEEKDAY_NAMES } from '../shared/hungarian-text.js'
 
 /**
- * The Hungarian weekday names, keyed by the `en-US` short weekday `Intl.DateTimeFormat` gives. The
- * names come from this table, not from the `hu` locale, so the text does not depend on which locale
- * data the runtime carries.
+ * The Hungarian weekday names (`shared/hungarian-text.ts` `WEEKDAY_NAMES`), keyed by the `en-US`
+ * short weekday `Intl.DateTimeFormat` gives. The names come from that table, not from the `hu`
+ * locale, so the text does not depend on which locale data the runtime carries.
  */
-const WEEKDAYS: Readonly<Record<string, string>> = {
-  Mon: 'hétfő',
-  Tue: 'kedd',
-  Wed: 'szerda',
-  Thu: 'csütörtök',
-  Fri: 'péntek',
-  Sat: 'szombat',
-  Sun: 'vasárnap',
-}
+const WEEKDAYS: Readonly<Record<string, string | undefined>> = Object.fromEntries(
+  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((short, day) => [short, WEEKDAY_NAMES[day]]),
+)
 
 interface Clock {
   /** `H:mm`, the Hungarian way: the hour without a leading zero (`1:05`, `22:20`). */

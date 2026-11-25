@@ -1,10 +1,14 @@
 import type { SessionStatus } from '@claudeswitcher/core'
+import type { WeeklyReset } from '../shared/excluded-sessions.js'
 import type { MarkerTone } from './session-marker.js'
 import { filterRows, type SearchableRow } from './session-search.js'
+import { untilClock } from './until-time.js'
 
 /**
- * The list's cleanup keys: Backspace clears a finish's ✓, Delete moves a session out of the list
- * into the excluded group at its bottom, or brings it back. Pure; App owns the keys (in its window
+ * The list's cleanup keys: Backspace clears a finish's ✓ and the due mark of a session back from a
+ * timed exclusion, Delete moves a session out of the list into the excluded group at its bottom, or
+ * brings it back, and Shift+Delete opens the bar that excludes it until a time (`UntilBar.tsx`).
+ * Pure; App owns the keys (in its window
  * handler `onKey`, outside every text field, so both keys still edit the search field and a deny
  * reason, and not in the peek), the group's open state (closed on every `shown`), and sends the
  * changes to the main process, which checks them against the daemon's state.
@@ -26,8 +30,18 @@ function isPlain(event: KeyLike, key: string): boolean {
 }
 
 /**
- * The key that clears the selected row's ✓: a plain Backspace (`isPlain`). No letter: the decision
- * panel's buttons are letters (`decision-actions.ts` `ACTION_BUTTONS`).
+ * The key that opens the time bar under the selected row (`UntilBar.tsx`), to exclude its session
+ * until a time, or to give an excluded one a new time: Shift+Delete, no Ctrl, Alt or Meta, not held.
+ * It never excludes by itself: only a time the bar confirms does.
+ */
+export function isTimedExcludeKey(event: KeyLike): boolean {
+  return event.key === 'Delete' && event.shiftKey && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey
+}
+
+/**
+ * The key that clears the selected row's ✓ and its due mark (`dueMarkOf`): a plain Backspace
+ * (`isPlain`). No letter: the decision panel's buttons are letters (`decision-actions.ts`
+ * `ACTION_BUTTONS`).
  */
 export function isClearFinishKey(event: KeyLike): boolean {
   return isPlain(event, 'Backspace')
@@ -75,7 +89,7 @@ export function groupArrow(event: KeyLike, place: 'header' | 'group-row' | 'othe
 export const EXCLUDED_TEXT = {
   /** The group's header, with the number of its rows. */
   group: (count: number): string => `Kizárt (${String(count)})`,
-  groupTitle: 'Enter: kinyitás vagy becsukás. Egy kizárt soron a Delete visszahozza a sessiont.',
+  groupTitle: 'Enter: kinyitás vagy becsukás. Egy kizárt soron a Delete visszahozza a sessiont, a Shift+Delete új időpontot ad neki.',
   /** The tag of an excluded session's row outside the group: one that waits, or one the search found. */
   tag: 'kizárt',
   tagTitle: 'Kizártad a listából, de amíg vár rád, itt marad. Delete: visszahozás.',
@@ -86,7 +100,16 @@ export const EXCLUDED_TEXT = {
   returnedTitle: 'Kizártad, de elkezdett futni, ezért visszakerült a listába. Az első Enter után eltűnik ez a jelölés.',
   /** The tag of a session excluded while running, wherever its row shows. */
   whileRunningTag: 'futáskor se jön vissza',
-  whileRunningTitle: 'Futás közben zártad ki, ezért akkor sem jön vissza, ha újra elindul. Delete: visszahozás.',
+  whileRunningTitle:
+    'Futás közben zártad ki, ezért akkor sem jön vissza, ha újra elindul: csak a Delete hozza vissza, vagy a megadott időpont, ha adtál meg.',
+  /** The tag of a session excluded until a time, wherever its row shows: until when (`untilClock`). */
+  untilTag: (until: number, now: number): string => `${untilClock(until, now)}-ig`,
+  untilTitle: (until: number, now: number): string =>
+    `Eddig zártad ki: ${untilClock(until, now)}. Akkor visszakerül a listába, teendő jelöléssel. Shift+Delete: új időpont. Delete: visszahozás most.`,
+  /** The tag of a session whose exclusion time has passed, until the first jump to it or a Backspace on its row. */
+  dueTag: 'teendő',
+  dueTitle: (until: number, now: number): string =>
+    `Eddig zártad ki: ${untilClock(until, now)}. Az első Enter vagy a Backspace után eltűnik ez a jelölés.`,
 } as const
 
 /** The excluded sessions as the list reads them (`renderer/useExcludedSessions.ts` `readExcludedSessions`). */
@@ -97,6 +120,15 @@ export interface ExclusionState {
   whileRunning: ReadonlySet<string>
   /** The sessions that came back because they started running, until the first jump to each. */
   returned: ReadonlySet<string>
+  /** Those of the excluded sessions excluded until a time, to the time (epoch ms). */
+  until: ReadonlyMap<string, number>
+  /**
+   * The sessions whose exclusion time has passed, to that time: back in the list with the due mark,
+   * until the first jump to each or a Backspace on its row.
+   */
+  due: ReadonlyMap<string, number>
+  /** The weekly reset from `config.json`, for the bar's preset and the `limit` phrase; `undefined` while not set. */
+  weeklyReset: WeeklyReset | undefined
 }
 
 /**
@@ -139,25 +171,41 @@ export interface RowTag {
 }
 
 /**
- * The tags a row carries for its exclusion, in their order. The `kizárt` tag on an excluded row
- * that stays in the list because something of it waits (`showsExcludedTag`), and on a row the
- * search found in the group, which shows dimmed among the matches; none in the open group, whose
- * header says it already. After it, on a session excluded while running, the `futáskor se jön
- * vissza` tag, wherever its row shows, so in the group alone. And on a session that came back
- * because it started running (not excluded any more), the `kizárt, de fut` tag. A row without a
- * session carries none.
+ * The time of the row's due mark, while it shows one: its session's exclusion time has passed, and
+ * it is not excluded again. `undefined` otherwise, and on a row without a session.
  */
-export function exclusionTags(row: GroupableRow, place: RowPlace, exclusion: ExclusionState): RowTag[] {
+export function dueMarkOf(row: { sessionId: string; session?: unknown }, exclusion: ExclusionState): number | undefined {
+  if (row.session === undefined || exclusion.excluded.has(row.sessionId)) return undefined
+  return exclusion.due.get(row.sessionId)
+}
+
+/**
+ * The tags a row carries for its exclusion, in their order, at `now` (the until tag names its day
+ * relative to today). The `kizárt` tag on an excluded row that stays in the list because something
+ * of it waits (`showsExcludedTag`), and on a row the search found in the group, which shows dimmed
+ * among the matches; none in the open group, whose header says it already. After it, on a session
+ * excluded until a time, the until tag (`csütörtök 08:00-ig`), and on a session excluded while
+ * running, the `futáskor se jön vissza` tag, both wherever the row shows, so in the group alone
+ * too. On a session that came back because it started running (not excluded any more), the
+ * `kizárt, de fut` tag; on one whose time has passed (`dueMarkOf`), the `teendő` tag. A row without
+ * a session carries none.
+ */
+export function exclusionTags(row: GroupableRow, place: RowPlace, exclusion: ExclusionState, now: number): RowTag[] {
   if (row.session === undefined) return []
   const tags: RowTag[] = []
   if (place === 'match') tags.push({ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle })
   else if (place === 'list' && showsExcludedTag(row, exclusion.excluded)) tags.push({ text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle })
-  if (exclusion.excluded.has(row.sessionId) && exclusion.whileRunning.has(row.sessionId)) {
+  const excluded = exclusion.excluded.has(row.sessionId)
+  const until = excluded ? exclusion.until.get(row.sessionId) : undefined
+  if (until !== undefined) tags.push({ text: EXCLUDED_TEXT.untilTag(until, now), title: EXCLUDED_TEXT.untilTitle(until, now) })
+  if (excluded && exclusion.whileRunning.has(row.sessionId)) {
     tags.push({ text: EXCLUDED_TEXT.whileRunningTag, title: EXCLUDED_TEXT.whileRunningTitle })
   }
-  if (!exclusion.excluded.has(row.sessionId) && exclusion.returned.has(row.sessionId)) {
+  if (!excluded && exclusion.returned.has(row.sessionId)) {
     tags.push({ text: EXCLUDED_TEXT.returnedTag, title: EXCLUDED_TEXT.returnedTitle })
   }
+  const due = dueMarkOf(row, exclusion)
+  if (due !== undefined) tags.push({ text: EXCLUDED_TEXT.dueTag, title: EXCLUDED_TEXT.dueTitle(due, now) })
   return tags
 }
 

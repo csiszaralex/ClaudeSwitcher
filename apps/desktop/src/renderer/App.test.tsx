@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { pendingRowText } from '../shared/row-text.js'
 import { ACTION_BUTTONS } from './decision-actions.js'
 import { EXCLUDED_TEXT } from './list-cleanup.js'
+import { parseUntil, UNTIL_TEXT } from './until-time.js'
 import {
   bashRequest,
   questionRequest,
@@ -17,6 +18,7 @@ import {
   selectedName,
   session,
   sessionId,
+  START,
 } from './test-helpers.js'
 
 /**
@@ -331,7 +333,7 @@ describe('the cleanup keys', () => {
     const { pushExcluded, settle } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
     expect(rowNames()).toEqual(['alpha', 'beta'])
 
-    pushExcluded({ excluded: [], returned: [sessionId(3)] })
+    pushExcluded({ excluded: [], returned: [sessionId(3)], due: [] })
     await settle()
     expect(header()).toBeNull()
     expect(rowNames()).toEqual(['alpha', 'beta', 'gamma'])
@@ -339,7 +341,7 @@ describe('the cleanup keys', () => {
     expect(row('gamma').querySelector('.excluded-tag')?.textContent).toBe(EXCLUDED_TEXT.returnedTag)
 
     // The first jump ends the mark in the main process, which pushes again.
-    pushExcluded({ excluded: [], returned: [] })
+    pushExcluded({ excluded: [], returned: [], due: [] })
     await settle()
     expect(row('gamma').querySelector('.excluded-tag')).toBeNull()
   })
@@ -836,5 +838,241 @@ describe('the auto-accept hold (Shift+A)', () => {
     pushAutoAccept([])
     await flush()
     expect(tagOf('beta')).toBeUndefined()
+  })
+})
+
+describe('the timed exclusion (Shift+Delete)', () => {
+  const HOUR = 3_600_000
+
+  /** The time bar, while it shows. */
+  const bar = (): HTMLElement | null => document.querySelector('li.until-bar')
+  const field = (): HTMLInputElement | null => document.querySelector('input.until-field')
+  const preview = (): string => document.querySelector('.until-preview')?.textContent ?? ''
+  const presets = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('button.until-preset')]
+  const tags = (name: string): string[] => [...row(name).querySelectorAll('.excluded-tag')].map((tag) => tag.textContent)
+  const shiftDelete = '{Shift>}{Delete}{/Shift}'
+  /** What `parseUntil` gives for the phrase now: the time the bar must send. */
+  const timeOf = (text: string): number => {
+    const parsed = parseUntil(text, Date.now(), undefined)
+    if (parsed.kind !== 'time') throw new Error(`no time for ${text}`)
+    return parsed.until
+  }
+
+  it('opens the bar under the selected row with the focus in its field, and excludes nothing by itself', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard(`{ArrowDown}${shiftDelete}`)
+    expect(bar()).not.toBeNull()
+    expect(bar()?.previousElementSibling).toBe(row('beta'))
+    expect(document.activeElement).toBe(field())
+    expect(presets().map((button) => button.textContent)).toEqual([UNTIL_TEXT.oneHour, UNTIL_TEXT.tomorrowMorning, UNTIL_TEXT.mondayMorning])
+    // An empty field previews what Enter takes: the first preset.
+    expect(preview()).toBe(UNTIL_TEXT.preview(Date.now() + HOUR, Date.now()))
+    expect(api.setExcluded).not.toHaveBeenCalled()
+    expect(api.setExcludedUntil).not.toHaveBeenCalled()
+    expect(rowNames()).toEqual(['alpha', 'beta', 'gamma'])
+  })
+
+  it('takes the first preset on Enter in the empty field: the row moves into the group with its until tag', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: LIST })
+    await user.keyboard(`{ArrowDown}${shiftDelete}{Enter}`)
+    expect(api.setExcludedUntil.mock.calls).toEqual([[sessionId(2), Date.now() + HOUR]])
+    expect(api.setExcluded).not.toHaveBeenCalled()
+    await settle()
+    expect(bar()).toBeNull()
+    expect(rowNames()).toEqual(['alpha', 'gamma'])
+    expect(selectedName()).toBe('gamma')
+    await user.click(header() ?? document.body)
+    expect(tags('beta')).toEqual([EXCLUDED_TEXT.untilTag(Date.now() + HOUR, Date.now())])
+  })
+
+  it('excludes until the phrase typed, previewed in absolute form', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: LIST })
+    await user.keyboard(shiftDelete)
+    await user.keyboard('csütörtök reggel')
+    const until = timeOf('csütörtök reggel')
+    expect(preview()).toBe(UNTIL_TEXT.preview(until, Date.now()))
+    await user.keyboard('{Enter}')
+    expect(api.setExcludedUntil.mock.calls).toEqual([[sessionId(1), until]])
+    await settle()
+    expect(rowNames()).toEqual(['beta', 'gamma'])
+  })
+
+  it('says Nem értem for a phrase it does not take, and then Enter does nothing', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard(shiftDelete)
+    await user.keyboard('jövő héten valamikor{Enter}')
+    expect(preview()).toBe(UNTIL_TEXT.unknown)
+    expect(api.setExcludedUntil).not.toHaveBeenCalled()
+    expect(bar()).not.toBeNull()
+    // A time already gone does nothing either.
+    await user.clear(field() ?? document.body)
+    await user.keyboard('ma 0:00{Enter}')
+    expect(preview()).toBe(UNTIL_TEXT.past)
+    expect(api.setExcludedUntil).not.toHaveBeenCalled()
+  })
+
+  it('confirms a preset by Tab and Enter, by ← and →, and by a click', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: LIST })
+    await user.keyboard(`${shiftDelete}{Tab}{Tab}`)
+    expect(document.activeElement).toBe(presets()[1])
+    expect(preview()).toBe(UNTIL_TEXT.preview(timeOf('holnap reggel'), Date.now()))
+    await user.keyboard('{ArrowRight}{ArrowRight}{ArrowLeft}{Enter}')
+    expect(api.setExcludedUntil.mock.calls).toEqual([[sessionId(1), timeOf('hétfő reggel')]])
+    await settle()
+    expect(selectedName()).toBe('beta')
+
+    await user.keyboard(shiftDelete)
+    // Shift+Tab from the field goes around to the last preset.
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(document.activeElement).toBe(presets()[2])
+    await user.click(presets()[0] ?? document.body)
+    expect(api.setExcludedUntil.mock.calls.at(-1)).toEqual([sessionId(2), Date.now() + HOUR])
+  })
+
+  it('keeps every key in the bar: a waiting request decides nothing, and the list does not move', async () => {
+    const request = bashRequest(1, 'pnpm test')
+    const { api, user, armKeys } = await renderOverlay({ sessions: LIST, decisions: [request] })
+    armKeys()
+    expect(selectedName()).toBe('alpha')
+    await user.keyboard(shiftDelete)
+
+    // Typed in the field: the letters, Space, Shift+A, Delete, Backspace and the arrows are the field's.
+    await user.keyboard('ads A{ArrowDown}{ArrowUp}{ArrowLeft}{Backspace}{Delete}')
+    expect(field()?.value.startsWith('ads')).toBe(true)
+    // With a preset focused, and the letters' pause after typing over.
+    await user.keyboard('{Tab}')
+    armKeys()
+    await user.keyboard('ads{ArrowDown}{ArrowUp}{Delete}{Backspace}{Shift>}A{/Shift}')
+    expect(document.activeElement).toBe(presets()[0])
+
+    expect(api.decide).not.toHaveBeenCalled()
+    expect(api.setExcluded).not.toHaveBeenCalled()
+    expect(api.setExcludedUntil).not.toHaveBeenCalled()
+    expect(api.clearFinish).not.toHaveBeenCalled()
+    expect(api.focusSession).not.toHaveBeenCalled()
+    expect(document.querySelector('section.peek')).toBeNull()
+    expect(selectedName()).toBe('alpha')
+  })
+
+  it('closes the bar alone on Esc: its release does not hide the overlay, and the next Esc does', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard(shiftDelete)
+    await user.keyboard('{Escape>}')
+    expect(bar()).toBeNull()
+    await user.keyboard('{/Escape}')
+    expect(api.hide).not.toHaveBeenCalled()
+    expect(api.setExcludedUntil).not.toHaveBeenCalled()
+    expect(selectedName()).toBe('alpha')
+
+    // From a preset too.
+    await user.keyboard(`${shiftDelete}{Tab}{Escape}`)
+    expect(bar()).toBeNull()
+    expect(api.hide).not.toHaveBeenCalled()
+
+    await user.keyboard('{Escape}')
+    expect(api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves plain Delete as it was: it excludes at once, without a time and without the bar', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard('{Delete}')
+    expect(api.setExcluded.mock.calls).toEqual([[sessionId(1), true]])
+    expect(api.setExcludedUntil).not.toHaveBeenCalled()
+    expect(bar()).toBeNull()
+  })
+
+  it('stays a text edit in the search field', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard(`/alp{Home}${shiftDelete}`)
+    expect(searchField()?.value).toBe('lp')
+    expect(bar()).toBeNull()
+    expect(api.setExcludedUntil).not.toHaveBeenCalled()
+  })
+
+  it('does nothing on the group header, and closes when the overlay appears again', async () => {
+    const { user, show } = await renderOverlay({ sessions: LIST, excluded: [sessionId(3)] })
+    await user.keyboard(`{ArrowDown}{ArrowDown}${shiftDelete}`)
+    expect(header()?.classList.contains('selected')).toBe(true)
+    expect(bar()).toBeNull()
+
+    await user.keyboard(`{ArrowUp}${shiftDelete}`)
+    expect(bar()).not.toBeNull()
+    await show()
+    expect(bar()).toBeNull()
+  })
+
+  it('gives a row of the group a new time: it keeps its place and its selection, and shows the new time', async () => {
+    const later = START + 5 * 86_400_000
+    const { api, user, settle } = await renderOverlay({ sessions: LIST, excludedUntil: [{ sessionId: sessionId(3), until: later }] })
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}{ArrowDown}')
+    expect(selectedName()).toBe('gamma')
+    expect(tags('gamma')).toEqual([EXCLUDED_TEXT.untilTag(later, Date.now())])
+
+    await user.keyboard(`${shiftDelete}holnap 9{Enter}`)
+    const until = timeOf('holnap 9')
+    expect(api.setExcludedUntil.mock.calls).toEqual([[sessionId(3), until]])
+    await settle()
+    expect(selectedName()).toBe('gamma')
+    expect(row('gamma').classList.contains('excluded')).toBe(true)
+    expect(tags('gamma')).toEqual([EXCLUDED_TEXT.untilTag(until, Date.now())])
+  })
+
+  it('shows the until tag on a waiting excluded row and on a search match', async () => {
+    const later = START + 2 * HOUR
+    const { user } = await renderOverlay({
+      sessions: LIST,
+      decisions: [bashRequest(1, 'pnpm test')],
+      excludedUntil: [{ sessionId: sessionId(1), until: later }, { sessionId: sessionId(3), until: later }],
+    })
+    const until = EXCLUDED_TEXT.untilTag(later, Date.now())
+    expect(tags('alpha')).toEqual([EXCLUDED_TEXT.tag, until])
+    await user.keyboard('/gam')
+    expect(tags('gamma')).toEqual([EXCLUDED_TEXT.tag, until])
+  })
+
+  it('brings a row back at the push with the teendő tag, quietly in its usual place', async () => {
+    const until = START + HOUR
+    const { pushExcluded, settle } = await renderOverlay({ sessions: LIST, excludedUntil: [{ sessionId: sessionId(3), until }] })
+    expect(rowNames()).toEqual(['alpha', 'beta'])
+    pushExcluded({ excluded: [], returned: [], due: [{ sessionId: sessionId(3), until }] })
+    await settle()
+    expect(header()).toBeNull()
+    expect(rowNames()).toEqual(['alpha', 'beta', 'gamma'])
+    expect(tags('gamma')).toEqual([EXCLUDED_TEXT.dueTag])
+    expect(row('gamma').querySelector('.excluded-tag')?.getAttribute('title')).toBe(EXCLUDED_TEXT.dueTitle(until, Date.now()))
+  })
+
+  it('takes the teendő tag off with Backspace, and the ✓ with it where there is one', async () => {
+    const finished = session(2, 'beta', { stoppedAt: START - 120_000 })
+    const due = [
+      { sessionId: sessionId(1), until: START - 60_000 },
+      { sessionId: sessionId(2), until: START - 60_000 },
+    ]
+    const { api, user, settle } = await renderOverlay({ sessions: [LIST[0]!, finished], due })
+    // The ✓ row first.
+    expect(rowNames()).toEqual(['beta', 'alpha'])
+    await user.keyboard('{Backspace}')
+    expect(api.clearFinish.mock.calls).toEqual([[sessionId(2)]])
+    expect(api.clearDue.mock.calls).toEqual([[sessionId(2)]])
+    await settle()
+    expect(tags('beta')).toEqual([])
+
+    await user.click(row('alpha'))
+    expect(selectedName()).toBe('alpha')
+    await user.keyboard('{Backspace}')
+    expect(api.clearDue.mock.calls.at(-1)).toEqual([sessionId(1)])
+    expect(api.clearFinish).toHaveBeenCalledTimes(1)
+    await settle()
+    expect(tags('alpha')).toEqual([])
+  })
+
+  it('ends the teendő mark on Delete, which excludes the row as before', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: LIST, due: [{ sessionId: sessionId(1), until: START - 60_000 }] })
+    expect(tags('alpha')).toEqual([EXCLUDED_TEXT.dueTag])
+    await user.keyboard('{Delete}')
+    expect(api.setExcluded.mock.calls).toEqual([[sessionId(1), true]])
+    await settle()
+    await user.click(header() ?? document.body)
+    expect(tags('alpha')).toEqual([])
   })
 })

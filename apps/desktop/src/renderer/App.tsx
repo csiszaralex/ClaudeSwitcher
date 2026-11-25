@@ -1,5 +1,5 @@
 import type { PendingDecisionView } from '@claudeswitcher/daemon'
-import { useEffect, useRef, useState, type JSX } from 'react'
+import { Fragment, useEffect, useRef, useState, type JSX } from 'react'
 import {
   AUTO_ACCEPT_HOLD_MS,
   autoTagText,
@@ -26,12 +26,14 @@ import {
 } from './format.js'
 import { armUntil, type KeyHistory } from './key-guard.js'
 import {
+  dueMarkOf,
   EXCLUDED_GROUP_ID,
   EXCLUDED_TEXT,
   exclusionTags,
   groupArrow,
   isClearFinishKey,
   isExcludeKey,
+  isTimedExcludeKey,
   keptRows,
   listView,
   selectionAfterChange,
@@ -47,7 +49,8 @@ import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, t
 import { isSearchChord, isSearchKey, SEARCH_KEYS_LABEL } from './session-search.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
-import { usageLimitStatusText } from './usage-limit.js'
+import { UntilBar } from './UntilBar.js'
+import { sessionUsageLimit, usageLimitStatusText } from './usage-limit.js'
 import { useAppVersion, withAppVersion } from './useAppVersion.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
@@ -108,9 +111,11 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * @param trackSeen Takes the reply of a request that answers with the seen finishes (a cleared ✓), so
  * the list redraws at once (`useSeenFinishes`).
  * @param exclusion The sessions moved out of the list, and the ones that came back because they
- * started running (`useExcludedSessions`), for the excluded group and the rows' tags.
- * @param trackExcluded Takes the reply of a Delete, which answers with the excluded sessions, and
- * calls `onApplied` with them in the same update (`useExcludedSessions`).
+ * started running or because their time passed (`useExcludedSessions`), for the excluded group,
+ * the rows' tags and the time bar.
+ * @param trackExcluded Takes the reply of a Delete, of a time from the bar or of a Backspace on a
+ * due row, which answer with the excluded sessions, and calls `onApplied` with them in the same
+ * update (`useExcludedSessions`).
  * @param autoAccept The sessions in the auto-accept mode and their counts (`useAutoAccept`).
  * @param trackAutoAccept Takes the reply of a completed Shift+A hold, which answers with them (`useAutoAccept`).
  */
@@ -127,7 +132,7 @@ export function App({
   seenFinishes: SeenFinishes
   trackSeen: (reply: Promise<unknown>) => void
   exclusion: ExclusionState
-  trackExcluded: (reply: Promise<unknown>, onApplied: (exclusion: ExclusionState) => void) => void
+  trackExcluded: (reply: Promise<unknown>, onApplied?: (exclusion: ExclusionState) => void) => void
   autoAccept: ReadonlyMap<string, number>
   trackAutoAccept: (reply: Promise<unknown>) => void
 }): JSX.Element {
@@ -151,6 +156,8 @@ export function App({
   // counter that redraws its countdown while it runs.
   const [hold, setHold] = useState<AutoAcceptHold | undefined>()
   const [, redrawHold] = useState(0)
+  // The session whose time bar shows under its row (Shift+Delete, `UntilBar`), else `undefined`.
+  const [untilBarId, setUntilBarId] = useState<string | undefined>()
 
   // All rows: the sessions, plus a row of its own for each pending request whose session the
   // snapshot does not know yet, in the list's order (rows.ts).
@@ -233,11 +240,13 @@ export function App({
         rerenderOnShow(armedAt)
         // The keys act on the list again on every show, not on a question form left focused.
         questionFocus.current?.leave()
-        // The search, the peek and the excluded group start closed on every show, and no hold runs.
+        // The search, the peek, the excluded group and the time bar start closed on every show, and
+        // no hold runs.
         setHold(undefined)
         setQuery(undefined)
         setPeekId(undefined)
         setGroupOpen(false)
+        setUntilBarId(undefined)
         setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current, preferred))
       }),
     [],
@@ -287,6 +296,13 @@ export function App({
   useEffect(() => {
     selectedRow.current?.scrollIntoView({ block: 'nearest' })
   }, [selected, peekId])
+
+  // The time bar belongs to the selected row: it closes when the selection leaves that row (a click
+  // on another row, the row gone).
+  const untilBarOff = untilBarId !== undefined && untilBarId !== selectedItem
+  useEffect(() => {
+    if (untilBarOff) setUntilBarId(undefined)
+  }, [untilBarOff])
 
   // A session that went away while its peek was open: back to the list.
   const peekGone = peekId !== undefined && peekRow === undefined
@@ -400,11 +416,30 @@ export function App({
    * to its neighbour (list-cleanup.ts `selectionAfterChange`), in the same update as the list.
    */
   function setExcluded(sessionId: string, exclude: boolean): void {
-    trackExcluded(window.claudeswitcher.setExcluded(sessionId, exclude), (next) => {
+    applyExclusion(sessionId, window.claudeswitcher.setExcluded(sessionId, exclude))
+  }
+
+  /**
+   * Excludes the session until `until`, or gives an excluded one a new time: the time bar's
+   * confirmation. The bar closes; the selection follows the reply as after a Delete.
+   */
+  function excludeUntil(sessionId: string, until: number): void {
+    setUntilBarId(undefined)
+    applyExclusion(sessionId, window.claudeswitcher.setExcludedUntil(sessionId, until))
+  }
+
+  /** Takes a reply that may move the session's row, with the selection after it (`selectionAfterChange`). */
+  function applyExclusion(sessionId: string, reply: Promise<unknown>): void {
+    trackExcluded(reply, (next) => {
       const { allRows: rowsNow, ids: before, query: queryNow, groupOpen: openNow } = latest.current
       const after = listView(rowsNow, next.excluded, queryNow, openNow).ids
       setSelectedId((current) => selectionAfterChange(before, after, current, sessionId))
     })
+  }
+
+  /** Closes the time bar without a change (Esc in it, the focus leaving it, the window losing the focus). */
+  function closeUntilBar(): void {
+    setUntilBarId(undefined)
   }
 
   /** Opens the search; when it is open already, puts the focus back into its field. */
@@ -467,14 +502,30 @@ export function App({
         }
         return
       }
-      // Backspace clears the selected row's ✓ (list-cleanup.ts). Its default is prevented, so a
-      // focused button is not pressed (Chromium presses a button only on Enter and Space anyway). The
-      // main process checks the session's state when the request arrives (`clearFinish`), so a row
-      // whose session started a new turn meanwhile is left alone.
+      // Backspace clears the selected row's ✓ and its `teendő` mark (list-cleanup.ts), each where
+      // there is one. Its default is prevented, so a focused button is not pressed (Chromium presses
+      // a button only on Enter and Space anyway). The main process checks the session's state when
+      // the request arrives (`clearFinish`), so a row whose session started a new turn meanwhile
+      // keeps its ✓.
       if (isClearFinishKey(event)) {
         event.preventDefault()
         const row = selectedRowView
         if (row !== undefined && showsFinishMark(row)) trackSeen(window.claudeswitcher.clearFinish(row.sessionId))
+        if (row !== undefined && dueMarkOf(row, exclusion) !== undefined) trackExcluded(window.claudeswitcher.clearDue(row.sessionId))
+        return
+      }
+      // Shift+Delete opens the time bar under the selected row (`UntilBar`), which excludes its
+      // session until a time, or gives an excluded one a new time. It never excludes by itself. A row
+      // without a session and the group's header do nothing. In the search field it never gets here
+      // (the returns above): there it edits the text.
+      if (isTimedExcludeKey(event)) {
+        event.preventDefault()
+        const row = selectedRowView
+        if (row?.session !== undefined) {
+          // An Esc pressed before, still down, must not hide the overlay on its release in the bar.
+          escapeHides.current = false
+          setUntilBarId(row.sessionId)
+        }
         return
       }
       // Delete moves the selected row's session into the excluded group, or an excluded one back
@@ -557,83 +608,96 @@ export function App({
     // In the auto-accept mode: the green row and the `auto` tag with the mode's count.
     const autoAllowed = autoAccept.get(row.sessionId)
     const rowHold = hold?.sessionId === row.sessionId ? hold : undefined
+    const session = row.session
     return (
-      <li
-        key={row.sessionId}
-        ref={isSelected ? selectedRow : null}
-        className={`session ${row.status} ${place === 'list' ? '' : 'excluded'} ${isSelected ? 'selected' : ''} ${autoAllowed === undefined ? '' : 'auto-accept'}`}
-        onClick={() => {
-          setSelectedId(row.sessionId)
-        }}
-        onDoubleClick={() => {
-          void window.claudeswitcher.focusSession(row.sessionId)
-        }}
-      >
-        <span className={`marker tone-${marker.tone}`} title={marker.title}>
-          {marker.glyph}
-        </span>
-        <span className="name">
-          {/*
-            Only the text is truncated (…), never the dot: it must show with a long name too.
-            The tooltip also names the registry name when the row shows the tab title.
-          */}
-          <span className="name-text" title={row.session === undefined ? row.name : nameTooltip(row.session)}>
-            {row.name}
-          </span>
-          {row.session !== undefined && hasRemoteControl(row.session) && (
-            <span className="remote" title="Remote Control: telefonról is elérhető">
-              ●
-            </span>
-          )}
-          {flagged && (
-            <span className="source-tag" title={source.title}>
-              {source.label}
-            </span>
-          )}
-          {badge !== undefined && (
-            <span className="pending-count" title="Ennyi kérése vár az appban">
-              {badge}
-            </span>
-          )}
-          {autoAllowed !== undefined && (
-            <span className="auto-tag" title={autoTagTitle(autoAllowed)}>
-              {autoTagText(autoAllowed)}
-            </span>
-          )}
-          {exclusionTags(row, place, exclusion).map((tag) => (
-            <span key={tag.text} className="excluded-tag" title={tag.title}>
-              {tag.text}
-            </span>
-          ))}
-        </span>
-        <span
-          className="summary"
-          // A pending decision overrides the row; the tooltip still lists every active subagent.
-          title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
+      <Fragment key={row.sessionId}>
+        <li
+          ref={isSelected ? selectedRow : null}
+          className={`session ${row.status} ${place === 'list' ? '' : 'excluded'} ${isSelected ? 'selected' : ''} ${autoAllowed === undefined ? '' : 'auto-accept'}`}
+          onClick={() => {
+            setSelectedId(row.sessionId)
+          }}
+          onDoubleClick={() => {
+            void window.claudeswitcher.focusSession(row.sessionId)
+          }}
         >
-          {/* The sessions this one works for, first, so the end of a long text is what CSS cuts. */}
-          {note !== undefined && (
-            <span className="prompted-by" title={`Megkérte: ${row.promptedBy.join(', ')}`}>
-              {note}{' '}
+          <span className={`marker tone-${marker.tone}`} title={marker.title}>
+            {marker.glyph}
+          </span>
+          <span className="name">
+            {/*
+              Only the text is truncated (…), never the dot: it must show with a long name too.
+              The tooltip also names the registry name when the row shows the tab title.
+            */}
+            <span className="name-text" title={row.session === undefined ? row.name : nameTooltip(row.session)}>
+              {row.name}
             </span>
-          )}
-          {/* A running Shift+A hold's countdown takes the place of the row's text. */}
-          {rowHold !== undefined ? (
-            <span className="auto-hold">{holdText(rowHold, Date.now())}</span>
-          ) : pending !== undefined ? (
-            pendingRowText(pending)
-          ) : row.waitsOn.length > 0 ? (
-            waitsOnText(row.waitsOn)
-          ) : row.session !== undefined ? (
-            summarize(row.session, now)
-          ) : (
-            ''
-          )}
-        </span>
-        <span className="age">
-          {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}
-        </span>
-      </li>
+            {row.session !== undefined && hasRemoteControl(row.session) && (
+              <span className="remote" title="Remote Control: telefonról is elérhető">
+                ●
+              </span>
+            )}
+            {flagged && (
+              <span className="source-tag" title={source.title}>
+                {source.label}
+              </span>
+            )}
+            {badge !== undefined && (
+              <span className="pending-count" title="Ennyi kérése vár az appban">
+                {badge}
+              </span>
+            )}
+            {autoAllowed !== undefined && (
+              <span className="auto-tag" title={autoTagTitle(autoAllowed)}>
+                {autoTagText(autoAllowed)}
+              </span>
+            )}
+            {exclusionTags(row, place, exclusion, now).map((tag) => (
+              <span key={tag.text} className="excluded-tag" title={tag.title}>
+                {tag.text}
+              </span>
+            ))}
+          </span>
+          <span
+            className="summary"
+            // A pending decision overrides the row; the tooltip still lists every active subagent.
+            title={row.session === undefined ? undefined : subagentTooltip(row.session.subagents)}
+          >
+            {/* The sessions this one works for, first, so the end of a long text is what CSS cuts. */}
+            {note !== undefined && (
+              <span className="prompted-by" title={`Megkérte: ${row.promptedBy.join(', ')}`}>
+                {note}{' '}
+              </span>
+            )}
+            {/* A running Shift+A hold's countdown takes the place of the row's text. */}
+            {rowHold !== undefined ? (
+              <span className="auto-hold">{holdText(rowHold, Date.now())}</span>
+            ) : pending !== undefined ? (
+              pendingRowText(pending)
+            ) : row.waitsOn.length > 0 ? (
+              waitsOnText(row.waitsOn)
+            ) : row.session !== undefined ? (
+              summarize(row.session, now)
+            ) : (
+              ''
+            )}
+          </span>
+          <span className="age">
+            {row.waitingSince !== undefined ? formatDuration(now - row.waitingSince) : ''}
+          </span>
+        </li>
+        {isSelected && untilBarId === row.sessionId && session !== undefined && (
+          <UntilBar
+            now={now}
+            weeklyReset={exclusion.weeklyReset}
+            limitResetsAt={sessionUsageLimit(session)?.resetsAt}
+            onConfirm={(until) => {
+              excludeUntil(row.sessionId, until)
+            }}
+            onClose={closeUntilBar}
+          />
+        )}
+      </Fragment>
     )
   }
 
