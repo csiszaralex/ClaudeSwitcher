@@ -37,8 +37,9 @@ export interface TrayInput {
   /** The finishes the user has seen (`shared/session-finished.ts` `acknowledgeFinish`). */
   acknowledged: SeenFinishes
   /**
-   * The sessions the user moved out of the list (`main/excluded-sessions.ts`): their finishes do not
-   * count. Their requests and waits do, as any session's.
+   * The sessions the user moved out of the list, and those back from a timed exclusion whose last
+   * finish is from before their time (`main/excluded-sessions.ts` `quietFinishes`): their finishes do
+   * not count. Their requests and waits do, as any session's.
    */
   excluded: ReadonlySet<string>
   /** The current time (ms, `Date.now()`), for the age of the held requests. */

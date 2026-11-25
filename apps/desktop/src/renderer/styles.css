@@ -161,6 +161,45 @@ body {
 .session.excluded { opacity: 0.55; }
 .session.excluded.selected { opacity: 0.8; }
 
+/* The time bar under a row (Shift+Delete, UntilBar.tsx): the presets, the phrase field and the
+   preview of the resolved time, in the panel's colours; a preview the bar cannot use is the danger
+   colour, so a misread time stands out before Enter. */
+.until-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0 4px 24px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+}
+.until-preset {
+  padding: 2px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.until-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.until-field {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.until-field:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.until-preview { color: var(--success); font-weight: 600; }
+.until-preview.unusable { color: var(--danger); }
+.until-keys { margin-left: auto; color: var(--text-faint); }
+
 /* The peek (Space, PeekPanel.tsx): the session's conversation in place of the list. The header
    stays, the history scrolls; App's keys scroll it. */
 .peek { flex: 1; min-height: 0; display: flex; flex-direction: column; }

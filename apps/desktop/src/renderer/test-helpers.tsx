@@ -16,7 +16,7 @@ import type { JSX } from 'react'
 import { onTestFinished, vi, type Mock } from 'vitest'
 import type { ClaudeSwitcherApi } from '../preload/api.js'
 import type { AutoAcceptEntry } from '../shared/auto-accept.js'
-import type { ExcludedReply } from '../shared/excluded-sessions.js'
+import type { DueEntry, ExcludedReply, WeeklyReset } from '../shared/excluded-sessions.js'
 import type { ConversationReply } from '../shared/overlay-channels.js'
 import { clearFinish, seenFinishesReply, type SeenFinish } from '../shared/session-finished.js'
 import { App } from './App.js'
@@ -39,6 +39,12 @@ export interface OverlaySetup {
   excludedWhileRunning?: readonly string[]
   /** The sessions that came back because they started running, until the first jump to each. */
   returned?: readonly string[]
+  /** The sessions already excluded until a time (epoch ms), while idle. */
+  excludedUntil?: readonly DueEntry[]
+  /** The sessions whose exclusion time has passed, with the due mark. */
+  due?: readonly DueEntry[]
+  /** The weekly reset from `config.json`. */
+  weeklyReset?: WeeklyReset
   /** The peek's reply (`OVERLAY_CHANNELS.conversation`); an empty history by default. */
   conversation?: ConversationReply
   /** The sessions already in the auto-accept mode, with their counts (`main/auto-accept.ts`). */
@@ -46,7 +52,7 @@ export interface OverlaySetup {
 }
 
 /** The fixed start of the overlay's clock: only `Date` is faked, so the key letters arm when a test says so. */
-const START = Date.parse('2026-11-21T10:00:00.000Z')
+export const START = Date.parse('2026-11-21T10:00:00.000Z')
 
 /**
  * A stand-in for the daemon's WebSocket. `useDaemonState` opens it with `new WebSocket(url)`, so the
@@ -76,33 +82,52 @@ class FakeSocket {
 interface FakeExclusion {
   /** Session id to `whileRunning`, in the order they were excluded. */
   excluded: Map<string, boolean>
+  /** Session id to the time it is excluded until, for those excluded until a time. */
+  until: Map<string, number>
   returned: Set<string>
+  /** Session id to the time it was excluded until, for those with the due mark. */
+  due: Map<string, number>
+  weeklyReset: WeeklyReset | undefined
   push: Set<(raw: unknown) => void>
 }
 
 function fakeExclusion(setup: OverlaySetup): FakeExclusion {
+  const timed = setup.excludedUntil ?? []
   return {
     excluded: new Map<string, boolean>([
       ...(setup.excluded ?? []).map((id): [string, boolean] => [id, false]),
       ...(setup.excludedWhileRunning ?? []).map((id): [string, boolean] => [id, true]),
+      ...timed.map((entry): [string, boolean] => [entry.sessionId, false]),
     ]),
+    until: new Map(timed.map((entry) => [entry.sessionId, entry.until])),
     returned: new Set(setup.returned ?? []),
+    due: new Map((setup.due ?? []).map((entry) => [entry.sessionId, entry.until])),
+    weeklyReset: setup.weeklyReset,
     push: new Set(),
   }
 }
 
 /** The excluded sessions in their wire format (`ExcludedReply`). */
-function excludedReply({ excluded, returned }: FakeExclusion): ExcludedReply {
-  return { excluded: [...excluded].map(([sessionId, whileRunning]) => ({ sessionId, whileRunning })), returned: [...returned] }
+function excludedReply({ excluded, until, returned, due, weeklyReset }: FakeExclusion): ExcludedReply {
+  return {
+    excluded: [...excluded].map(([sessionId, whileRunning]) => {
+      const time = until.get(sessionId)
+      return time === undefined ? { sessionId, whileRunning } : { sessionId, whileRunning, until: time }
+    }),
+    returned: [...returned],
+    due: [...due].map(([sessionId, time]) => ({ sessionId, until: time })),
+    ...(weeklyReset === undefined ? {} : { weeklyReset }),
+  }
 }
 
 /**
  * The fake preload API. It answers like the main process: the state over IPC, the seen finishes,
- * the excluded sessions and the auto-accept sessions in their wire formats, a clear, a Delete and a
- * completed Shift+A hold applied with the main process's rules (only a listed session;
- * `shared/session-finished.ts` `clearFinish`; a Delete remembers whether the session was running
- * and ends its returned mark, as `main/excluded-sessions.ts` `exclude`), and every decision
- * accepted. A jump does not end a returned mark here: that is the main process's, which then pushes
+ * the excluded sessions and the auto-accept sessions in their wire formats, a clear, a Delete, a
+ * time from the bar, a Backspace on a due row and a completed Shift+A hold applied with the main
+ * process's rules (only a listed session; `shared/session-finished.ts` `clearFinish`; a Delete
+ * remembers whether the session was running and ends its returned and due marks, as
+ * `main/excluded-sessions.ts` `exclude`; a time must be a finite number in the future and keeps an
+ * excluded session's `whileRunning`, as `excludeUntil`), and every decision accepted. A jump does not end a returned mark here: that is the main process's, which then pushes
  * (`pushExcluded`). The auto-accept toggle
  * only records the session (its count starts at 0); the main side is `main/auto-accept.test.ts`'s.
  */
@@ -114,7 +139,7 @@ function fakeApi(
   exclusion: FakeExclusion,
 ): FakeApi {
   const seen = new Map<string, SeenFinish>()
-  const { excluded, returned } = exclusion
+  const { excluded, until, returned, due } = exclusion
   const autoAccept = new Map((setup.autoAccept ?? []).map((entry) => [entry.sessionId, entry.allowed]))
   const autoAcceptReply = (): AutoAcceptEntry[] => [...autoAccept].map(([sessionId, allowed]) => ({ sessionId, allowed }))
   const listed = (sessionId: string): SessionView | undefined => state.sessions.find((s) => s.sessionId === sessionId)
@@ -133,8 +158,27 @@ function fakeApi(
       if (exclude && view !== undefined && !excluded.has(sessionId)) {
         excluded.set(sessionId, view.status !== 'idle')
         returned.delete(sessionId)
+        due.delete(sessionId)
       }
-      if (!exclude) excluded.delete(sessionId)
+      if (!exclude) {
+        excluded.delete(sessionId)
+        until.delete(sessionId)
+      }
+      return Promise.resolve(excludedReply(exclusion))
+    }),
+    setExcludedUntil: vi.fn((sessionId: string, time: number) => {
+      const view = listed(sessionId)
+      const valid = Number.isFinite(time) && time > Date.now()
+      if (valid && (excluded.has(sessionId) || view !== undefined)) {
+        if (!excluded.has(sessionId) && view !== undefined) excluded.set(sessionId, view.status !== 'idle')
+        until.set(sessionId, time)
+        returned.delete(sessionId)
+        due.delete(sessionId)
+      }
+      return Promise.resolve(excludedReply(exclusion))
+    }),
+    clearDue: vi.fn((sessionId: string) => {
+      due.delete(sessionId)
       return Promise.resolve(excludedReply(exclusion))
     }),
     onExcludedChanged: vi.fn((callback: (raw: unknown) => void) => {
@@ -271,9 +315,15 @@ export async function renderOverlay(setup: OverlaySetup = {}): Promise<RenderedO
     },
     pushExcluded: (reply) => {
       exclusion.excluded.clear()
-      for (const entry of reply.excluded) exclusion.excluded.set(entry.sessionId, entry.whileRunning)
+      exclusion.until.clear()
+      for (const entry of reply.excluded) {
+        exclusion.excluded.set(entry.sessionId, entry.whileRunning)
+        if (entry.until !== undefined) exclusion.until.set(entry.sessionId, entry.until)
+      }
       exclusion.returned.clear()
       for (const id of reply.returned) exclusion.returned.add(id)
+      exclusion.due.clear()
+      for (const entry of reply.due) exclusion.due.set(entry.sessionId, entry.until)
       act(() => {
         for (const callback of exclusion.push) callback(excludedReply(exclusion))
       })

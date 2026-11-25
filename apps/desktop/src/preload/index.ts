@@ -15,6 +15,8 @@ const api: ClaudeSwitcherApi = {
   clearFinish: (sessionId) => ipcRenderer.invoke(OVERLAY_CHANNELS.clearFinish, sessionId),
   excludedSessions: () => ipcRenderer.invoke(OVERLAY_CHANNELS.excludedSessions),
   setExcluded: (sessionId, excluded) => ipcRenderer.invoke(OVERLAY_CHANNELS.setExcluded, sessionId, excluded),
+  setExcludedUntil: (sessionId, until) => ipcRenderer.invoke(OVERLAY_CHANNELS.setExcludedUntil, sessionId, until),
+  clearDue: (sessionId) => ipcRenderer.invoke(OVERLAY_CHANNELS.clearDue, sessionId),
   onExcludedChanged: (callback) => {
     const listener = (_event: unknown, raw: unknown): void => {
       callback(raw)

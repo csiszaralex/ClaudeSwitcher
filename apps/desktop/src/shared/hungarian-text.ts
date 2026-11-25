@@ -20,3 +20,10 @@ export function numberArticle(text: string): 'a' | 'az' {
 export function capitalized(phrase: string): string {
   return phrase.charAt(0).toUpperCase() + phrase.slice(1)
 }
+
+/**
+ * The Hungarian weekday names, in the order `Date.getDay` counts them (Sunday first): the usage
+ * limit's texts (`renderer/usage-limit.ts`), and the time phrases and the tags of a timed exclusion
+ * (`renderer/until-time.ts`).
+ */
+export const WEEKDAY_NAMES: readonly string[] = ['vasárnap', 'hétfő', 'kedd', 'szerda', 'csütörtök', 'péntek', 'szombat']

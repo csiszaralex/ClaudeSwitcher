@@ -2,7 +2,15 @@ import { mkdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isNotFoundError, isRecord, transformSettingsFile } from '@claudeswitcher/core'
-import { readExcludedEntries, type ExcludedEntry } from '../shared/excluded-sessions.js'
+import {
+  readDueEntries,
+  readExcludedEntries,
+  readWeeklyReset,
+  type DueEntry,
+  type ExcludedEntry,
+  type WeeklyReset,
+} from '../shared/excluded-sessions.js'
+import type { StoredExclusions } from './excluded-sessions.js'
 import { DEFAULT_HOTKEY, DEFAULT_SETTINGS, SETTINGS, isHotkeyValue, isSettingKey } from '../shared/settings.js'
 import type { SettingKey, SettingValues } from '../shared/settings.js'
 
@@ -22,10 +30,23 @@ export interface StoredConfig {
    * The sessions the user moved out of the list (`saveExcludedSessions`, `main/excluded-sessions.ts`),
    * as `shared/excluded-sessions.ts` `ExcludedEntry` items. Not a setting either, the same way as
    * `skippedVersion`. An older file without it, or a value that is not an array, excludes nothing;
-   * an older file's plain session id reads as `whileRunning: false`, and any other item that is not
-   * an entry drops out (`readExcludedEntries`).
+   * an older file's plain session id reads as `whileRunning: false`, an entry without `until` (as
+   * v0.26.0 wrote them) as an exclusion without a time, and any other item that is not an entry drops
+   * out (`readExcludedEntries`).
    */
   excludedSessions: readonly ExcludedEntry[]
+  /**
+   * The sessions whose exclusion time passed and that still carry the due mark
+   * (`saveExcludedSessions`, `main/excluded-sessions.ts`), as `DueEntry` items. Not a setting, as
+   * `excludedSessions`; a missing key or a value that is not an array marks none (`readDueEntries`).
+   */
+  dueSessions: readonly DueEntry[]
+  /**
+   * When the account's weekly usage limit resets (`{ "weekday": 4, "time": "07:00" }`), which the
+   * user writes by hand; the app never writes it, and a settings save keeps it as any key of the
+   * file. Not a setting. Missing or malformed: not set (`readWeeklyReset`).
+   */
+  weeklyReset: WeeklyReset | undefined
 }
 
 const DEFAULT_VALUES: StoredValues = {
@@ -38,7 +59,14 @@ const DEFAULT_VALUES: StoredValues = {
 }
 
 function defaultConfig(): StoredConfig {
-  return { values: { ...DEFAULT_VALUES }, confirmed: new Set(), skippedVersion: undefined, excludedSessions: [] }
+  return {
+    values: { ...DEFAULT_VALUES },
+    confirmed: new Set(),
+    skippedVersion: undefined,
+    excludedSessions: [],
+    dueSessions: [],
+    weeklyReset: undefined,
+  }
 }
 
 /** A release version as electron-updater reports it (`1.2.3`, with an optional pre-release or build). */
@@ -149,6 +177,8 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
       confirmed,
       skippedVersion,
       excludedSessions,
+      dueSessions,
+      weeklyReset,
     } = parsed
     return {
       values: {
@@ -162,6 +192,8 @@ export async function loadConfig(dir: string): Promise<StoredConfig> {
       confirmed: confirmedKeys(confirmed),
       skippedVersion: versionOrUndefined(skippedVersion),
       excludedSessions: readExcludedEntries(excludedSessions),
+      dueSessions: readDueEntries(dueSessions),
+      weeklyReset: readWeeklyReset(weeklyReset),
     }
   }
 
@@ -222,17 +254,21 @@ export async function saveSkippedVersion(dir: string, version: string): Promise<
 }
 
 /**
- * Persists the sessions the user excluded from the list (`excludedSessions`), the whole list, with
- * the same guarantees as `saveSkippedVersion`: the file is read fresh, only this key changes (so a
- * save from the setup window, which rewrites only its settings, keeps it), a broken or unreadable
- * file is not written to, and the calls queue per file, so the last call's list is the one that
- * stays. Never throws; true if it was written.
+ * Persists the sessions the user excluded from the list (`excludedSessions`, the whole list) and the
+ * due marks (`dueSessions`), in one write, with the same guarantees as `saveSkippedVersion`: the
+ * file is read fresh, only these two keys change (so a save from the setup window, which rewrites
+ * only its settings, keeps them), a broken or unreadable file is not written to, and the calls queue
+ * per file, so the last call's lists are the ones that stay. Never throws; true if it was written.
  */
-export async function saveExcludedSessions(dir: string, entries: readonly ExcludedEntry[]): Promise<boolean> {
-  // Only the entry's two fields, so the file holds exactly the shape `readExcludedEntries` reads.
-  const stored = entries.map(({ sessionId, whileRunning }) => ({ sessionId, whileRunning }))
+export async function saveExcludedSessions(dir: string, stored: StoredExclusions): Promise<boolean> {
+  // Only the entries' own fields, so the file holds exactly the shapes `readExcludedEntries` and
+  // `readDueEntries` read.
+  const excludedSessions = stored.excluded.map(({ sessionId, whileRunning, until }) =>
+    until === undefined ? { sessionId, whileRunning } : { sessionId, whileRunning, until },
+  )
+  const dueSessions = stored.due.map(({ sessionId, until }) => ({ sessionId, until }))
   try {
-    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), excludedSessions: stored }))
+    await transformConfig(dir, (existing) => ({ ...orDefaults(existing), excludedSessions, dueSessions }))
     return true
   } catch (error) {
     console.error('[claudeswitcher] could not save the excluded sessions; not overwriting the config file', error)

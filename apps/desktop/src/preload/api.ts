@@ -24,12 +24,17 @@ export interface ClaudeSwitcherApi {
   /** Clears the ✓ of the session's finish; answers like `finishesSeen`. */
   clearFinish: (sessionId: string) => Promise<unknown>
   /**
-   * The sessions moved out of the list and the ones that came back because they started running;
-   * the renderer reads them with `readExcludedSessions`.
+   * The sessions moved out of the list, the ones that came back because they started running or
+   * because their time passed, and the weekly reset; the renderer reads them with
+   * `readExcludedSessions`.
    */
   excludedSessions: () => Promise<unknown>
   /** Moves the session out of the list (`true`) or brings it back (`false`); answers like `excludedSessions`. */
   setExcluded: (sessionId: string, excluded: boolean) => Promise<unknown>
+  /** Excludes the session until `until` (epoch ms), or sets a new time; answers like `excludedSessions`. */
+  setExcludedUntil: (sessionId: string, until: number) => Promise<unknown>
+  /** Ends the due mark of the session; answers like `excludedSessions`. */
+  clearDue: (sessionId: string) => Promise<unknown>
   /**
    * Subscribes to the main process's push of the excluded sessions (answered like
    * `excludedSessions`); the returned function unsubscribes. As with `onShown`, the callback gets

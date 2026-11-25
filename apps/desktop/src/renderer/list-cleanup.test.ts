@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionStatus } from '@claudeswitcher/core'
 import {
+  dueMarkOf,
   EXCLUDED_GROUP_ID,
   EXCLUDED_TEXT,
   exclusionTags,
@@ -8,6 +9,7 @@ import {
   inExcludedGroup,
   isClearFinishKey,
   isExcludeKey,
+  isTimedExcludeKey,
   keptRows,
   listView,
   selectionAfterChange,
@@ -69,6 +71,21 @@ describe('isExcludeKey', () => {
       expect(isExcludeKey(key('Delete', { [modifier]: true }))).toBe(false)
     }
     for (const other of ['Backspace', 'd', 'Del', 'Enter']) expect(isExcludeKey(key(other))).toBe(false)
+  })
+})
+
+describe('isTimedExcludeKey', () => {
+  it('is Shift+Delete, which plain Delete (isExcludeKey) is not', () => {
+    expect(isTimedExcludeKey(key('Delete', { shiftKey: true }))).toBe(true)
+    expect(isExcludeKey(key('Delete', { shiftKey: true }))).toBe(false)
+    expect(isTimedExcludeKey(key('Delete'))).toBe(false)
+  })
+
+  it('is not with Ctrl, Alt or Meta, held down, or another key', () => {
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey', 'repeat'] as const) {
+      expect(isTimedExcludeKey(key('Delete', { shiftKey: true, [modifier]: true }))).toBe(false)
+    }
+    for (const other of ['Backspace', 'D', 'Del', 'Insert']) expect(isTimedExcludeKey(key(other, { shiftKey: true }))).toBe(false)
   })
 })
 
@@ -175,11 +192,23 @@ describe('the excluded group', () => {
 
   describe('the tags of a row', () => {
     const none: ReadonlySet<string> = new Set()
-    const state = (excluded: string[], whileRunning: string[] = [], returned: string[] = []) => ({
+    const state = (
+      excluded: string[],
+      whileRunning: string[] = [],
+      returned: string[] = [],
+      until: [string, number][] = [],
+      due: [string, number][] = [],
+    ) => ({
       excluded: new Set(excluded),
       whileRunning: new Set(whileRunning),
       returned: new Set(returned),
+      until: new Map(until),
+      due: new Map(due),
+      weeklyReset: undefined,
     })
+    // An invented moment in local time, and a time three days later, both at a known clock time.
+    const NOW = new Date(2026, 10, 23, 10, 0).getTime()
+    const LATER = new Date(2026, 10, 26, 8, 0).getTime()
     const KIZART = { text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.tagTitle }
     const FOUND = { text: EXCLUDED_TEXT.tag, title: EXCLUDED_TEXT.matchTitle }
     const STAYS_OUT = { text: EXCLUDED_TEXT.whileRunningTag, title: EXCLUDED_TEXT.whileRunningTitle }
@@ -187,36 +216,68 @@ describe('the excluded group', () => {
 
     it('tags an excluded row outside the open group: one that waits, and one the search found', () => {
       const exclusion = state([A])
-      expect(exclusionTags(row(A, 'alpha', { status: 'waiting' }), 'list', exclusion)).toEqual([KIZART])
-      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion)).toEqual([FOUND])
-      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion)).toEqual([])
-      expect(exclusionTags(row(B, 'beta'), 'list', exclusion)).toEqual([])
+      expect(exclusionTags(row(A, 'alpha', { status: 'waiting' }), 'list', exclusion, NOW)).toEqual([KIZART])
+      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion, NOW)).toEqual([FOUND])
+      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion, NOW)).toEqual([])
+      expect(exclusionTags(row(B, 'beta'), 'list', exclusion, NOW)).toEqual([])
     })
 
     it('adds the tag of a session excluded while running wherever it shows, in the group alone', () => {
       const exclusion = state([A], [A])
-      expect(exclusionTags(row(A, 'alpha', { decisions: [{}] }), 'list', exclusion)).toEqual([KIZART, STAYS_OUT])
-      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion)).toEqual([FOUND, STAYS_OUT])
-      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion)).toEqual([STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha', { decisions: [{}] }), 'list', exclusion, NOW)).toEqual([KIZART, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion, NOW)).toEqual([FOUND, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion, NOW)).toEqual([STAYS_OUT])
       // Only an excluded id counts: a stale flag without the exclusion tags nothing.
-      expect(exclusionTags(row(A, 'alpha'), 'list', { ...state([]), whileRunning: new Set([A]) })).toEqual([])
+      expect(exclusionTags(row(A, 'alpha'), 'list', { ...state([]), whileRunning: new Set([A]) }, NOW)).toEqual([])
     })
 
     it('tags a session that came back because it started running, only while it is not excluded', () => {
-      expect(exclusionTags(row(A, 'alpha', { status: 'working' }), 'list', state([], [], [A]))).toEqual([RETURNED])
-      expect(exclusionTags(row(A, 'alpha'), 'group', state([A], [], [A]))).toEqual([])
-      expect(exclusionTags(row(B, 'beta'), 'list', state([], [], [A]))).toEqual([])
+      expect(exclusionTags(row(A, 'alpha', { status: 'working' }), 'list', state([], [], [A]), NOW)).toEqual([RETURNED])
+      expect(exclusionTags(row(A, 'alpha'), 'group', state([A], [], [A]), NOW)).toEqual([])
+      expect(exclusionTags(row(B, 'beta'), 'list', state([], [], [A]), NOW)).toEqual([])
     })
 
     it('tags no row without a session', () => {
       const orphan = row(A, 'alpha', { session: false, decisions: [{}] })
-      expect(exclusionTags(orphan, 'list', { excluded: new Set([A]), whileRunning: new Set([A]), returned: none })).toEqual([])
-      expect(exclusionTags(orphan, 'list', state([], [], [A]))).toEqual([])
+      expect(exclusionTags(orphan, 'list', { ...state([A], [A], [], [[A, LATER]], [[A, LATER]]), returned: none }, NOW)).toEqual([])
+      expect(exclusionTags(orphan, 'list', state([], [], [A]), NOW)).toEqual([])
+    })
+
+    it('tags a session excluded until a time with until when, wherever it shows, beside its other tags', () => {
+      const UNTIL = { text: EXCLUDED_TEXT.untilTag(LATER, NOW), title: EXCLUDED_TEXT.untilTitle(LATER, NOW) }
+      expect(UNTIL.text).toBe('csütörtök 08:00-ig')
+      const exclusion = state([A], [A], [], [[A, LATER]])
+      expect(exclusionTags(row(A, 'alpha'), 'group', exclusion, NOW)).toEqual([UNTIL, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha'), 'match', exclusion, NOW)).toEqual([FOUND, UNTIL, STAYS_OUT])
+      expect(exclusionTags(row(A, 'alpha', { status: 'waiting' }), 'list', exclusion, NOW)).toEqual([KIZART, UNTIL, STAYS_OUT])
+      // A stale time without the exclusion tags nothing.
+      expect(exclusionTags(row(A, 'alpha'), 'list', state([], [], [], [[A, LATER]]), NOW)).toEqual([])
+    })
+
+    it('names the day of the until tag from now on', () => {
+      expect(EXCLUDED_TEXT.untilTag(new Date(2026, 10, 23, 18, 30).getTime(), NOW)).toBe('ma 18:30-ig')
+      expect(EXCLUDED_TEXT.untilTag(new Date(2026, 10, 24, 8, 0).getTime(), NOW)).toBe('holnap 08:00-ig')
+      expect(EXCLUDED_TEXT.untilTag(new Date(2026, 10, 30, 8, 0).getTime(), NOW)).toBe('2026. 11. 30. 08:00-ig')
+    })
+
+    it('tags a session whose time has passed as teendő, only while it is not excluded again', () => {
+      const DUE = { text: EXCLUDED_TEXT.dueTag, title: EXCLUDED_TEXT.dueTitle(LATER, NOW) }
+      expect(exclusionTags(row(A, 'alpha'), 'list', state([], [], [], [], [[A, LATER]]), NOW)).toEqual([DUE])
+      expect(exclusionTags(row(A, 'alpha'), 'group', state([A], [], [], [], [[A, LATER]]), NOW)).toEqual([])
+      expect(EXCLUDED_TEXT.dueTitle(LATER, NOW)).toBe('Eddig zártad ki: csütörtök 08:00. Az első Enter vagy a Backspace után eltűnik ez a jelölés.')
+    })
+
+    it('reads the due mark of a row only with a session and while it is not excluded', () => {
+      expect(dueMarkOf(row(A, 'alpha'), state([], [], [], [], [[A, LATER]]))).toBe(LATER)
+      expect(dueMarkOf(row(A, 'alpha'), state([A], [], [], [], [[A, LATER]]))).toBeUndefined()
+      expect(dueMarkOf(row(A, 'alpha', { session: false }), state([], [], [], [], [[A, LATER]]))).toBeUndefined()
+      expect(dueMarkOf(row(B, 'beta'), state([], [], [], [], [[A, LATER]]))).toBeUndefined()
     })
 
     it('keeps its texts free of an en or em dash', () => {
       for (const text of Object.values(EXCLUDED_TEXT)) {
-        if (typeof text === 'string') expect(text).not.toMatch(/[–—]/)
+        const shown = typeof text === 'string' ? text : text(LATER, NOW)
+        expect(shown).not.toMatch(/[–—]/)
       }
     })
   })

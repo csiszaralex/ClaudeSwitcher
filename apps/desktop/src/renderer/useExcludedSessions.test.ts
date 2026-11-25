@@ -37,3 +37,35 @@ describe('readExcludedSessions', () => {
     expect(read({ excluded: SESSION_A, returned: { 0: SESSION_C } })).toEqual(empty)
   })
 })
+
+describe('readExcludedSessions: times, due marks and the weekly reset', () => {
+  it('reads the times of the timed entries, the due marks and the weekly reset', () => {
+    const reply = {
+      excluded: [
+        { sessionId: SESSION_A, whileRunning: false, until: 2000 },
+        { sessionId: SESSION_B, whileRunning: true },
+      ],
+      returned: [],
+      due: [{ sessionId: SESSION_C, until: 1000 }],
+      weeklyReset: { weekday: 4, hour: 7, minute: 0 },
+    }
+    const state = readExcludedSessions(reply)
+    expect([...state.until]).toEqual([[SESSION_A, 2000]])
+    expect([...state.due]).toEqual([[SESSION_C, 1000]])
+    expect(state.weeklyReset).toEqual({ weekday: 4, hour: 7, minute: 0 })
+  })
+
+  it('drops an entry whose time is malformed, a malformed due mark, and a malformed weekly reset', () => {
+    const reply = {
+      excluded: [{ sessionId: SESSION_A, whileRunning: false, until: 'holnap' }],
+      returned: [],
+      due: [{ sessionId: SESSION_C }, { sessionId: SESSION_B, until: Number.NaN }],
+      weeklyReset: { weekday: 9, hour: 7, minute: 0 },
+    }
+    const state = readExcludedSessions(reply)
+    expect([...state.excluded]).toEqual([])
+    expect([...state.due]).toEqual([])
+    expect(state.weeklyReset).toBeUndefined()
+    expect(readExcludedSessions({ excluded: [], returned: [] }).due.size).toBe(0)
+  })
+})

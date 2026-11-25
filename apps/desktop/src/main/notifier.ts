@@ -38,8 +38,9 @@ export interface NotifierInput {
   /** The overlay is on screen: the user is looking at the list already, so nothing is shown. */
   overlayVisible: boolean
   /**
-   * The sessions the user moved out of the list (`main/excluded-sessions.ts`): their finishes notify
-   * nothing. Their requests notify as any session's.
+   * The sessions the user moved out of the list, and those back from a timed exclusion whose last
+   * finish is from before their time (`main/excluded-sessions.ts` `quietFinishes`): their finishes
+   * notify nothing. Their requests notify as any session's.
    */
   excluded: ReadonlySet<string>
 }

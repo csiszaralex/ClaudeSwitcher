@@ -818,6 +818,34 @@ the list; the ids are stored in `config.json`. The decisions:
   jumps to it from the overlay (the `focusSession` handler, whatever the outcome), excludes it
   again, or its session is gone by the same rule as the excluded ids. After a restart the reason is
   stale, so no row carries it; storing it would add a second file key for a hint.
+- *Excluded until a time* (issue #73, the owner's request, 2026-11-23). Shift+Delete opens a bar
+  under the row (`renderer/UntilBar.tsx`) with presets and a field for a Hungarian time phrase,
+  parsed without AI (`renderer/until-time.ts` `parseUntil`); the preview always shows the resolved
+  time as a day and a clock time, and a phrase it does not take (`Nem értem`) or a time gone already
+  confirms nothing, so a misread time never hides a session. The renderer resolves the time (epoch
+  ms, local time through the `Date` setters, so DST is the platform's); the main process refuses
+  one that is not a finite number in the future (`main/excluded-sessions.ts` `excludeUntil`). The
+  entry keeps it as `until` (`shared/excluded-sessions.ts` `ExcludedEntry`; an entry without it,
+  as v0.26.0 wrote them, is an exclusion without a time). Every key pressed in the bar stays in it,
+  because `isTypingTarget` covers its field but not a focused preset, and the decision panel's
+  letters would decide a waiting request.
+- *At the time the exclusion turns into a mark, live or not.* The tray tick's `observe` checks the
+  time before anything else, also on an empty list: one tick's daemon picture is no proof that a
+  session is gone (an empty list is no picture, and a scan can drop a live session for a moment,
+  see above), so the time alone decides. For the same reason a timed exclusion is not dropped by
+  the gone rule before its time: its window may stay closed until then (VS Code closed over the
+  weekend). Once the mark is there, the gone rule applies to it as to the returned mark, and a
+  session that shows up later under the same id is a plain row. The return is quiet (the owner:
+  the list and a tag, nothing louder): no toast, and a finish from before the time stays out of
+  the tray (`quietFinishes`).
+- *The due mark is stored* (`dueSessions` in `config.json`), unlike the returned mark: the time may
+  pass while the app is off, and a mark kept in memory only would then be gone at the very start that
+  should show it. It ends with the first jump, with Backspace on the row, or when the session is
+  excluded again.
+- *The weekly reset is a hand-written key* (`weeklyReset` in `config.json`, read leniently by
+  `readWeeklyReset`), not a setting of the setup window (the owner: "mehet helyi configba"). The
+  app never writes it; the saves of the settings and of the excluded sessions rewrite only their
+  own keys, so it stays.
 
 **Auto-accept per session** (issue #2). Holding Shift+A on a row for 3 s puts its session into a
 mode in which the app allows the session's requests by itself. The decisions:
