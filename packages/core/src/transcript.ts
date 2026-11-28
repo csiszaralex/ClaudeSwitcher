@@ -4,6 +4,7 @@ import {
   conversationFromLines,
   countTurnStarts,
   CONVERSATION_TURNS,
+  isOwnPrompt,
   mayBeConversation,
   type ConversationEntry,
 } from './conversation.js'
@@ -62,7 +63,10 @@ export function readActivityFromLines(lines: readonly string[], earlierLines: re
     prompts.see(rec)
 
     const at = typeof rec['timestamp'] === 'string' ? Date.parse(rec['timestamp']) : NaN
-    if (!Number.isNaN(at)) activity.lastEventAt = at
+    if (!Number.isNaN(at)) {
+      activity.lastEventAt = at
+      if (isOwnPrompt(rec)) activity.lastOwnPromptAt = at
+    }
 
     const titled = titleRecordOf(rec)
     if (titled !== undefined) {

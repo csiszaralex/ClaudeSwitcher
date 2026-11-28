@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { AskQuestion } from '@claudeswitcher/core'
+import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { pendingRowText } from '../shared/row-text.js'
@@ -11,6 +12,7 @@ import {
   questionRequest,
   renderOverlay,
   type OverlaySetup,
+  type RenderedOverlay,
   row,
   rowNames,
   rows,
@@ -55,14 +57,80 @@ describe('the list keys', () => {
     expect(api.focusSession.mock.calls).toEqual([[sessionId(2)]])
   })
 
-  it('jumps again on every auto-repeated Enter of a held key', async () => {
-    // Today App's `onKey` does not look at `repeat` for Enter: each repeat asks for the jump again,
-    // and the main process drops a jump asked while one runs (`main/index.ts` `jumpInFlight`).
+  it('jumps on the release of Enter, not on its press, so the session window never gets the key', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard('{Enter>}')
+    expect(api.focusSession).not.toHaveBeenCalled()
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+  })
+
+  it('jumps once on the release of a held Enter: the auto-repeats do nothing', async () => {
     const { api } = await renderOverlay({ sessions: LIST })
     fireEvent.keyDown(document.body, { key: 'Enter' })
     fireEvent.keyDown(document.body, { key: 'Enter', repeat: true })
     fireEvent.keyDown(document.body, { key: 'Enter', repeat: true })
-    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)], [sessionId(1)], [sessionId(1)]])
+    expect(api.focusSession).not.toHaveBeenCalled()
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+  })
+
+  it('ignores an Enter release whose press it did not see, and a press the focus left meanwhile', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    fireEvent.keyDown(document.body, { key: 'Enter' })
+    fireEvent.blur(window)
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    expect(api.focusSession).not.toHaveBeenCalled()
+  })
+
+  it('jumps to the row selected at the press, and on the release of Tab on a row without a request', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fireEvent.keyDown(document.body, { key: 'Enter' })
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' })
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+
+    fireEvent.keyDown(document.body, { key: 'Tab' })
+    expect(api.focusSession.mock.calls).toHaveLength(1)
+    fireEvent.keyUp(document.body, { key: 'Tab' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)], [sessionId(2)]])
+  })
+
+  it('jumps from the search field and from the peek on the release of Enter too', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: LIST })
+    await user.keyboard('/amm{Enter>}')
+    expect(api.focusSession).not.toHaveBeenCalled()
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(3)]])
+
+    await user.keyboard('{Escape} ')
+    await settle()
+    expect(peek()).not.toBeNull()
+    await user.keyboard('{Enter>}')
+    expect(api.focusSession.mock.calls).toHaveLength(1)
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(3)], [sessionId(3)]])
+  })
+
+  it('jumps from a focused jump button on the release of Enter, once, and on a click', async () => {
+    const released = { ...bashRequest(1, 'pnpm test'), released: true }
+    const { api, user } = await renderOverlay({ sessions: [session(1, 'alpha', { status: 'waiting' })], decisions: [released] })
+    const button = screen.getByRole('button', { name: /^Ugrás/ })
+    button.focus()
+    fireEvent.keyDown(button, { key: 'Enter' })
+    fireEvent.keyDown(button, { key: 'Enter', repeat: true })
+    expect(api.focusSession).not.toHaveBeenCalled()
+    fireEvent.keyUp(button, { key: 'Enter' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+    await user.click(button)
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)], [sessionId(1)]])
+    // The press does not click the button either.
+    button.focus()
+    await user.keyboard('{Enter>}')
+    expect(api.focusSession.mock.calls).toHaveLength(2)
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toHaveLength(3)
   })
 })
 
@@ -410,6 +478,118 @@ describe('the decision panel letters', () => {
   })
 })
 
+describe('the selection after a decision', () => {
+  /** The request of gamma that arrives while beta is selected and pulls the selection. */
+  const pulling = { ...bashRequest(3, 'pnpm test'), id: 'req-pull' }
+  const waiting = (n: number, name: string) => session(n, name, { status: 'waiting' })
+
+  /** The overlay with beta selected, then gamma's request arriving: the selection is pulled to gamma. */
+  async function pulled(more: PendingDecisionView[] = []): Promise<RenderedOverlay> {
+    const overlay = await renderOverlay({ sessions: LIST })
+    await overlay.user.keyboard('{ArrowDown}')
+    expect(selectedName()).toBe('beta')
+    overlay.sendState({ sessions: [LIST[0]!, LIST[1]!, waiting(3, 'gamma')], decisions: [pulling, ...more] })
+    expect(selectedName()).toBe('gamma')
+    overlay.armKeys()
+    return overlay
+  }
+
+  /** Allows the selected request on A and lets the step after it land. */
+  async function allow(overlay: RenderedOverlay): Promise<void> {
+    await overlay.user.keyboard('a')
+    await overlay.settle()
+  }
+
+  it('goes back to the row a request pulled the selection from, once its request is decided', async () => {
+    const overlay = await pulled()
+    await allow(overlay)
+    expect(overlay.api.decide.mock.calls).toEqual([[pulling.id, { type: 'allow' }]])
+    expect(selectedName()).toBe('beta')
+    expect(overlay.api.hide).not.toHaveBeenCalled()
+  })
+
+  it('does not go back when the user moved the selection himself meanwhile', async () => {
+    const overlay = await pulled()
+    await overlay.user.keyboard('{ArrowDown}{ArrowUp}')
+    expect(selectedName()).toBe('gamma')
+    // The panel mounted again with the selection: its letters arm again.
+    overlay.armKeys()
+    await allow(overlay)
+    expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves to another waiting request instead', async () => {
+    const overlay = await pulled()
+    // It arrives after the pull, so the selection stays on gamma, which holds a request.
+    overlay.sendState({ sessions: [waiting(1, 'alpha'), LIST[1]!, waiting(3, 'gamma')], decisions: [pulling, bashRequest(1, 'pnpm lint')] })
+    expect(selectedName()).toBe('gamma')
+    await allow(overlay)
+    expect(selectedName()).toBe('alpha')
+  })
+
+  it('does not go back when the remembered row is gone', async () => {
+    const overlay = await pulled()
+    overlay.sendState({ sessions: [LIST[0]!, waiting(3, 'gamma')], decisions: [pulling] })
+    await allow(overlay)
+    expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays while the decided session has another request to decide, and goes back after that one', async () => {
+    const sibling = { ...bashRequest(3, 'pnpm build'), id: 'req-sibling' }
+    const overlay = await pulled([sibling])
+    await allow(overlay)
+    expect(selectedName()).toBe('gamma')
+    overlay.sendState({ sessions: [LIST[0]!, LIST[1]!, waiting(3, 'gamma')], decisions: [sibling] })
+    overlay.armKeys()
+    await allow(overlay)
+    expect(overlay.api.decide.mock.calls.map(([id]) => id)).toEqual([pulling.id, sibling.id])
+    expect(selectedName()).toBe('beta')
+  })
+
+  it('does not go back after the overlay appeared again', async () => {
+    const overlay = await pulled()
+    await overlay.show()
+    expect(selectedName()).toBe('gamma')
+    overlay.armKeys()
+    await allow(overlay)
+    expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  describe('after the last decision', () => {
+    const request = bashRequest(1, 'pnpm test')
+    const finished = session(2, 'beta', { stoppedAt: Date.parse('2026-11-21T09:59:00.000Z') })
+
+    it('hides with the setting on', async () => {
+      const overlay = await renderOverlay({ sessions: [waiting(1, 'alpha'), finished], decisions: [request] })
+      overlay.armKeys()
+      await allow(overlay)
+      expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+    })
+
+    it('moves to the first green ✓ with the setting off', async () => {
+      const overlay = await renderOverlay({
+        sessions: [waiting(1, 'alpha'), session(3, 'gamma'), finished],
+        decisions: [request],
+      })
+      overlay.api.settings.mockResolvedValue({ hideAfterLastDecision: false })
+      expect(selectedName()).toBe('alpha')
+      overlay.armKeys()
+      await allow(overlay)
+      expect(selectedName()).toBe('beta')
+      expect(overlay.api.hide).not.toHaveBeenCalled()
+    })
+
+    it('stays on the decided row with the setting off and no green ✓', async () => {
+      const overlay = await renderOverlay({ sessions: [waiting(1, 'alpha'), session(3, 'gamma')], decisions: [request] })
+      overlay.api.settings.mockResolvedValue({ hideAfterLastDecision: false })
+      overlay.armKeys()
+      await allow(overlay)
+      expect(selectedName()).toBe('alpha')
+      expect(overlay.api.hide).not.toHaveBeenCalled()
+    })
+  })
+})
+
 describe('the state and the showing', () => {
   it('keeps the selection on its session when a live state from the daemon reorders the list', async () => {
     const { user, sendState } = await renderOverlay({ sessions: LIST })
@@ -739,17 +919,51 @@ describe('the auto-accept hold (Shift+A)', () => {
     expect(summaryOf('alpha')).not.toContain('Automatikus')
   })
 
-  it('turns a session in the mode off the same way', async () => {
+  it('turns a session in the mode off at once, without a hold or a countdown, and a held key does nothing more', async () => {
     const { api } = await renderOverlay({ sessions: LIST, autoAccept: [{ sessionId: sessionId(1), allowed: 2 }] })
     expect(row('alpha').classList.contains('auto-accept')).toBe(true)
     expect(tagOf('alpha')).toBe('auto 2')
     fakeClock()
     down()
-    expect(summaryOf('alpha')).toContain('kikapcsolása')
-    advance(3_000)
     expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+    expect(summaryOf('alpha')).not.toContain('Automatikus')
     await flush()
     expect(row('alpha').classList.contains('auto-accept')).toBe(false)
+    // Still held: the repeats neither turn it off again nor start the hold that would turn it on.
+    for (let step = 0; step < 8; step += 1) {
+      advance(500)
+      down(true)
+    }
+    expect(summaryOf('alpha')).not.toContain('Automatikus')
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+  })
+
+  it('needs the full hold again to turn it back on after an off', async () => {
+    const { api } = await renderOverlay({ sessions: LIST, autoAccept: [{ sessionId: sessionId(1), allowed: 2 }] })
+    fakeClock()
+    down()
+    up()
+    await flush()
+    down()
+    advance(2_999)
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+    advance(1)
+    expect(api.setAutoAccept.mock.calls).toEqual([
+      [sessionId(1), false],
+      [sessionId(1), true],
+    ])
+  })
+
+  it('never decides the selected request when it turns the mode off', async () => {
+    const { api, armKeys } = await renderOverlay({
+      sessions: [session(1, 'alpha')],
+      decisions: [request],
+      autoAccept: [{ sessionId: sessionId(1), allowed: 0 }],
+    })
+    armKeys()
+    down()
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+    expect(api.decide).not.toHaveBeenCalled()
   })
 
   it('does nothing when the A, the Shift or the window is let go early', async () => {

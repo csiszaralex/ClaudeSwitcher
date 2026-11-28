@@ -44,7 +44,11 @@ export function autoAcceptTakes(request: AutoAcceptRequest): boolean {
   }
 }
 
-/** One session in the mode, on the wire: its id and how many requests the mode allowed since it was turned on. */
+/**
+ * One session in the mode, on the wire: its id and how many requests the mode allowed since the
+ * user's last own prompt to the session, or since it was turned on when that is later
+ * (`main/auto-accept.ts` `observe`).
+ */
 export interface AutoAcceptEntry {
   sessionId: string
   allowed: number

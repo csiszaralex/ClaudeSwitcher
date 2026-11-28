@@ -59,9 +59,9 @@ export const OVERLAY_CHANNELS = {
    */
   autoAccept: 'session:auto-accept',
   /**
-   * Turns the auto-accept mode on or off for a session (the Shift+A hold on its row). The arguments
-   * are the session id and `true` for on, `false` for off; the direction is explicit, as for
-   * `setExcluded`. Answers like `autoAccept`.
+   * Turns the auto-accept mode on or off for a session (on: the Shift+A hold on its row; off: one
+   * Shift+A press). The arguments are the session id and `true` for on, `false` for off; the
+   * direction is explicit, as for `setExcluded`. Answers like `autoAccept`.
    */
   setAutoAccept: 'session:set-auto-accept',
   /**

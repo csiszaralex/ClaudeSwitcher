@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react'
 import { isSubmitChord, SUBMIT_CHORD_LABEL } from './decision-actions.js'
+import { useJumpButton } from './JumpButton.js'
 import type { SessionHost } from '../shared/request-source.js'
 
 interface Props {
@@ -20,6 +21,8 @@ interface Props {
 export function PlanPanel({ plan, busy, host, onReject, onJump }: Props): JSX.Element {
   const [feedback, setFeedback] = useState('')
   const canReject = feedback.trim() !== '' && !busy
+  // The approval jumps to the session's own prompt, on Enter's release as the other jumps.
+  const jumpHandlers = useJumpButton(onJump)
 
   return (
     <div className="plan-panel">
@@ -49,7 +52,7 @@ export function PlanPanel({ plan, busy, host, onReject, onJump }: Props): JSX.El
           <button type="submit" disabled={!canReject}>
             <kbd>{SUBMIT_CHORD_LABEL}</kbd> Elutasítás visszajelzéssel
           </button>
-          <button type="button" onClick={onJump}>
+          <button type="button" {...jumpHandlers}>
             Jóváhagyás {host.inside} →
           </button>
         </div>

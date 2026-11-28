@@ -441,9 +441,10 @@ async function startApp(): Promise<void> {
   // The counters of the `[perf]` line (`perf-log.ts`), from before the daemon starts, so its scans
   // and broadcasts count from the first one.
   const perf = createPerfCounters()
-  // The per-session auto-accept mode (Shift+A held on a row), in memory only. Its decider sees every
-  // new request before the daemon's state does, so a request it allows never reaches the overlay,
-  // the toasts or the tray (`auto-accept.ts`). Its changes go to the overlay as a push once the
+  // The per-session auto-accept mode (Shift+A on a row, held to turn it on), in memory only. Its
+  // decider sees every new request before the daemon's state does, so a request it allows never
+  // reaches the overlay, the toasts or the tray (`auto-accept.ts`). Its changes (a reset count
+  // included, `observe` below) go to the overlay as a push once the
   // overlay exists (`pushAutoAccept`, set below); none can come before, since the set starts empty.
   let pushAutoAccept = (): void => undefined
   const autoAccept = createAutoAccept({
@@ -961,7 +962,8 @@ async function startApp(): Promise<void> {
     // notifier read the set: a session that came back by running counts as any session's in this
     // very tick, and one whose time passed stays quiet (`quietFinishes`).
     if (excludedSessions.observe(state.sessions, now)) pushExcluded()
-    // Ends the auto-accept mode of a session that is gone (`AUTO_ACCEPT_GONE_AFTER_MS`), and pushes it.
+    // Starts an auto-accept count again at the session's new own prompt, and ends the mode of a
+    // session that is gone (`AUTO_ACCEPT_GONE_AFTER_MS`); each change is pushed.
     autoAccept.observe(state, now)
     const excluded = excludedSessions.quietFinishes(state.sessions)
     tray.setState(trayState({ ...state, acknowledged: finishesSeen, excluded, now }))

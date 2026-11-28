@@ -69,6 +69,7 @@ const ACTIVITY_FIELDS = {
   usageLimit: true,
   tabTitle: true,
   promptedBy: true,
+  lastOwnPromptAt: true,
 } satisfies FieldList<SessionActivity>
 
 const USAGE_LIMIT_FIELDS = { kind: true, resetsAt: true } satisfies FieldList<UsageLimit>
@@ -176,11 +177,17 @@ async function claudeDir(): Promise<string> {
       }),
     ].join('\n') + '\n',
   )
-  // The waiting session: a running tool, and a subagent with its own.
+  // The waiting session: the user's own prompt, a running tool, and a subagent with its own.
   const toolUse = (command: string, at: string): string =>
     line({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', name: 'Bash', input: { command } }] } })
+  const ownPrompt = line({
+    type: 'user',
+    timestamp: '2026-11-21T09:02:30.000Z',
+    message: { role: 'user', content: 'Futtasd a teszteket.' },
+    origin: { kind: 'human' },
+  })
   const transcript = path.join(project, `${WAITING}.jsonl`)
-  await writeFile(transcript, toolUse('pnpm test', '2026-11-21T09:03:00.000Z') + '\n')
+  await writeFile(transcript, [ownPrompt, toolUse('pnpm test', '2026-11-21T09:03:00.000Z')].join('\n') + '\n')
   const subagents = subagentsDirOf(transcript)
   await mkdir(subagents, { recursive: true })
   await writeFile(path.join(subagents, `agent-${SUBAGENT}.jsonl`), toolUse('pnpm lint', '2026-11-21T09:04:00.000Z') + '\n')

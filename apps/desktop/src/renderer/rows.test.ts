@@ -386,7 +386,7 @@ describe('selection with a registry-only wait', () => {
   it('moves to it after a decision instead of hiding', () => {
     const decisions = [decision('d', 'a', 1)]
     const rows = buildRows([session('a', 'waiting', 1), session('r', 'waiting', 2), session('i', 'idle')], decisions, NONE_SEEN)
-    expect(nextAfterDecision(rows, decisions, decisions[0]!, true)).toEqual({ select: 'r', hide: false })
+    expect(nextAfterDecision(rows, decisions, decisions[0]!, true)).toEqual({ select: 'r', hide: false, staysOnSession: false })
   })
 })
 
@@ -396,7 +396,7 @@ describe('selection over merged rows', () => {
     const rows = buildRows([session('i', 'idle'), session('k', 'working')], decisions, NONE_SEEN)
     expect(selectOnShow(rows, decisions, 'k')).toBe('ghost')
     expect(moveSelection(rows.map((r) => r.sessionId), 'ghost', 1)).toBe('k')
-    expect(nextAfterDecision(rows, decisions, decisions[0]!, true)).toEqual({ hide: true })
+    expect(nextAfterDecision(rows, decisions, decisions[0]!, true)).toEqual({ hide: true, staysOnSession: false })
   })
 
   it('preselects the longest waiting decidable row, even when a younger yes/no row is listed first', () => {
@@ -404,7 +404,7 @@ describe('selection over merged rows', () => {
     const rows = buildRows([session('yesno', 'waiting', 20), session('choice', 'waiting', 10)], decisions, NONE_SEEN)
     expect(rows.map((r) => r.sessionId)).toEqual(['yesno', 'choice'])
     expect(selectOnShow(rows, decisions, undefined)).toBe('choice')
-    expect(nextAfterDecision(rows, decisions, decisions[1]!, true)).toEqual({ select: 'yesno', hide: false })
+    expect(nextAfterDecision(rows, decisions, decisions[1]!, true)).toEqual({ select: 'yesno', hide: false, staysOnSession: false })
   })
 
   it('falls back to the longest waiting released row, not the most recently active one', () => {

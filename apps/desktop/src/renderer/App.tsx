@@ -45,13 +45,14 @@ import { isPeekKey, PEEK_TEXT, peekRequest, peekScrollTop } from './peek.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
-import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
+import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals, type Pull } from './selection.js'
 import { isSearchChord, isSearchKey, SEARCH_KEYS_LABEL } from './session-search.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
 import { UntilBar } from './UntilBar.js'
 import { sessionUsageLimit, usageLimitStatusText } from './usage-limit.js'
 import { useAppVersion, withAppVersion } from './useAppVersion.js'
+import { useReleaseKey } from './useReleaseKey.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
 import { nameTooltip } from '../shared/session-name.js'
@@ -117,7 +118,8 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * due row, which answer with the excluded sessions, and calls `onApplied` with them in the same
  * update (`useExcludedSessions`).
  * @param autoAccept The sessions in the auto-accept mode and their counts (`useAutoAccept`).
- * @param trackAutoAccept Takes the reply of a completed Shift+A hold, which answers with them (`useAutoAccept`).
+ * @param trackAutoAccept Takes the reply of a completed Shift+A hold or of a Shift+A that turns the
+ * mode off, which answer with them (`useAutoAccept`).
  */
 export function App({
   overlay,
@@ -215,8 +217,12 @@ export function App({
 
   // On a new request the app can decide, the selection jumps to it if the selected row has no
   // decision and the user is not typing (selection.ts `selectOnArrival`). Runs only when the list
-  // of requests changed; `trackArrivals` keeps the requests of the previous state.
+  // of requests changed; `trackArrivals` keeps the requests of the previous state. The latest such
+  // pull is remembered with the item the selection was on (selection.ts `Pull`), so the decision
+  // of the pulling request can bring the selection back there (`afterDecision`). The user's own
+  // move (`selectByUser`), a blur or a show forgets it.
   const arrivals = useRef(trackArrivals())
+  const pull = useRef<Pull | undefined>(undefined)
   useEffect(() => {
     const next = arrivals.current({
       sessions: keptRows(allRows, excluded),
@@ -225,8 +231,27 @@ export function App({
       lastTypedAt: keyHistory.current.lastTypedAt,
       now: Date.now(),
     })
-    if (next !== undefined) setSelectedId(next)
+    if (next === undefined) return
+    if (selectedItem !== undefined && selectedItem !== next) pull.current = { from: selectedItem, to: next }
+    setSelectedId(next)
   }, [decisions])
+
+  /** The user moves the selection himself (the arrows, a click, the search): a remembered pull is forgotten. */
+  function selectByUser(id: string | undefined): void {
+    pull.current = undefined
+    setSelectedId(id)
+  }
+
+  // The overlay hides when it loses the focus (the main process), so a blur forgets the pull too.
+  useEffect(() => {
+    const forget = (): void => {
+      pull.current = undefined
+    }
+    window.addEventListener('blur', forget)
+    return () => {
+      window.removeEventListener('blur', forget)
+    }
+  }, [])
 
   // On show, jump to the session that has been waiting longest (or the one a clicked notification
   // named, `preferred`), and the panel arms again: the
@@ -247,6 +272,7 @@ export function App({
         setPeekId(undefined)
         setGroupOpen(false)
         setUntilBarId(undefined)
+        pull.current = undefined
         setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current, preferred))
       }),
     [],
@@ -264,7 +290,12 @@ export function App({
     }
   }, [])
 
-  /** After a SUCCESSFUL decision made in the app: steps to the next waiting one, or hides. */
+  /**
+   * After a SUCCESSFUL decision made in the app: steps to the next waiting one, back to the item a
+   * pulling request took the selection from, to the first green ✓, or hides (selection.ts
+   * `nextAfterDecision`). The remembered pull is used once: only a sibling request still to decide
+   * keeps it.
+   */
   async function afterDecision(decided: PendingDecisionView): Promise<void> {
     // Asked fresh on every decision: the tray checkbox can flip at any time, and a cache would need
     // its own notification channel for that. If the IPC fails, the default (hide) applies.
@@ -273,7 +304,15 @@ export function App({
       return undefined
     })
     const { hideAfterLastDecision } = readOverlaySettings(raw)
-    const next = nextAfterDecision(latest.current.rows, latest.current.decisions, decided, hideAfterLastDecision)
+    const next = nextAfterDecision(
+      latest.current.rows,
+      latest.current.decisions,
+      decided,
+      hideAfterLastDecision,
+      pull.current,
+      latest.current.ids,
+    )
+    if (!next.staysOnSession) pull.current = undefined
     if (next.select !== undefined) setSelectedId(next.select)
     if (next.hide) await window.claudeswitcher.hide()
   }
@@ -313,7 +352,7 @@ export function App({
   // A running hold ends early, changing nothing, when the A or the Shift is released, the window
   // loses the focus, the selection leaves its row, or the peek opens. Otherwise it completes after
   // `AUTO_ACCEPT_HOLD_MS` from its first keydown (the key's auto-repeat does not restart it), and the
-  // main process turns the mode on or off (`AutoAccept.set`).
+  // main process turns the mode on (`AutoAccept.set`). Turning it off needs no hold (`onKey`).
   const holdOff = hold !== undefined && (hold.sessionId !== selectedItem || peekId !== undefined)
   useEffect(() => {
     if (holdOff) setHold(undefined)
@@ -330,7 +369,7 @@ export function App({
     window.addEventListener('blur', cancel)
     const done = setTimeout(() => {
       setHold(undefined)
-      trackAutoAccept(window.claudeswitcher.setAutoAccept(hold.sessionId, hold.turnOn))
+      trackAutoAccept(window.claudeswitcher.setAutoAccept(hold.sessionId, true))
     }, Math.max(0, hold.startedAt + AUTO_ACCEPT_HOLD_MS - Date.now()))
     const countdown = setInterval(() => {
       redrawHold((count) => count + 1)
@@ -343,30 +382,17 @@ export function App({
     }
   }, [hold])
 
-  // The Esc that hides the overlay hides it on its release, not on its press. Hiding gives the focus
-  // back to the window in front before (`main/focus-return.ts`), and with the key still down that
-  // window would get its release, and its auto-repeat if held: a browser showing a video full screen
-  // took that as its own Esc and left full screen (seen by the owner, 2026-11-22). A press the overlay
-  // armed only counts: an Esc that went down elsewhere does nothing here, and the focus leaving the
-  // overlay meanwhile disarms it.
-  const escapeHides = useRef(false)
-  useEffect(() => {
-    const onKeyUp = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || !escapeHides.current) return
-      escapeHides.current = false
-      event.preventDefault()
-      void window.claudeswitcher.hide()
-    }
-    const disarm = (): void => {
-      escapeHides.current = false
-    }
-    window.addEventListener('keyup', onKeyUp)
-    window.addEventListener('blur', disarm)
-    return () => {
-      window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('blur', disarm)
-    }
-  }, [])
+  // The Esc that hides the overlay hides it on its release, not on its press (`useReleaseKey`):
+  // hiding gives the focus back to the window in front before (`main/focus-return.ts`), which would
+  // otherwise get the key's release. The same for the list's jump to a session (Enter, and Tab on a
+  // row without a request, also from the search field and the peek): the jump brings the session's
+  // window to the front, which would otherwise get the release, and a held Enter's repeats.
+  const escapeHides = useReleaseKey<undefined>(() => {
+    void window.claudeswitcher.hide()
+  })
+  const jumpOnRelease = useReleaseKey<string>((sessionId) => {
+    void window.claudeswitcher.focusSession(sessionId)
+  })
 
   /** Back from the peek to the list, with the peeked session selected (a new request may have moved the selection meanwhile). */
   function closePeek(id: string): void {
@@ -387,7 +413,7 @@ export function App({
     }
     if (event.key === 'Enter') {
       event.preventDefault()
-      void window.claudeswitcher.focusSession(id)
+      if (!event.repeat) jumpOnRelease.arm(event.key, id)
       return
     }
     const box = peekHistory.current
@@ -406,7 +432,7 @@ export function App({
     setQuery(next)
     const { allRows: rowsNow, excluded: excludedNow } = latest.current
     const first = listView(rowsNow, excludedNow, next, false).ids[0]
-    if (next.trim() !== '' && first !== undefined) setSelectedId(first)
+    if (next.trim() !== '' && first !== undefined) selectByUser(first)
   }
 
   /**
@@ -477,15 +503,21 @@ export function App({
       // the query (the panel's key letters skip a text field too, `isTypingTarget`).
       if (isTypingTarget(event.target) && !inSearch) return
       if (inSearch && !SEARCH_FIELD_KEYS.has(event.key)) return
-      // Shift+A starts the hold that turns the selected row's auto-accept mode on or off
-      // (auto-accept-hold.ts). Only its first keydown starts it: the auto-repeat of the held key
-      // does not restart the countdown. The decision panel's letters skip it (Shift, key-guard.ts).
+      // Shift+A on the selected row (auto-accept-hold.ts): on a session in the auto-accept mode it
+      // turns the mode off at once; on another it starts the hold that turns it on. Only its first
+      // keydown acts: the auto-repeat of the held key neither restarts the countdown nor, after an
+      // off, starts a hold. The decision panel's letters skip it (Shift, key-guard.ts).
       if (isAutoAcceptKey(event)) {
         event.preventDefault()
         const row = selectedRowView
         if (!event.repeat && row !== undefined) {
-          const start: AutoAcceptHold = { sessionId: row.sessionId, turnOn: !autoAccept.has(row.sessionId), startedAt: Date.now() }
-          setHold((current) => current ?? start)
+          if (autoAccept.has(row.sessionId)) {
+            setHold(undefined)
+            trackAutoAccept(window.claudeswitcher.setAutoAccept(row.sessionId, false))
+          } else {
+            const start: AutoAcceptHold = { sessionId: row.sessionId, startedAt: Date.now() }
+            setHold((current) => current ?? start)
+          }
         }
         return
       }
@@ -522,8 +554,10 @@ export function App({
         event.preventDefault()
         const row = selectedRowView
         if (row?.session !== undefined) {
-          // An Esc pressed before, still down, must not hide the overlay on its release in the bar.
-          escapeHides.current = false
+          // An Esc or an Enter pressed before, still down, must not hide the overlay or jump on its
+          // release later: the bar keeps its keys' releases from the window.
+          escapeHides.disarm()
+          jumpOnRelease.disarm()
           setUntilBarId(row.sessionId)
         }
         return
@@ -544,13 +578,13 @@ export function App({
         // search the Esc hides the overlay, but only on its release (`escapeHides`).
         if (query === undefined) {
           event.preventDefault()
-          if (!event.repeat) escapeHides.current = true
+          if (!event.repeat) escapeHides.arm(event.key, undefined)
         } else setQuery(undefined)
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         // Without this the arrow would also scroll the list besides moving the selection.
         event.preventDefault()
-        setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
+        selectByUser(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
       // ←/→ on the excluded group, as in a tree view (`groupArrow`). Not in the search field, whose
       // arrows move the cursor (`SEARCH_FIELD_KEYS` returned above), and not in a question form,
@@ -560,7 +594,7 @@ export function App({
         event.preventDefault()
         if (arrow === 'open') setGroupOpen(true)
         else if (arrow === 'close') setGroupOpen(false)
-        else setSelectedId(EXCLUDED_GROUP_ID)
+        else selectByUser(EXCLUDED_GROUP_ID)
         return
       }
       // With a question form open, Tab moves the focus onto its active question; from then on its
@@ -575,14 +609,16 @@ export function App({
         return
       }
       // In the search, Enter opens the selected match; without a match there is nothing to open. On
-      // the excluded group's header Enter opens or closes the group, and Tab does nothing.
+      // the excluded group's header Enter opens or closes the group, and Tab does nothing. The jump
+      // goes on the key's release (`jumpOnRelease`), to the row selected at its press; the
+      // auto-repeat of a held key does nothing.
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
         if (headerSelected) {
           if (event.key === 'Enter') setGroupOpen((open) => !open)
           return
         }
-        if (selectedItem !== undefined) void window.claudeswitcher.focusSession(selectedItem)
+        if (selectedItem !== undefined && !event.repeat) jumpOnRelease.arm(event.key, selectedItem)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -615,7 +651,7 @@ export function App({
           ref={isSelected ? selectedRow : null}
           className={`session ${row.status} ${place === 'list' ? '' : 'excluded'} ${isSelected ? 'selected' : ''} ${autoAllowed === undefined ? '' : 'auto-accept'}`}
           onClick={() => {
-            setSelectedId(row.sessionId)
+            selectByUser(row.sessionId)
           }}
           onDoubleClick={() => {
             void window.claudeswitcher.focusSession(row.sessionId)
@@ -757,7 +793,7 @@ export function App({
                 className={`excluded-header ${headerSelected ? 'selected' : ''}`}
                 title={EXCLUDED_TEXT.groupTitle}
                 onClick={() => {
-                  setSelectedId(EXCLUDED_GROUP_ID)
+                  selectByUser(EXCLUDED_GROUP_ID)
                   setGroupOpen((open) => !open)
                 }}
               >
