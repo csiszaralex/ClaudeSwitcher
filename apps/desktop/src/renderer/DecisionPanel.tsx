@@ -6,12 +6,16 @@ import { errorMessage } from '../shared/error-message.js'
 import {
   ACTION_BUTTONS,
   DENY_BUTTON,
+  isRuleAction,
   isTypingTarget,
   isUnreadableQuestion,
   readDecideResult,
+  ruleDecision,
+  ruleScopeText,
   shortcutFor,
   type ActionButton,
   type DecisionAction,
+  type RuleAction,
 } from './decision-actions.js'
 import { DecisionContent } from './DecisionContent.js'
 import { JumpButton } from './JumpButton.js'
@@ -25,10 +29,6 @@ import { requestFacts, type RequestSource } from '../shared/request-source.js'
 import { releasedMessage, unreadableMessage } from './session-marker.js'
 import { showsSummary, summaryView } from './summary-view.js'
 
-function isRuleAction(action: DecisionAction): boolean {
-  return action === 'rule-project' || action === 'rule-machine'
-}
-
 const KIND_LABEL = {
   tool: 'Engedélyt kér',
   edit: 'Fájlt írna',
@@ -36,7 +36,7 @@ const KIND_LABEL = {
   plan: 'Tervet hagyatna jóvá',
 } as const
 
-type Mode = 'buttons' | Extract<DecisionAction, 'deny' | 'rule-project' | 'rule-machine'>
+type Mode = 'buttons' | 'deny' | RuleAction
 
 interface Props {
   decision: PendingDecisionView
@@ -98,6 +98,7 @@ export function DecisionPanel({
         void submit({ type: 'allow-session-edits' })
         return
       case 'deny':
+      case 'rule-session':
       case 'rule-project':
       case 'rule-machine':
         setMode(action)
@@ -225,18 +226,18 @@ export function DecisionPanel({
       )
     }
 
-    if (mode === 'rule-project' || mode === 'rule-machine') {
-      const destination = mode === 'rule-machine' ? 'userSettings' : 'localSettings'
+    if (mode !== 'buttons') {
+      const action = mode
       const seed = ruleEditorSeed(decision.suggestedRules)
       return (
         <RuleEditor
           initial={seed.text}
           multilineSuggestions={seed.multiline}
-          machine={mode === 'rule-machine'}
+          action={action}
           busy={busy}
           host={source.host}
           onSubmit={(rules) => {
-            void submit({ type: 'allow-with-rules', rules, destination })
+            void submit(ruleDecision(action, rules))
           }}
           onCancel={() => {
             setMode('buttons')
@@ -259,16 +260,22 @@ export function DecisionPanel({
 
     switch (decision.kind) {
       case 'tool': {
-        // Claude Code's suggestion fills the editor of both rule buttons, so both get a mark: the key
+        // Claude Code's suggestion fills the editor of every rule button, so each gets a mark: the key
         // letter is inverted (orange background), so the button row stays on one line. The rule is
-        // in the tooltip.
+        // in the tooltip. The session rule's tooltip also says its scope first: its label alone does
+        // not say that it ends with the session and goes into no file.
         const suggestion = suggestionTooltip(decision.suggestedRules)
         const ruleKey = suggestion === undefined ? undefined : 'suggested'
         return (
           <div className="decision-row">
-            {ACTION_BUTTONS.tool.map((button) =>
-              isRuleAction(button.action) ? actionButton(button, suggestion, ruleKey) : actionButton(button),
-            )}
+            {ACTION_BUTTONS.tool.map((button) => {
+              if (!isRuleAction(button.action)) return actionButton(button)
+              const title =
+                button.action === 'rule-session'
+                  ? [ruleScopeText(button.action), suggestion].filter((line) => line !== undefined).join('\n')
+                  : suggestion
+              return actionButton(button, title, ruleKey)
+            })}
           </div>
         )
       }

@@ -1,7 +1,7 @@
 import type { PermissionRule } from '@claudeswitcher/core'
 import { parseRules } from '@claudeswitcher/core/browser'
 import { useState, type JSX } from 'react'
-import { isSubmitChord, MACHINE_RULE_BUTTON, PROJECT_RULE_BUTTON, SUBMIT_CHORD_LABEL } from './decision-actions.js'
+import { isSubmitChord, ruleScopeText, SUBMIT_CHORD_LABEL, type RuleAction } from './decision-actions.js'
 import { broadRules, editorRows, suggestionCount, unparsableLineText } from './rule-editor.js'
 import type { SessionHost } from '../shared/request-source.js'
 
@@ -10,8 +10,8 @@ interface Props {
   initial: string
   /** How many suggestions were left out of the initial text because they contain a line break (rule-editor.ts `ruleEditorSeed`). */
   multilineSuggestions: number
-  /** Machine level: it affects every project and session, so it needs a separate confirmation. */
-  machine: boolean
+  /** The rule button that opened the editor: it names the scope. The machine level affects every project and session, so it needs a separate confirmation. */
+  action: RuleAction
   busy: boolean
   /** Where the session's own prompt is, for the text that sends a multi-line rule there. */
   host: SessionHost
@@ -23,7 +23,8 @@ interface Props {
  * The editable preview of the rule. While a line cannot be parsed it cannot be submitted: a
  * silently "fixed" rule would grant a different permission than the one the user sees.
  */
-export function RuleEditor({ initial, multilineSuggestions, machine, busy, host, onSubmit, onCancel }: Props): JSX.Element {
+export function RuleEditor({ initial, multilineSuggestions, action, busy, host, onSubmit, onCancel }: Props): JSX.Element {
+  const machine = action === 'rule-machine'
   const [text, setText] = useState(initial)
   const [machineConfirmed, setMachineConfirmed] = useState(false)
   // Which broad rule list the user confirmed. If the list changes, the checkbox must not carry the
@@ -56,9 +57,7 @@ export function RuleEditor({ initial, multilineSuggestions, machine, busy, host,
     >
       <p className="muted">
         {/* Named as the button that opened the editor. */}
-        {machine
-          ? `${MACHINE_RULE_BUTTON.label}: minden projektre és sessionre érvényes (~/.claude/settings.json).`
-          : `${PROJECT_RULE_BUTTON.label}: csak ebben a projektben (.claude/settings.local.json).`}
+        {ruleScopeText(action)}
       </p>
       {multilineSuggestions > 0 && (
         <p className="decision-error">

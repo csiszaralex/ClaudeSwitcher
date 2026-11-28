@@ -6,26 +6,32 @@ import {
   isActivationTarget,
   isSubmitChord,
   isTypingTarget,
+  isRuleAction,
   isUnreadableQuestion,
   readDecideResult,
   readOverlaySettings,
+  ruleDecision,
+  ruleScopeText,
   shortcutFor,
   SUBMIT_CHORD_LABEL,
+  type RuleAction,
 } from './decision-actions.js'
 
 describe('shortcutFor', () => {
   it('maps the command keys, case-insensitively', () => {
-    expect(['a', 'd', 'p', 'g', 'A'].map((key) => shortcutFor('tool', key, true))).toEqual([
+    expect(['a', 'd', 's', 'p', 'g', 'A', 'S'].map((key) => shortcutFor('tool', key, true))).toEqual([
       'allow',
       'deny',
+      'rule-session',
       'rule-project',
       'rule-machine',
       'allow',
+      'rule-session',
     ])
     expect(shortcutFor('tool', 'x', true)).toBeUndefined()
   })
 
-  it('offers session edits for a file write, and no rules', () => {
+  it('offers session edits for a file write on the same S, and no rules', () => {
     expect(shortcutFor('edit', 's', true)).toBe('session-edits')
     expect(shortcutFor('edit', 'p', true)).toBeUndefined()
     expect(shortcutFor('edit', 'g', true)).toBeUndefined()
@@ -47,9 +53,48 @@ describe('ACTION_BUTTONS labels', () => {
     expect(ACTION_BUTTONS.tool.map((button) => button.label)).toEqual([
       'Engedélyezés',
       'Tiltás',
+      'Sessionszabály',
       'Projektszabály',
       'Gépszintű szabály',
     ])
+  })
+})
+
+describe('the rule buttons', () => {
+  const actions: RuleAction[] = ['rule-session', 'rule-project', 'rule-machine']
+
+  it('come in the tool row narrowest scope first, each one armed-gated', () => {
+    const rules = ACTION_BUTTONS.tool.filter((button) => isRuleAction(button.action))
+    expect(rules.map((button) => [button.action, button.key])).toEqual([
+      ['rule-session', 's'],
+      ['rule-project', 'p'],
+      ['rule-machine', 'g'],
+    ])
+    for (const button of rules) expect(button.needsArming).toBe(true)
+  })
+
+  it('send the rules to the destination of their scope', () => {
+    const rules = [{ toolName: 'Bash', ruleContent: 'node -e *' }]
+    expect(actions.map((action) => ruleDecision(action, rules))).toEqual([
+      { type: 'allow-with-rules', rules, destination: 'session' },
+      { type: 'allow-with-rules', rules, destination: 'localSettings' },
+      { type: 'allow-with-rules', rules, destination: 'userSettings' },
+    ])
+  })
+
+  it('are the only rule actions', () => {
+    expect(isRuleAction('allow')).toBe(false)
+    expect(isRuleAction('deny')).toBe(false)
+    expect(isRuleAction('session-edits')).toBe(false)
+  })
+
+  it('say their scope after their label, the session rule that it ends with the session and goes into no file', () => {
+    expect(ruleScopeText('rule-session')).toBe(
+      'Sessionszabály: csak ebben a sessionben érvényes, amíg az véget nem ér, és nem kerül fájlba.',
+    )
+    for (const action of actions) {
+      expect(ruleScopeText(action)).not.toMatch(/[–—]/)
+    }
   })
 })
 
@@ -157,7 +202,13 @@ describe('isUnreadableQuestion', () => {
 
 describe('shortcutFor: unreadable request', () => {
   it('leaves only deny on the keyboard, since no allow can go out for it', () => {
-    expect(['a', 'd', 'p', 'g'].map((key) => shortcutFor('tool', key, false))).toEqual([undefined, 'deny', undefined, undefined])
+    expect(['a', 'd', 's', 'p', 'g'].map((key) => shortcutFor('tool', key, false))).toEqual([
+      undefined,
+      'deny',
+      undefined,
+      undefined,
+      undefined,
+    ])
     expect(['a', 'd', 's'].map((key) => shortcutFor('edit', key, false))).toEqual([undefined, 'deny', undefined])
   })
 })

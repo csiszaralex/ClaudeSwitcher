@@ -16,8 +16,22 @@ export interface PermissionRule {
   ruleContent?: string | undefined
 }
 
-/** Where Claude Code writes the rule: the project's local settings or the user-level settings. */
-export type RuleDestination = 'localSettings' | 'userSettings'
+/**
+ * Where Claude Code keeps an added rule (the hooks reference, "Permission update entries",
+ * "Destinations"): `session` in memory only, discarded when the session ends; `localSettings` the
+ * project's `.claude/settings.local.json`; `userSettings` the user-level `~/.claude/settings.json`.
+ * The app writes none of them: Claude Code applies the hook response's `updatedPermissions` itself.
+ */
+const RULE_DESTINATIONS = ['session', 'localSettings', 'userSettings'] as const
+
+export type RuleDestination = (typeof RULE_DESTINATIONS)[number]
+
+const RULE_DESTINATION_SET: ReadonlySet<unknown> = new Set(RULE_DESTINATIONS)
+
+/** True for one of `RULE_DESTINATIONS`; anything else (`projectSettings` included) is not offered. */
+export function isRuleDestination(value: unknown): value is RuleDestination {
+  return RULE_DESTINATION_SET.has(value)
+}
 
 interface AskOption {
   label: string
@@ -33,7 +47,7 @@ export interface AskQuestion {
 
 /**
  * What the overlay offers for a request (the table in the design doc, section 5):
- * - `tool` (command, WebFetch, MCP): allow / deny / a project or user-level rule
+ * - `tool` (command, WebFetch, MCP): allow / deny / a session, project or user-level rule
  * - `edit` (file write): allow / deny / accept edits automatically for this session
  * - `question` (AskUserQuestion): goes through only with the user's answer
  * - `plan` (ExitPlanMode): can be rejected with feedback; the hook cannot approve it

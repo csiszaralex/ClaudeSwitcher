@@ -694,7 +694,7 @@ PermissionRequest ─→ PendingDecision, the HTTP response suspended
 
 | `tool_name` | The overlay shows | Buttons | Answer to the hook |
 |---|---|---|---|
-| Bash, PowerShell, WebFetch, MCP, … | the tool, the input, who asks (session or subagent); for a Bash command that runs git, one line per git call saying what it does, the dangerous ones marked | Allow · Deny (with a reason) · Project level · Machine level | `allow` / `deny`+`message` / `allow`+`updatedPermissions` |
+| Bash, PowerShell, WebFetch, MCP, … | the tool, the input, who asks (session or subagent); for a Bash command that runs git, one line per git call saying what it does, the dangerous ones marked | Allow · Deny (with a reason) · Session level · Project level · Machine level | `allow` / `deny`+`message` / `allow`+`updatedPermissions` (`addRules` to `session`, `localSettings` or `userSettings`) |
 | Write, Edit | the file, a diff summary | Allow · Deny · For this session automatically | `allow` / `deny` / `allow`+`setMode acceptEdits session` |
 | AskUserQuestion | the questions and the options | option choice (several for multi-select), free text → Answer | `allow`+`updatedInput.answers` (key: the question's text, value: the option label; several labels joined with `", "`; free text verbatim) |
 | ExitPlanMode | the plan's text | Reject with feedback · **"Jóváhagyás a VS Code-ban"** (approve in VS Code: jumps there; for a terminal session "a terminálban") | `deny`+`message`; it cannot be approved from the hook (§10) |
@@ -703,6 +703,20 @@ PermissionRequest ─→ PendingDecision, the HTTP response suspended
 editable**; the user can rewrite it (narrow it), and Claude Code itself writes the approved
 version (`localSettings` / `userSettings`). The app writes no settings file. The machine level
 option asks for a separate confirmation, because it affects every session.
+
+**Session rule (added 2026-11-28, unmeasured until the owner's live test).** The third rule
+button, "Sessionszabály" (key S, the letter the edit kind already uses for its session option),
+sends the same `addRules` entry with `destination: 'session'`. The hooks reference
+(https://code.claude.com/docs/en/hooks, "Permission update entries", "Destinations", read
+2026-11-28) lists `session` as "in-memory only, discarded when the session ends", next to
+`localSettings`, `projectSettings` and `userSettings`. The owner asked for it because the VS Code
+extension offers a session scope by default. The app lacked it only because the permission spike
+measured the two file destinations (`spikes/m2-permission/RESULTS.md`, row 10 and K5) and nobody
+tried this one for a rule; it was never rejected. The editor, the arming and the checks are the rule
+buttons' own; there is no extra confirmation, since the rule ends with the session. Not measured
+yet: that Claude Code stops asking for the same command in that session, that a new session asks
+again, and that no settings file changes. `projectSettings` (the committed `.claude/settings.json`)
+stays unoffered: `parseUserDecision` rejects it.
 
 **A late click.** If the decision has already been made (from any source), the overlay's row
 disappears; a click that arrives meanwhile is a no-op. After a release the row stays, but only
