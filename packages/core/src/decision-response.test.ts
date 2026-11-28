@@ -82,6 +82,22 @@ describe('buildHookResponse', () => {
     })
   })
 
+  it('adds a rule for the session only: Claude Code keeps it in memory and writes no file', () => {
+    const decision = decisionOf(
+      buildHookResponse(bash, {
+        type: 'allow-with-rules',
+        rules: [{ toolName: 'Bash', ruleContent: 'echo spike-a *' }],
+        destination: 'session',
+      }),
+    )
+    expect(decision).toEqual({
+      behavior: 'allow',
+      updatedPermissions: [
+        { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'echo spike-a *' }], behavior: 'allow', destination: 'session' },
+      ],
+    })
+  })
+
   it('omits ruleContent for an MCP rule instead of sending it as undefined', () => {
     const result = buildHookResponse(mcp, {
       type: 'allow-with-rules',
@@ -175,6 +191,16 @@ describe('parseUserDecision: the IPC boundary', () => {
     expect(parseUserDecision({ type: 'answer', answers: { q: 'a' } })).toEqual({ type: 'answer', answers: { q: 'a' } })
   })
 
+  it('accepts each rule destination the panel offers', () => {
+    for (const destination of ['session', 'localSettings', 'userSettings']) {
+      expect(parseUserDecision({ type: 'allow-with-rules', destination, rules: [{ toolName: 'Bash', ruleContent: 'ls *' }] })).toEqual({
+        type: 'allow-with-rules',
+        destination,
+        rules: [{ toolName: 'Bash', ruleContent: 'ls *' }],
+      })
+    }
+  })
+
   it('rejects anything malformed, and never throws', () => {
     for (const garbage of [
       null,
@@ -182,6 +208,8 @@ describe('parseUserDecision: the IPC boundary', () => {
       { type: 'approve' },
       { type: 'deny', message: 7 },
       { type: 'allow-with-rules', destination: 'projectSettings', rules: [] },
+      { type: 'allow-with-rules', destination: 'Session', rules: [{ toolName: 'Bash' }] },
+      { type: 'allow-with-rules', rules: [{ toolName: 'Bash' }] },
       { type: 'allow-with-rules', destination: 'userSettings', rules: [{ ruleContent: 'x' }] },
       { type: 'answer', answers: { q: 1 } },
       { type: 'answer', answers: [] },

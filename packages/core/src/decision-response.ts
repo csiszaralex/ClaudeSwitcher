@@ -1,4 +1,4 @@
-import type { PermissionRequestInfo, PermissionRule, RuleDestination } from './decision.js'
+import { isRuleDestination, type PermissionRequestInfo, type PermissionRule, type RuleDestination } from './decision.js'
 import { isRecord } from './guards.js'
 
 /** The user's decision on a pending request: it comes from the overlay, over IPC. */
@@ -143,7 +143,7 @@ export function parseUserDecision(raw: unknown): UserDecision | undefined {
     case 'allow-with-rules': {
       const destination = raw['destination']
       const list = raw['rules']
-      if (destination !== 'localSettings' && destination !== 'userSettings') return undefined
+      if (!isRuleDestination(destination)) return undefined
       if (!Array.isArray(list)) return undefined
       const rules: PermissionRule[] = []
       for (const item of list) {
