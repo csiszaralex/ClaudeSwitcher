@@ -7,6 +7,9 @@ import { DecisionPanel } from './DecisionPanel.js'
 import { requestSource, sessionHost } from '../shared/request-source.js'
 import { RuleEditor } from './RuleEditor.js'
 
+/** The session rule's scope line (decision-actions.ts `ruleScopeText`), spelled out: the test pins the wording. */
+const SESSION_SCOPE = 'Sessionszabály: csak ebben a sessionben érvényes, amíg az véget nem ér, és nem kerül fájlba.'
+
 function bashDecision(overrides: Partial<PendingDecisionView> = {}): PendingDecisionView {
   return {
     id: 'd1',
@@ -204,7 +207,7 @@ describe('Ctrl+Enter label', () => {
       createElement(RuleEditor, {
         initial: 'Bash(node -e *)',
         multilineSuggestions: 0,
-        machine: false,
+        action: 'rule-project',
         busy: false,
         host: sessionHost(undefined),
         onSubmit: () => undefined,
@@ -278,7 +281,7 @@ describe("the session's host in the texts", () => {
       createElement(RuleEditor, {
         initial: '',
         multilineSuggestions: 1,
-        machine: false,
+        action: 'rule-project',
         busy: false,
         host: sessionHost('cli'),
         onSubmit: () => undefined,
@@ -290,14 +293,13 @@ describe("the session's host in the texts", () => {
 })
 
 describe('rule suggestion mark', () => {
-  /** The full markup of the P and the G button, from the opening tag to `</button>`. */
-  function ruleButtons(html: string): string[] {
-    return [...html.matchAll(/<button[^>]*>(?:(?!<\/button>).)*?<kbd[^>]*>[PG]<\/kbd>(?:(?!<\/button>).)*<\/button>/g)].map(
-      (match) => match[0],
-    )
+  /** The full markup of the buttons with the given key letters, from the opening tag to `</button>`. */
+  function ruleButtons(html: string, letters = 'PG'): string[] {
+    const pattern = new RegExp(`<button[^>]*>(?:(?!</button>).)*?<kbd[^>]*>[${letters}]</kbd>(?:(?!</button>).)*</button>`, 'g')
+    return [...html.matchAll(pattern)].map((match) => match[0])
   }
 
-  it('marks both rule buttons and names the suggested rule in their tooltip', () => {
+  it('marks the project and the machine rule and names the suggested rule in their tooltip', () => {
     const html = render(bashDecision({ suggestedRules: [{ toolName: 'Bash', ruleContent: 'node -e *' }] }))
     const buttons = ruleButtons(html)
     expect(buttons).toHaveLength(2)
@@ -307,13 +309,73 @@ describe('rule suggestion mark', () => {
     }
   })
 
-  it('changes nothing without a suggestion', () => {
-    const buttons = ruleButtons(render(bashDecision()))
+  it('marks the session rule too, with the suggested rule after its scope', () => {
+    const html = render(bashDecision({ suggestedRules: [{ toolName: 'Bash', ruleContent: 'node -e *' }] }))
+    const [session] = ruleButtons(html, 'S')
+    expect(session).toContain(`title="${SESSION_SCOPE}\nA Claude Code szabályt javasol:\nBash(node -e *)"`)
+    expect(session).toContain('<kbd class="suggested">S</kbd>')
+  })
+
+  it('changes nothing without a suggestion, and the session rule still says its scope', () => {
+    const html = render(bashDecision())
+    const buttons = ruleButtons(html)
     expect(buttons).toHaveLength(2)
     for (const button of buttons) {
       expect(button).not.toContain('title=')
       expect(button).not.toContain('class="suggested"')
     }
+    const [session] = ruleButtons(html, 'S')
+    expect(session).toContain(`title="${SESSION_SCOPE}"`)
+    expect(session).not.toContain('class="suggested"')
+  })
+})
+
+describe('the session rule button', () => {
+  /** The key letters of the rendered buttons, upper case, in display order. */
+  function keysInOrder(html: string): string[] {
+    return [...html.matchAll(/<button[^>]*><kbd[^>]*>([A-Z])<\/kbd>/g)].map((match) => match[1]!)
+  }
+
+  it('shows on a command between deny and the project rule, with its label', () => {
+    const html = render(bashDecision())
+    expect(keysInOrder(html)).toEqual(['A', 'D', 'S', 'P', 'G'])
+    expect(html).toMatch(/<kbd[^>]*>S<\/kbd> Sessionszabály<\/button>/)
+  })
+
+  it('is disabled on a freshly mounted panel, like every allowing button', () => {
+    const html = render(bashDecision(), Date.now() - 60_000)
+    expect(/<button[^>]*><kbd[^>]*>S<\/kbd>[^<]*<\/button>/.exec(html)?.[0]).toContain('disabled=""')
+  })
+
+  it('opens an editor that names its scope, without the machine-level confirmation', () => {
+    const html = renderToStaticMarkup(
+      createElement(RuleEditor, {
+        initial: 'Bash(node -e *)',
+        multilineSuggestions: 0,
+        action: 'rule-session',
+        busy: false,
+        host: sessionHost(undefined),
+        onSubmit: () => undefined,
+        onCancel: () => undefined,
+      }),
+    )
+    expect(html).toContain(SESSION_SCOPE)
+    expect(html).not.toContain('Értem, hogy ez a gép minden sessionjére érvényes')
+  })
+
+  it('is not on a file edit: there S stays the session edits button', () => {
+    const html = render(
+      bashDecision({
+        kind: 'edit',
+        toolName: 'Write',
+        toolInput: { file_path: 'p:\\proj\\alpha\\a.txt', content: 'a' },
+        summary: 'p:\\proj\\alpha\\a.txt',
+        description: undefined,
+      }),
+    )
+    expect(keysInOrder(html)).toEqual(['A', 'D', 'S'])
+    expect(html).toContain('Erre a sessionre automatikusan')
+    expect(html).not.toContain('Sessionszabály')
   })
 })
 

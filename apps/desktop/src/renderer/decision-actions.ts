@@ -1,9 +1,12 @@
-import type { DecisionKind } from '@claudeswitcher/core'
+import type { DecisionKind, PermissionRule, RuleDestination, UserDecision } from '@claudeswitcher/core'
 import { isRecord } from '@claudeswitcher/core/browser'
 import type { DecideOutcome } from '../shared/overlay-channels.js'
 import { DEFAULT_SETTINGS } from '../shared/settings.js'
 
-export type DecisionAction = 'allow' | 'deny' | 'rule-project' | 'rule-machine' | 'session-edits'
+/** The three rule buttons' actions, the narrowest scope first. */
+export type RuleAction = 'rule-session' | 'rule-project' | 'rule-machine'
+
+export type DecisionAction = 'allow' | 'deny' | RuleAction | 'session-edits'
 
 /** One button of a decision's button row, with its key letter. */
 export interface ActionButton {
@@ -24,18 +27,55 @@ export const DENY_BUTTON: ActionButton = { action: 'deny', key: 'd', label: 'Til
 /** Allow: in the button row of a command and of a file edit. */
 const ALLOW_BUTTON: ActionButton = { action: 'allow', key: 'a', label: 'Engedélyezés', needsArming: true }
 
-/** The two rule buttons. Their labels also name the rule editor each one opens (`RuleEditor`). */
-export const PROJECT_RULE_BUTTON: ActionButton = {
+/** The three rule buttons. Their labels also name the rule editor each one opens (`ruleScopeText`). */
+const SESSION_RULE_BUTTON: ActionButton = {
+  action: 'rule-session',
+  key: 's',
+  label: 'Sessionszabály',
+  needsArming: true,
+}
+const PROJECT_RULE_BUTTON: ActionButton = {
   action: 'rule-project',
   key: 'p',
   label: 'Projektszabály',
   needsArming: true,
 }
-export const MACHINE_RULE_BUTTON: ActionButton = {
+const MACHINE_RULE_BUTTON: ActionButton = {
   action: 'rule-machine',
   key: 'g',
   label: 'Gépszintű szabály',
   needsArming: true,
+}
+
+/** Where each rule button's rule goes (core `decision.ts` `RuleDestination`). */
+const RULE_DESTINATION: Readonly<Record<RuleAction, RuleDestination>> = {
+  'rule-session': 'session',
+  'rule-project': 'localSettings',
+  'rule-machine': 'userSettings',
+}
+
+export function isRuleAction(action: DecisionAction): action is RuleAction {
+  return Object.hasOwn(RULE_DESTINATION, action)
+}
+
+/** The decision a rule editor sends: allow, and add the rules at the button's destination. */
+export function ruleDecision(action: RuleAction, rules: PermissionRule[]): UserDecision {
+  return { type: 'allow-with-rules', rules, destination: RULE_DESTINATION[action] }
+}
+
+/**
+ * What a rule applies to and where it is kept, after the button's label: the rule editor's first
+ * line, and the session rule button's tooltip (the scope the other two labels already say).
+ */
+export function ruleScopeText(action: RuleAction): string {
+  switch (action) {
+    case 'rule-session':
+      return `${SESSION_RULE_BUTTON.label}: csak ebben a sessionben érvényes, amíg az véget nem ér, és nem kerül fájlba.`
+    case 'rule-project':
+      return `${PROJECT_RULE_BUTTON.label}: csak ebben a projektben (.claude/settings.local.json).`
+    case 'rule-machine':
+      return `${MACHINE_RULE_BUTTON.label}: minden projektre és sessionre érvényes (~/.claude/settings.json).`
+  }
 }
 
 /**
@@ -44,7 +84,7 @@ export const MACHINE_RULE_BUTTON: ActionButton = {
  * hook cannot approve it, rejecting it needs feedback, and a mistyped letter must not reject a plan.
  */
 export const ACTION_BUTTONS: Readonly<Record<DecisionKind, readonly ActionButton[]>> = {
-  tool: [ALLOW_BUTTON, DENY_BUTTON, PROJECT_RULE_BUTTON, MACHINE_RULE_BUTTON],
+  tool: [ALLOW_BUTTON, DENY_BUTTON, SESSION_RULE_BUTTON, PROJECT_RULE_BUTTON, MACHINE_RULE_BUTTON],
   edit: [
     ALLOW_BUTTON,
     DENY_BUTTON,
