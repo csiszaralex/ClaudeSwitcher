@@ -52,6 +52,7 @@ import { SourceLabel } from './SourceLabel.js'
 import { UntilBar } from './UntilBar.js'
 import { sessionUsageLimit, usageLimitStatusText } from './usage-limit.js'
 import { useAppVersion, withAppVersion } from './useAppVersion.js'
+import { useReleaseKey } from './useReleaseKey.js'
 import type { OverlayState } from './useDaemonState.js'
 import type { SeenFinishes } from '../shared/session-finished.js'
 import { nameTooltip } from '../shared/session-name.js'
@@ -381,30 +382,17 @@ export function App({
     }
   }, [hold])
 
-  // The Esc that hides the overlay hides it on its release, not on its press. Hiding gives the focus
-  // back to the window in front before (`main/focus-return.ts`), and with the key still down that
-  // window would get its release, and its auto-repeat if held: a browser showing a video full screen
-  // took that as its own Esc and left full screen (seen by the owner, 2026-11-22). A press the overlay
-  // armed only counts: an Esc that went down elsewhere does nothing here, and the focus leaving the
-  // overlay meanwhile disarms it.
-  const escapeHides = useRef(false)
-  useEffect(() => {
-    const onKeyUp = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || !escapeHides.current) return
-      escapeHides.current = false
-      event.preventDefault()
-      void window.claudeswitcher.hide()
-    }
-    const disarm = (): void => {
-      escapeHides.current = false
-    }
-    window.addEventListener('keyup', onKeyUp)
-    window.addEventListener('blur', disarm)
-    return () => {
-      window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('blur', disarm)
-    }
-  }, [])
+  // The Esc that hides the overlay hides it on its release, not on its press (`useReleaseKey`):
+  // hiding gives the focus back to the window in front before (`main/focus-return.ts`), which would
+  // otherwise get the key's release. The same for the list's jump to a session (Enter, and Tab on a
+  // row without a request, also from the search field and the peek): the jump brings the session's
+  // window to the front, which would otherwise get the release, and a held Enter's repeats.
+  const escapeHides = useReleaseKey<undefined>(() => {
+    void window.claudeswitcher.hide()
+  })
+  const jumpOnRelease = useReleaseKey<string>((sessionId) => {
+    void window.claudeswitcher.focusSession(sessionId)
+  })
 
   /** Back from the peek to the list, with the peeked session selected (a new request may have moved the selection meanwhile). */
   function closePeek(id: string): void {
@@ -425,7 +413,7 @@ export function App({
     }
     if (event.key === 'Enter') {
       event.preventDefault()
-      void window.claudeswitcher.focusSession(id)
+      if (!event.repeat) jumpOnRelease.arm(event.key, id)
       return
     }
     const box = peekHistory.current
@@ -566,8 +554,10 @@ export function App({
         event.preventDefault()
         const row = selectedRowView
         if (row?.session !== undefined) {
-          // An Esc pressed before, still down, must not hide the overlay on its release in the bar.
-          escapeHides.current = false
+          // An Esc or an Enter pressed before, still down, must not hide the overlay or jump on its
+          // release later: the bar keeps its keys' releases from the window.
+          escapeHides.disarm()
+          jumpOnRelease.disarm()
           setUntilBarId(row.sessionId)
         }
         return
@@ -588,7 +578,7 @@ export function App({
         // search the Esc hides the overlay, but only on its release (`escapeHides`).
         if (query === undefined) {
           event.preventDefault()
-          if (!event.repeat) escapeHides.current = true
+          if (!event.repeat) escapeHides.arm(event.key, undefined)
         } else setQuery(undefined)
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -619,14 +609,16 @@ export function App({
         return
       }
       // In the search, Enter opens the selected match; without a match there is nothing to open. On
-      // the excluded group's header Enter opens or closes the group, and Tab does nothing.
+      // the excluded group's header Enter opens or closes the group, and Tab does nothing. The jump
+      // goes on the key's release (`jumpOnRelease`), to the row selected at its press; the
+      // auto-repeat of a held key does nothing.
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
         if (headerSelected) {
           if (event.key === 'Enter') setGroupOpen((open) => !open)
           return
         }
-        if (selectedItem !== undefined) void window.claudeswitcher.focusSession(selectedItem)
+        if (selectedItem !== undefined && !event.repeat) jumpOnRelease.arm(event.key, selectedItem)
       }
     }
     window.addEventListener('keydown', onKey)

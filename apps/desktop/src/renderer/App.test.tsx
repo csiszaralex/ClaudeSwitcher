@@ -57,14 +57,80 @@ describe('the list keys', () => {
     expect(api.focusSession.mock.calls).toEqual([[sessionId(2)]])
   })
 
-  it('jumps again on every auto-repeated Enter of a held key', async () => {
-    // Today App's `onKey` does not look at `repeat` for Enter: each repeat asks for the jump again,
-    // and the main process drops a jump asked while one runs (`main/index.ts` `jumpInFlight`).
+  it('jumps on the release of Enter, not on its press, so the session window never gets the key', async () => {
+    const { api, user } = await renderOverlay({ sessions: LIST })
+    await user.keyboard('{Enter>}')
+    expect(api.focusSession).not.toHaveBeenCalled()
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+  })
+
+  it('jumps once on the release of a held Enter: the auto-repeats do nothing', async () => {
     const { api } = await renderOverlay({ sessions: LIST })
     fireEvent.keyDown(document.body, { key: 'Enter' })
     fireEvent.keyDown(document.body, { key: 'Enter', repeat: true })
     fireEvent.keyDown(document.body, { key: 'Enter', repeat: true })
-    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)], [sessionId(1)], [sessionId(1)]])
+    expect(api.focusSession).not.toHaveBeenCalled()
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+  })
+
+  it('ignores an Enter release whose press it did not see, and a press the focus left meanwhile', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    fireEvent.keyDown(document.body, { key: 'Enter' })
+    fireEvent.blur(window)
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    expect(api.focusSession).not.toHaveBeenCalled()
+  })
+
+  it('jumps to the row selected at the press, and on the release of Tab on a row without a request', async () => {
+    const { api } = await renderOverlay({ sessions: LIST })
+    fireEvent.keyDown(document.body, { key: 'Enter' })
+    fireEvent.keyDown(document.body, { key: 'ArrowDown' })
+    fireEvent.keyUp(document.body, { key: 'Enter' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+
+    fireEvent.keyDown(document.body, { key: 'Tab' })
+    expect(api.focusSession.mock.calls).toHaveLength(1)
+    fireEvent.keyUp(document.body, { key: 'Tab' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)], [sessionId(2)]])
+  })
+
+  it('jumps from the search field and from the peek on the release of Enter too', async () => {
+    const { api, user, settle } = await renderOverlay({ sessions: LIST })
+    await user.keyboard('/amm{Enter>}')
+    expect(api.focusSession).not.toHaveBeenCalled()
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(3)]])
+
+    await user.keyboard('{Escape} ')
+    await settle()
+    expect(peek()).not.toBeNull()
+    await user.keyboard('{Enter>}')
+    expect(api.focusSession.mock.calls).toHaveLength(1)
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(3)], [sessionId(3)]])
+  })
+
+  it('jumps from a focused jump button on the release of Enter, once, and on a click', async () => {
+    const released = { ...bashRequest(1, 'pnpm test'), released: true }
+    const { api, user } = await renderOverlay({ sessions: [session(1, 'alpha', { status: 'waiting' })], decisions: [released] })
+    const button = screen.getByRole('button', { name: /^Ugrás/ })
+    button.focus()
+    fireEvent.keyDown(button, { key: 'Enter' })
+    fireEvent.keyDown(button, { key: 'Enter', repeat: true })
+    expect(api.focusSession).not.toHaveBeenCalled()
+    fireEvent.keyUp(button, { key: 'Enter' })
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)]])
+    await user.click(button)
+    expect(api.focusSession.mock.calls).toEqual([[sessionId(1)], [sessionId(1)]])
+    // The press does not click the button either.
+    button.focus()
+    await user.keyboard('{Enter>}')
+    expect(api.focusSession.mock.calls).toHaveLength(2)
+    await user.keyboard('{/Enter}')
+    expect(api.focusSession.mock.calls).toHaveLength(3)
   })
 })
 

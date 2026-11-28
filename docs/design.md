@@ -634,6 +634,16 @@ is now `ACTION_BUTTONS`, read by `shortcutFor`):
   that answers the last open question (asked by the owner, 2026-11-22): an Enter that would move on
   but finds no unanswered question left sends instead. A digit, Space or a click never sends, so an
   answer can be changed after everything is answered without sending it.
+- added later (2026-11-28): every key that takes the focus away from the overlay acts on its
+  release, not on its press (`renderer/useReleaseKey.ts`): Esc's hide (since 0.25.1), and the jump
+  to a session, Enter and Tab on a row, Enter in the search field and in the peek, and Enter on a
+  focused jump button (`JumpButton.tsx` `useJumpButton`, also the plan's approval button). On the
+  press the window in front would get the release, and a held Enter's auto-repeat reached VS Code,
+  where it could send a half-typed prompt (the owner). The keydown arms the key with the target it
+  chose (the selected row at the press), an auto-repeat does nothing, the focus leaving the overlay
+  disarms it, and a release whose press the overlay did not see does nothing. The other Enters
+  (the deny reason, the question form, the time bar, the excluded group's header)
+  stay on the press: they do not leave the overlay.
 - added later (2026-11-28): the selection after a decision made in the app (`selection.ts`
   `nextAfterDecision`). A new request still pulls the selection to its row (`selectOnArrival`);
   App now remembers the latest pull with the item it came from (`Pull`). After the pulling

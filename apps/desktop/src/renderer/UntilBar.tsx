@@ -34,7 +34,7 @@ function previewOf(choice: UntilParse, now: number): string {
  * presets, ←/→ between the presets; a click on a preset confirms it.
  *
  * Every key pressed in it stays in it (`onKeyDown`, `onKeyUp`): neither App's window handler (the
- * list's arrows, Space, Delete, Backspace, Shift+A, and Esc's `escapeHides`) nor the decision panel's
+ * list's arrows, Space, Delete, Backspace, Shift+A, and the releases of Esc and Enter, `useReleaseKey`) nor the decision panel's
  * key letters see it. React handles it at its root, before the event reaches the window, so a
  * waiting request's `a`, `d` or `s` typed here, or pressed with a preset focused, decides nothing,
  * and its Esc does not hide the overlay. It closes when the focus leaves it and when the window
