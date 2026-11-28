@@ -634,6 +634,17 @@ is now `ACTION_BUTTONS`, read by `shortcutFor`):
   that answers the last open question (asked by the owner, 2026-11-22): an Enter that would move on
   but finds no unanswered question left sends instead. A digit, Space or a click never sends, so an
   answer can be changed after everything is answered without sending it.
+- added later (2026-11-28): the selection after a decision made in the app (`selection.ts`
+  `nextAfterDecision`). A new request still pulls the selection to its row (`selectOnArrival`);
+  App now remembers the latest pull with the item it came from (`Pull`). After the pulling
+  request's decision, when the session has no other request to decide and nothing else waits, the
+  selection goes back to that item if it is still listed, also with "Elrejtés az utolsó döntés
+  után" on: the user had the overlay open for something else, and the request only interrupted
+  him (a judgment of the 2026-11-28 batch, the owner's brief left it open). The memory ends with
+  the user's own move (the arrows, a click, the search), a blur (the overlay hides on it), a show,
+  and its one use; only a sibling request still to decide keeps it. When nothing is left and
+  nothing was pulled, the setting off now selects the first unseen finish in list order (the same
+  pick as `selectOnShow`, `firstUnseenFinish`) instead of leaving the selection on the decided row.
 
 ## 5. Data flow
 

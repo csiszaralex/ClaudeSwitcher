@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { AskQuestion } from '@claudeswitcher/core'
+import type { PendingDecisionView } from '@claudeswitcher/daemon'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { pendingRowText } from '../shared/row-text.js'
@@ -11,6 +12,7 @@ import {
   questionRequest,
   renderOverlay,
   type OverlaySetup,
+  type RenderedOverlay,
   row,
   rowNames,
   rows,
@@ -407,6 +409,118 @@ describe('the decision panel letters', () => {
 
     await user.keyboard('{Enter}')
     expect(api.decide.mock.calls).toEqual([[request.id, { type: 'deny', message: 'ad' }]])
+  })
+})
+
+describe('the selection after a decision', () => {
+  /** The request of gamma that arrives while beta is selected and pulls the selection. */
+  const pulling = { ...bashRequest(3, 'pnpm test'), id: 'req-pull' }
+  const waiting = (n: number, name: string) => session(n, name, { status: 'waiting' })
+
+  /** The overlay with beta selected, then gamma's request arriving: the selection is pulled to gamma. */
+  async function pulled(more: PendingDecisionView[] = []): Promise<RenderedOverlay> {
+    const overlay = await renderOverlay({ sessions: LIST })
+    await overlay.user.keyboard('{ArrowDown}')
+    expect(selectedName()).toBe('beta')
+    overlay.sendState({ sessions: [LIST[0]!, LIST[1]!, waiting(3, 'gamma')], decisions: [pulling, ...more] })
+    expect(selectedName()).toBe('gamma')
+    overlay.armKeys()
+    return overlay
+  }
+
+  /** Allows the selected request on A and lets the step after it land. */
+  async function allow(overlay: RenderedOverlay): Promise<void> {
+    await overlay.user.keyboard('a')
+    await overlay.settle()
+  }
+
+  it('goes back to the row a request pulled the selection from, once its request is decided', async () => {
+    const overlay = await pulled()
+    await allow(overlay)
+    expect(overlay.api.decide.mock.calls).toEqual([[pulling.id, { type: 'allow' }]])
+    expect(selectedName()).toBe('beta')
+    expect(overlay.api.hide).not.toHaveBeenCalled()
+  })
+
+  it('does not go back when the user moved the selection himself meanwhile', async () => {
+    const overlay = await pulled()
+    await overlay.user.keyboard('{ArrowDown}{ArrowUp}')
+    expect(selectedName()).toBe('gamma')
+    // The panel mounted again with the selection: its letters arm again.
+    overlay.armKeys()
+    await allow(overlay)
+    expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves to another waiting request instead', async () => {
+    const overlay = await pulled()
+    // It arrives after the pull, so the selection stays on gamma, which holds a request.
+    overlay.sendState({ sessions: [waiting(1, 'alpha'), LIST[1]!, waiting(3, 'gamma')], decisions: [pulling, bashRequest(1, 'pnpm lint')] })
+    expect(selectedName()).toBe('gamma')
+    await allow(overlay)
+    expect(selectedName()).toBe('alpha')
+  })
+
+  it('does not go back when the remembered row is gone', async () => {
+    const overlay = await pulled()
+    overlay.sendState({ sessions: [LIST[0]!, waiting(3, 'gamma')], decisions: [pulling] })
+    await allow(overlay)
+    expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays while the decided session has another request to decide, and goes back after that one', async () => {
+    const sibling = { ...bashRequest(3, 'pnpm build'), id: 'req-sibling' }
+    const overlay = await pulled([sibling])
+    await allow(overlay)
+    expect(selectedName()).toBe('gamma')
+    overlay.sendState({ sessions: [LIST[0]!, LIST[1]!, waiting(3, 'gamma')], decisions: [sibling] })
+    overlay.armKeys()
+    await allow(overlay)
+    expect(overlay.api.decide.mock.calls.map(([id]) => id)).toEqual([pulling.id, sibling.id])
+    expect(selectedName()).toBe('beta')
+  })
+
+  it('does not go back after the overlay appeared again', async () => {
+    const overlay = await pulled()
+    await overlay.show()
+    expect(selectedName()).toBe('gamma')
+    overlay.armKeys()
+    await allow(overlay)
+    expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+  })
+
+  describe('after the last decision', () => {
+    const request = bashRequest(1, 'pnpm test')
+    const finished = session(2, 'beta', { stoppedAt: Date.parse('2026-11-21T09:59:00.000Z') })
+
+    it('hides with the setting on', async () => {
+      const overlay = await renderOverlay({ sessions: [waiting(1, 'alpha'), finished], decisions: [request] })
+      overlay.armKeys()
+      await allow(overlay)
+      expect(overlay.api.hide).toHaveBeenCalledTimes(1)
+    })
+
+    it('moves to the first green ✓ with the setting off', async () => {
+      const overlay = await renderOverlay({
+        sessions: [waiting(1, 'alpha'), session(3, 'gamma'), finished],
+        decisions: [request],
+      })
+      overlay.api.settings.mockResolvedValue({ hideAfterLastDecision: false })
+      expect(selectedName()).toBe('alpha')
+      overlay.armKeys()
+      await allow(overlay)
+      expect(selectedName()).toBe('beta')
+      expect(overlay.api.hide).not.toHaveBeenCalled()
+    })
+
+    it('stays on the decided row with the setting off and no green ✓', async () => {
+      const overlay = await renderOverlay({ sessions: [waiting(1, 'alpha'), session(3, 'gamma')], decisions: [request] })
+      overlay.api.settings.mockResolvedValue({ hideAfterLastDecision: false })
+      overlay.armKeys()
+      await allow(overlay)
+      expect(selectedName()).toBe('alpha')
+      expect(overlay.api.hide).not.toHaveBeenCalled()
+    })
   })
 })
 

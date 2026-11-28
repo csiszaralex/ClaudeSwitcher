@@ -136,12 +136,12 @@ describe('nextAfterDecision', () => {
     // decision's reply: so it is excluded instead of waiting for the state.
     const sessions = [view('a', 'waiting'), view('b', 'waiting'), view('c', 'idle')]
     const decisions = [pending('da', 'a'), pending('db', 'b')]
-    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'b', hide: false })
+    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'b', hide: false, staysOnSession: false })
   })
 
   it('does not hide while another session still waits, even with auto-hide on', () => {
     const sessions = [view('a', 'idle'), view('n', 'waiting')]
-    expect(nextAfterDecision(sessions, [], pending('da', 'a'), true)).toEqual({ select: 'n', hide: false })
+    expect(nextAfterDecision(sessions, [], pending('da', 'a'), true)).toEqual({ select: 'n', hide: false, staysOnSession: false })
   })
 
   it('stays on the decided session when it has another held decision', () => {
@@ -149,29 +149,41 @@ describe('nextAfterDecision', () => {
     // must not hide, and the next request is right here.
     const sessions = [view('a', 'waiting'), view('b', 'waiting')]
     const decisions = [pending('d1', 'a'), pending('d2', 'a'), pending('d3', 'b')]
-    expect(nextAfterDecision(sessions, decisions, pending('d1', 'a'), true)).toEqual({ select: 'a', hide: false })
+    expect(nextAfterDecision(sessions, decisions, pending('d1', 'a'), true)).toEqual({ select: 'a', hide: false, staysOnSession: true })
   })
 
   it('hides after the last waiting session when auto-hide is on', () => {
     const sessions = [view('a', 'waiting'), view('b', 'idle')]
-    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), true)).toEqual({ hide: true })
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), true)).toEqual({ hide: true, staysOnSession: false })
   })
 
-  it('stays open after the last waiting session when auto-hide is off', () => {
+  it('stays open after the last waiting session when auto-hide is off, the selection where it is without a green ✓', () => {
     const sessions = [view('a', 'waiting'), view('b', 'idle')]
-    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), false)).toEqual({ hide: false })
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), false)).toEqual({ hide: false, staysOnSession: false })
+  })
+
+  it('moves to the first unseen finish in list order after the last decision when auto-hide is off', () => {
+    const done = (sessionId: string) => ({ ...view(sessionId, 'idle'), marker: { tone: 'done' } })
+    const sessions = [view('a', 'waiting'), { ...view('seen', 'idle'), marker: { tone: 'seen' } }, done('f1'), done('f2')]
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), false)).toEqual({
+      select: 'f1',
+      hide: false,
+      staysOnSession: false,
+    })
+    // With auto-hide on, it hides as before.
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), true)).toEqual({ hide: true, staysOnSession: false })
   })
 
   it('does not stay for a released sibling of the decided session', () => {
     const sessions = [view('a', 'waiting'), view('b', 'waiting')]
     const decisions = [pending('d1', 'a'), pending('d2', 'a', true), pending('d3', 'b')]
-    expect(nextAfterDecision(sessions, decisions, pending('d1', 'a'), true)).toEqual({ select: 'b', hide: false })
+    expect(nextAfterDecision(sessions, decisions, pending('d1', 'a'), true)).toEqual({ select: 'b', hide: false, staysOnSession: false })
   })
 
   it('skips a released-only session in favour of one that can be decided', () => {
     const sessions = [view('r', 'waiting'), view('a', 'waiting'), view('w', 'waiting')]
     const decisions = [pending('dr', 'r', true), pending('da', 'a'), pending('dw', 'w')]
-    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'w', hide: false })
+    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'w', hide: false, staysOnSession: false })
   })
 
   it('moves to the session whose held request is oldest, not the one with the earliest waitingSince', () => {
@@ -186,13 +198,72 @@ describe('nextAfterDecision', () => {
       pending('dm', 'mixed', false, 40),
       pending('db', 'b', false, 30),
     ]
-    expect(nextAfterDecision(sessions, decisions, pending('da', 'a', false, 5), true)).toEqual({ select: 'b', hide: false })
+    expect(nextAfterDecision(sessions, decisions, pending('da', 'a', false, 5), true)).toEqual({ select: 'b', hide: false, staysOnSession: false })
   })
 
   it('moves to a released-only session when nothing else waits, without hiding', () => {
     const sessions = [view('a', 'waiting'), view('r', 'waiting')]
     const decisions = [pending('da', 'a'), pending('dr', 'r', true)]
-    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'r', hide: false })
+    expect(nextAfterDecision(sessions, decisions, pending('da', 'a'), true)).toEqual({ select: 'r', hide: false, staysOnSession: false })
+  })
+})
+
+describe('nextAfterDecision: back to the row a request pulled the selection from', () => {
+  const done = { ...view('f', 'idle'), marker: { tone: 'done' } }
+  const sessions = [view('a', 'waiting'), view('home', 'working'), done]
+  const pull = { from: 'home', to: 'a' }
+
+  it('goes back to the remembered row after the pulled request is decided, before a ✓ and instead of hiding', () => {
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), false, pull)).toEqual({
+      select: 'home',
+      hide: false,
+      staysOnSession: false,
+    })
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), true, pull)).toEqual({
+      select: 'home',
+      hide: false,
+      staysOnSession: false,
+    })
+  })
+
+  it('goes back to an item of the list that is not a session row, such as the excluded group header', () => {
+    const header = { from: 'excluded-group', to: 'a' }
+    const listed = ['a', 'home', 'f', 'excluded-group']
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), false, header, listed).select).toBe('excluded-group')
+  })
+
+  it('does not go back while another request waits', () => {
+    const decisions = [pending('da', 'a'), pending('dw', 'w')]
+    const withWaiting = [...sessions, view('w', 'waiting')]
+    expect(nextAfterDecision(withWaiting, decisions, pending('da', 'a'), false, pull)).toEqual({
+      select: 'w',
+      hide: false,
+      staysOnSession: false,
+    })
+  })
+
+  it('does not go back while the decided session has another request it can decide, and keeps the pull for it', () => {
+    const decisions = [pending('d1', 'a'), pending('d2', 'a')]
+    expect(nextAfterDecision(sessions, decisions, pending('d1', 'a'), false, pull)).toEqual({
+      select: 'a',
+      hide: false,
+      staysOnSession: true,
+    })
+  })
+
+  it('does not go back when the remembered row is gone, or the decided request is not the one that pulled', () => {
+    const gone = { from: 'gone', to: 'a' }
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), false, gone).select).toBe('f')
+    const homeWaits = [view('a', 'idle'), view('home', 'waiting'), done]
+    expect(nextAfterDecision(homeWaits, [pending('dh', 'home')], pending('dh', 'home'), false, { from: 'a', to: 'other' })).toEqual({
+      select: 'f',
+      hide: false,
+      staysOnSession: false,
+    })
+    expect(nextAfterDecision(sessions, [pending('da', 'a')], pending('da', 'a'), true, { from: 'f', to: 'other' })).toEqual({
+      hide: true,
+      staysOnSession: false,
+    })
   })
 })
 

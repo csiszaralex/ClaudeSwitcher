@@ -45,7 +45,7 @@ import { isPeekKey, PEEK_TEXT, peekRequest, peekScrollTop } from './peek.js'
 import { activeDecision, buildRows, panelRequest, pendingBadge, rowFolder, waitsOutsideApp } from './rows.js'
 import { pendingRowText } from '../shared/row-text.js'
 import { requestSource, type RequestSource, type SessionHost } from '../shared/request-source.js'
-import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals } from './selection.js'
+import { moveSelection, nextAfterDecision, resolveSelectedIndex, selectOnShow, trackArrivals, type Pull } from './selection.js'
 import { isSearchChord, isSearchKey, SEARCH_KEYS_LABEL } from './session-search.js'
 import { hasRemoteControl, outsideAppMessage } from './session-marker.js'
 import { SourceLabel } from './SourceLabel.js'
@@ -216,8 +216,12 @@ export function App({
 
   // On a new request the app can decide, the selection jumps to it if the selected row has no
   // decision and the user is not typing (selection.ts `selectOnArrival`). Runs only when the list
-  // of requests changed; `trackArrivals` keeps the requests of the previous state.
+  // of requests changed; `trackArrivals` keeps the requests of the previous state. The latest such
+  // pull is remembered with the item the selection was on (selection.ts `Pull`), so the decision
+  // of the pulling request can bring the selection back there (`afterDecision`). The user's own
+  // move (`selectByUser`), a blur or a show forgets it.
   const arrivals = useRef(trackArrivals())
+  const pull = useRef<Pull | undefined>(undefined)
   useEffect(() => {
     const next = arrivals.current({
       sessions: keptRows(allRows, excluded),
@@ -226,8 +230,27 @@ export function App({
       lastTypedAt: keyHistory.current.lastTypedAt,
       now: Date.now(),
     })
-    if (next !== undefined) setSelectedId(next)
+    if (next === undefined) return
+    if (selectedItem !== undefined && selectedItem !== next) pull.current = { from: selectedItem, to: next }
+    setSelectedId(next)
   }, [decisions])
+
+  /** The user moves the selection himself (the arrows, a click, the search): a remembered pull is forgotten. */
+  function selectByUser(id: string | undefined): void {
+    pull.current = undefined
+    setSelectedId(id)
+  }
+
+  // The overlay hides when it loses the focus (the main process), so a blur forgets the pull too.
+  useEffect(() => {
+    const forget = (): void => {
+      pull.current = undefined
+    }
+    window.addEventListener('blur', forget)
+    return () => {
+      window.removeEventListener('blur', forget)
+    }
+  }, [])
 
   // On show, jump to the session that has been waiting longest (or the one a clicked notification
   // named, `preferred`), and the panel arms again: the
@@ -248,6 +271,7 @@ export function App({
         setPeekId(undefined)
         setGroupOpen(false)
         setUntilBarId(undefined)
+        pull.current = undefined
         setSelectedId((current) => selectOnShow(latest.current.rows, latest.current.decisions, current, preferred))
       }),
     [],
@@ -265,7 +289,12 @@ export function App({
     }
   }, [])
 
-  /** After a SUCCESSFUL decision made in the app: steps to the next waiting one, or hides. */
+  /**
+   * After a SUCCESSFUL decision made in the app: steps to the next waiting one, back to the item a
+   * pulling request took the selection from, to the first green ✓, or hides (selection.ts
+   * `nextAfterDecision`). The remembered pull is used once: only a sibling request still to decide
+   * keeps it.
+   */
   async function afterDecision(decided: PendingDecisionView): Promise<void> {
     // Asked fresh on every decision: the tray checkbox can flip at any time, and a cache would need
     // its own notification channel for that. If the IPC fails, the default (hide) applies.
@@ -274,7 +303,15 @@ export function App({
       return undefined
     })
     const { hideAfterLastDecision } = readOverlaySettings(raw)
-    const next = nextAfterDecision(latest.current.rows, latest.current.decisions, decided, hideAfterLastDecision)
+    const next = nextAfterDecision(
+      latest.current.rows,
+      latest.current.decisions,
+      decided,
+      hideAfterLastDecision,
+      pull.current,
+      latest.current.ids,
+    )
+    if (!next.staysOnSession) pull.current = undefined
     if (next.select !== undefined) setSelectedId(next.select)
     if (next.hide) await window.claudeswitcher.hide()
   }
@@ -407,7 +444,7 @@ export function App({
     setQuery(next)
     const { allRows: rowsNow, excluded: excludedNow } = latest.current
     const first = listView(rowsNow, excludedNow, next, false).ids[0]
-    if (next.trim() !== '' && first !== undefined) setSelectedId(first)
+    if (next.trim() !== '' && first !== undefined) selectByUser(first)
   }
 
   /**
@@ -557,7 +594,7 @@ export function App({
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         // Without this the arrow would also scroll the list besides moving the selection.
         event.preventDefault()
-        setSelectedId(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
+        selectByUser(moveSelection(ids, selectedId, event.key === 'ArrowDown' ? 1 : -1))
       }
       // ←/→ on the excluded group, as in a tree view (`groupArrow`). Not in the search field, whose
       // arrows move the cursor (`SEARCH_FIELD_KEYS` returned above), and not in a question form,
@@ -567,7 +604,7 @@ export function App({
         event.preventDefault()
         if (arrow === 'open') setGroupOpen(true)
         else if (arrow === 'close') setGroupOpen(false)
-        else setSelectedId(EXCLUDED_GROUP_ID)
+        else selectByUser(EXCLUDED_GROUP_ID)
         return
       }
       // With a question form open, Tab moves the focus onto its active question; from then on its
@@ -622,7 +659,7 @@ export function App({
           ref={isSelected ? selectedRow : null}
           className={`session ${row.status} ${place === 'list' ? '' : 'excluded'} ${isSelected ? 'selected' : ''} ${autoAllowed === undefined ? '' : 'auto-accept'}`}
           onClick={() => {
-            setSelectedId(row.sessionId)
+            selectByUser(row.sessionId)
           }}
           onDoubleClick={() => {
             void window.claudeswitcher.focusSession(row.sessionId)
@@ -764,7 +801,7 @@ export function App({
                 className={`excluded-header ${headerSelected ? 'selected' : ''}`}
                 title={EXCLUDED_TEXT.groupTitle}
                 onClick={() => {
-                  setSelectedId(EXCLUDED_GROUP_ID)
+                  selectByUser(EXCLUDED_GROUP_ID)
                   setGroupOpen((open) => !open)
                 }}
               >

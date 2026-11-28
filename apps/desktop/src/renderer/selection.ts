@@ -100,10 +100,18 @@ function longestWaiting(
 }
 
 /**
+ * The first unseen finish in list order (marker tone `done`, the green ✓ that has waited longest,
+ * rows.ts `compareWithinGroup`): the next thing to look at when nothing waits. `selectOnShow` and
+ * `nextAfterDecision` both pick it.
+ */
+function firstUnseenFinish(sessions: readonly SessionLike[]): string | undefined {
+  return sessions.find((s) => s.marker?.tone === 'done')?.sessionId
+}
+
+/**
  * The selection when the overlay appears: the session waiting longest, matching the user's flow
  * "open it, decide the oldest". It jumps to a released request only if nothing else waits (see
- * `firstWaiting`). If nobody waits, the first unseen finish in list order (the green ✓ that has
- * waited longest, rows.ts `compareWithinGroup`): the next thing to look at. Without one the current
+ * `firstWaiting`). If nobody waits, the first unseen finish (`firstUnseenFinish`). Without one the current
  * selection stays while it is in the list; otherwise the first row is selected by its id. An
  * `undefined` selection would make the list highlight its first row (`resolveSelectedIndex`), so
  * the highlight would move whenever another row came to the top.
@@ -120,8 +128,8 @@ export function selectOnShow(
   if (preferred !== undefined && sessions.some((s) => s.sessionId === preferred)) return preferred
   const waiting = firstWaiting(sessions, decisions)
   if (waiting !== undefined) return waiting
-  const finished = sessions.find((s) => s.marker?.tone === 'done')
-  if (finished !== undefined) return finished.sessionId
+  const finished = firstUnseenFinish(sessions)
+  if (finished !== undefined) return finished
   if (current !== undefined && sessions.some((s) => s.sessionId === current)) return current
   return sessions[0]?.sessionId
 }
@@ -131,6 +139,23 @@ export interface AfterDecision {
   select?: string | undefined
   /** Whether the overlay hides. */
   hide: boolean
+  /**
+   * Whether the decided session still has a request the app can decide, so the selection stays on
+   * it: the remembered pull (`Pull`) is kept for that request's decision. Every other outcome uses
+   * the pull up or makes it stale.
+   */
+  staysOnSession: boolean
+}
+
+/**
+ * A new request that pulled the selection to its row (`selectOnArrival`): the row it pulled to and
+ * the row the selection was on just before. App keeps the latest one only, and forgets it when the
+ * user moves the selection himself (the arrows, a click, the search), when the overlay hides, and
+ * after a decision used it (`AfterDecision.staysOnSession`).
+ */
+export interface Pull {
+  from: string
+  to: string
 }
 
 /**
@@ -139,22 +164,39 @@ export interface AfterDecision {
  * `sessions` and `decisions` can be one step behind: the decision's reply and the daemon's next
  * state travel separately. So the decided request is excluded by id, and the decided session is
  * not taken as waiting either; once answered it moves to the group its new marker belongs to.
- * The exception is when the same session has ANOTHER request that can still be decided (parallel
- * tool calls): then the selection stays there and the overlay does not hide, because there is still
- * something to decide. A released sibling is no reason to stay.
+ * In this order:
+ *
+ * 1. The same session has ANOTHER request that can still be decided (parallel tool calls): the
+ *    selection stays there and the overlay does not hide, because there is still something to
+ *    decide. A released sibling is no reason to stay.
+ * 2. Another session waits (`firstWaiting`): the selection moves to it.
+ * 3. The decided request pulled the selection to its row (`pull`, its `to` is the decided session)
+ *    and the item it came from is still among the list's items (`listed`, list-cleanup.ts
+ *    `listView` `ids`, by default the sessions): the selection goes back there, and the overlay
+ *    stays.
+ * 4. Nothing is left to decide: with `hideEnabled` the overlay hides; without it the selection moves
+ *    to the first unseen finish (`firstUnseenFinish`), and without one it stays.
  */
 export function nextAfterDecision(
   sessions: readonly SessionLike[],
   decisions: readonly DecisionLike[],
   decided: DecisionLike,
   hideEnabled: boolean,
+  pull?: Pull,
+  listed: readonly string[] = sessions.map((s) => s.sessionId),
 ): AfterDecision {
   const rest = decisions.filter((d) => d.id !== decided.id)
   // Only a sibling that can still be decided holds the selection: the app can no longer decide a released one.
-  if (rest.some((d) => d.sessionId === decided.sessionId && !d.released)) return { select: decided.sessionId, hide: false }
+  if (rest.some((d) => d.sessionId === decided.sessionId && !d.released)) {
+    return { select: decided.sessionId, hide: false, staysOnSession: true }
+  }
   const next = firstWaiting(sessions, rest, decided.sessionId)
-  if (next !== undefined) return { select: next, hide: false }
-  return { hide: hideEnabled }
+  if (next !== undefined) return { select: next, hide: false, staysOnSession: false }
+  if (pull !== undefined && pull.to === decided.sessionId && listed.includes(pull.from)) {
+    return { select: pull.from, hide: false, staysOnSession: false }
+  }
+  if (hideEnabled) return { hide: true, staysOnSession: false }
+  return { select: firstUnseenFinish(sessions), hide: false, staysOnSession: false }
 }
 
 interface ArrivalState {
