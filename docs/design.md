@@ -879,6 +879,42 @@ mode in which the app allows the session's requests by itself. The decisions:
   change Shift+A allowed the selected request. The letters now skip any key with Shift
   (`key-guard.ts` `shortcutAllowed`), and the hold ignores the key's auto-repeat, so the countdown
   runs from the first keydown.
+- *Off at once* (2026-11-28, the owner). Switching on still takes the 3 s hold, because it lets
+  requests through unseen; switching off only makes the session ask again, so one Shift+A press on
+  a row in the mode does it, without a countdown (`App.tsx` `onKey`). The key's auto-repeat after
+  that does nothing, so a held key does not start the hold that would turn it on again.
+- *The count since the last own prompt* (2026-11-28, the owner). The `auto N` tag counts the
+  requests allowed since the user's last own prompt to the session, not since the switch-on: it
+  answers "how much ran unseen since I last told it something". The source is the transcript the
+  daemon reads anyway: core `transcript.ts` `readActivityFromLines` keeps the latest own prompt's
+  `timestamp` as `SessionActivity.lastOwnPromptAt`, and the rule of an own prompt is the peek's
+  (`conversation.ts` `isOwnPrompt`: `origin.kind: "human"` on a `user` record or a
+  `queued_command` attachment, not `isMeta`; not a cross-session message, a task notice, a tool
+  result or a slash command). Slash commands are left out because most are local ones that tell
+  the model nothing: measured 2026-11-28 on 7 days (54 transcripts, Claude Code up to 2.1.332), 42
+  of 49 were followed by their `<local-command-stdout>`. The same measurement: all 2 570 human
+  `user` records and 137 human `queued_command` attachments had a parseable `timestamp`. The main
+  process compares the session's `lastOwnPromptAt` with the prompt the count started at (the one
+  shown at switch-on) in every tray tick (`main/auto-accept.ts` `observe`), so the count resets
+  while the overlay is closed too, and pushes the change (`autoAcceptChanged`). Transcript time is
+  compared with transcript time only, never with the clock. A prompt that a later long turn pushes
+  out of the 256 KB tail leaves `lastOwnPromptAt` absent; that resets nothing, because the reset
+  happened when the prompt was still at the end.
+
+  A `UserPromptSubmit` hook was the alternative: it fires at once, before the model sees the
+  prompt, where the transcript is read every `POLL_INTERVAL_MS` (3 s). It loses on the facts the
+  hook documentation gives (https://code.claude.com/docs/en/hooks, read 2026-11-28): the hook
+  "also fires on turns Claude Code starts on its own", naming "a message another session sends to
+  your main conversation", a background subagent reporting back and a scheduled task, and its
+  input has only `prompt` (and `session_title`) beyond the common fields, no origin. So it cannot
+  tell the user's prompt from a cross-session message without parsing the prompt text for the
+  `<cross-session-message` tag, an undocumented guess. Not documented, and only a live measurement
+  could tell: whether it fires for a prompt typed while the session works (the `queued_command`
+  case, 137 in the week above), and what `prompt` holds for a peer message. It would also be a new
+  hook in `HOOK_CONTRACT` that every user must reinstall, and it blocks the prompt until it
+  answers. The transcript gives the origin explicitly, and the few seconds of delay only matter
+  for a request allowed between the prompt and the scan that shows it: the reset comes after it,
+  so the tag leaves it out.
 
 ### Tab focus (tab focus milestone): without an extension of our own
 

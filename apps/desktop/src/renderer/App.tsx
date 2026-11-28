@@ -117,7 +117,8 @@ const SEARCH_FIELD_KEYS: ReadonlySet<string> = new Set(['ArrowDown', 'ArrowUp', 
  * due row, which answer with the excluded sessions, and calls `onApplied` with them in the same
  * update (`useExcludedSessions`).
  * @param autoAccept The sessions in the auto-accept mode and their counts (`useAutoAccept`).
- * @param trackAutoAccept Takes the reply of a completed Shift+A hold, which answers with them (`useAutoAccept`).
+ * @param trackAutoAccept Takes the reply of a completed Shift+A hold or of a Shift+A that turns the
+ * mode off, which answer with them (`useAutoAccept`).
  */
 export function App({
   overlay,
@@ -313,7 +314,7 @@ export function App({
   // A running hold ends early, changing nothing, when the A or the Shift is released, the window
   // loses the focus, the selection leaves its row, or the peek opens. Otherwise it completes after
   // `AUTO_ACCEPT_HOLD_MS` from its first keydown (the key's auto-repeat does not restart it), and the
-  // main process turns the mode on or off (`AutoAccept.set`).
+  // main process turns the mode on (`AutoAccept.set`). Turning it off needs no hold (`onKey`).
   const holdOff = hold !== undefined && (hold.sessionId !== selectedItem || peekId !== undefined)
   useEffect(() => {
     if (holdOff) setHold(undefined)
@@ -330,7 +331,7 @@ export function App({
     window.addEventListener('blur', cancel)
     const done = setTimeout(() => {
       setHold(undefined)
-      trackAutoAccept(window.claudeswitcher.setAutoAccept(hold.sessionId, hold.turnOn))
+      trackAutoAccept(window.claudeswitcher.setAutoAccept(hold.sessionId, true))
     }, Math.max(0, hold.startedAt + AUTO_ACCEPT_HOLD_MS - Date.now()))
     const countdown = setInterval(() => {
       redrawHold((count) => count + 1)
@@ -477,15 +478,21 @@ export function App({
       // the query (the panel's key letters skip a text field too, `isTypingTarget`).
       if (isTypingTarget(event.target) && !inSearch) return
       if (inSearch && !SEARCH_FIELD_KEYS.has(event.key)) return
-      // Shift+A starts the hold that turns the selected row's auto-accept mode on or off
-      // (auto-accept-hold.ts). Only its first keydown starts it: the auto-repeat of the held key
-      // does not restart the countdown. The decision panel's letters skip it (Shift, key-guard.ts).
+      // Shift+A on the selected row (auto-accept-hold.ts): on a session in the auto-accept mode it
+      // turns the mode off at once; on another it starts the hold that turns it on. Only its first
+      // keydown acts: the auto-repeat of the held key neither restarts the countdown nor, after an
+      // off, starts a hold. The decision panel's letters skip it (Shift, key-guard.ts).
       if (isAutoAcceptKey(event)) {
         event.preventDefault()
         const row = selectedRowView
         if (!event.repeat && row !== undefined) {
-          const start: AutoAcceptHold = { sessionId: row.sessionId, turnOn: !autoAccept.has(row.sessionId), startedAt: Date.now() }
-          setHold((current) => current ?? start)
+          if (autoAccept.has(row.sessionId)) {
+            setHold(undefined)
+            trackAutoAccept(window.claudeswitcher.setAutoAccept(row.sessionId, false))
+          } else {
+            const start: AutoAcceptHold = { sessionId: row.sessionId, startedAt: Date.now() }
+            setHold((current) => current ?? start)
+          }
         }
         return
       }

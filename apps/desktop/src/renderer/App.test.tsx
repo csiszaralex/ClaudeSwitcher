@@ -739,17 +739,51 @@ describe('the auto-accept hold (Shift+A)', () => {
     expect(summaryOf('alpha')).not.toContain('Automatikus')
   })
 
-  it('turns a session in the mode off the same way', async () => {
+  it('turns a session in the mode off at once, without a hold or a countdown, and a held key does nothing more', async () => {
     const { api } = await renderOverlay({ sessions: LIST, autoAccept: [{ sessionId: sessionId(1), allowed: 2 }] })
     expect(row('alpha').classList.contains('auto-accept')).toBe(true)
     expect(tagOf('alpha')).toBe('auto 2')
     fakeClock()
     down()
-    expect(summaryOf('alpha')).toContain('kikapcsolása')
-    advance(3_000)
     expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+    expect(summaryOf('alpha')).not.toContain('Automatikus')
     await flush()
     expect(row('alpha').classList.contains('auto-accept')).toBe(false)
+    // Still held: the repeats neither turn it off again nor start the hold that would turn it on.
+    for (let step = 0; step < 8; step += 1) {
+      advance(500)
+      down(true)
+    }
+    expect(summaryOf('alpha')).not.toContain('Automatikus')
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+  })
+
+  it('needs the full hold again to turn it back on after an off', async () => {
+    const { api } = await renderOverlay({ sessions: LIST, autoAccept: [{ sessionId: sessionId(1), allowed: 2 }] })
+    fakeClock()
+    down()
+    up()
+    await flush()
+    down()
+    advance(2_999)
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+    advance(1)
+    expect(api.setAutoAccept.mock.calls).toEqual([
+      [sessionId(1), false],
+      [sessionId(1), true],
+    ])
+  })
+
+  it('never decides the selected request when it turns the mode off', async () => {
+    const { api, armKeys } = await renderOverlay({
+      sessions: [session(1, 'alpha')],
+      decisions: [request],
+      autoAccept: [{ sessionId: sessionId(1), allowed: 0 }],
+    })
+    armKeys()
+    down()
+    expect(api.setAutoAccept.mock.calls).toEqual([[sessionId(1), false]])
+    expect(api.decide).not.toHaveBeenCalled()
   })
 
   it('does nothing when the A, the Shift or the window is let go early', async () => {

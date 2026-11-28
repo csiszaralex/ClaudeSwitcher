@@ -112,7 +112,7 @@ describe('createAutoAccept: the decider', () => {
     expect(arrive(mode, command('r1', ALPHA))).toEqual({ type: 'allow' })
     expect(arrive(mode, command('r2', ALPHA, { kind: 'edit', toolName: 'Write' }))).toEqual({ type: 'allow' })
     expect(mode.entries()).toEqual([{ sessionId: ALPHA, allowed: 2 }])
-    expect(lines.at(-1)).toBe(`[claudeswitcher] auto-accept: allowed Write of session ${ALPHA} (2 since on)`)
+    expect(lines.at(-1)).toBe(`[claudeswitcher] auto-accept: allowed Write of session ${ALPHA} (2 since the last own prompt)`)
   })
 
   it('never logs the command', () => {
@@ -144,6 +144,68 @@ describe('createAutoAccept: the decider', () => {
     mode.decider.decided(view, { ok: false, reason: 'closed' })
     expect(mode.entries()).toEqual([{ sessionId: ALPHA, allowed: 0 }])
     expect(changes()).toBe(1)
+  })
+})
+
+describe('createAutoAccept: the count since the last own prompt', () => {
+  /** The state with ALPHA listed and its last own prompt at `promptAt` (invented times). */
+  const prompted = (promptAt: number | undefined): ModeState => ({
+    sessions: [{ sessionId: ALPHA, activity: promptAt === undefined ? {} : { lastOwnPromptAt: promptAt } }],
+    decisions: [],
+  })
+  /** A fake daemon whose ALPHA shows its last own prompt at `promptAt`. */
+  const daemonAt = (promptAt: number | undefined): ModeDaemon => ({ state: () => prompted(promptAt), decide: () => ({ ok: true }) })
+
+  it('starts again at 0 on a new own prompt, and pushes it', () => {
+    const { mode, changes, lines } = setup()
+    mode.set(ALPHA, true, daemonAt(1_000))
+    arrive(mode, command('r1', ALPHA))
+    arrive(mode, command('r2', ALPHA))
+    const before = changes()
+    expect(mode.observe(prompted(2_000), 5_000)).toBe(false)
+    expect(mode.entries()).toEqual([{ sessionId: ALPHA, allowed: 0 }])
+    expect(changes()).toBe(before + 1)
+    expect(lines.at(-1)).toBe(`[claudeswitcher] auto-accept: a new own prompt of session ${ALPHA}; the count starts again`)
+    // The same prompt again resets nothing; the count goes on from 0.
+    arrive(mode, command('r3', ALPHA))
+    mode.observe(prompted(2_000), 6_000)
+    expect(mode.entries()).toEqual([{ sessionId: ALPHA, allowed: 1 }])
+  })
+
+  it('keeps the count for the prompt it started at, an older one or none', () => {
+    const { mode, changes } = setup()
+    mode.set(ALPHA, true, daemonAt(1_000))
+    arrive(mode, command('r1', ALPHA))
+    const before = changes()
+    mode.observe(prompted(1_000), 5_000)
+    mode.observe(prompted(500), 6_000)
+    mode.observe(prompted(undefined), 7_000)
+    mode.observe({ sessions: [{ sessionId: ALPHA }], decisions: [] }, 8_000)
+    expect(mode.entries()).toEqual([{ sessionId: ALPHA, allowed: 1 }])
+    expect(changes()).toBe(before)
+  })
+
+  it('resets on the first own prompt it sees when the session showed none at switch-on', () => {
+    const { mode } = setup()
+    mode.set(ALPHA, true, daemonAt(undefined))
+    arrive(mode, command('r1', ALPHA))
+    mode.observe(prompted(3_000), 5_000)
+    expect(mode.entries()).toEqual([{ sessionId: ALPHA, allowed: 0 }])
+  })
+
+  it('pushes nothing for a new prompt while the count is 0, and a session not in the mode has none', () => {
+    const { mode, changes } = setup()
+    mode.set(ALPHA, true, daemonAt(1_000))
+    const before = changes()
+    mode.observe(prompted(2_000), 5_000)
+    expect(changes()).toBe(before)
+    // The new prompt is the count's start now: allowing after it, then seeing it again, keeps the count.
+    arrive(mode, command('r1', ALPHA))
+    mode.observe(prompted(2_000), 6_000)
+    expect(mode.entries()).toEqual([{ sessionId: ALPHA, allowed: 1 }])
+    mode.set(ALPHA, false, daemonAt(2_000))
+    mode.observe(prompted(9_000), 7_000)
+    expect(mode.entries()).toEqual([])
   })
 })
 
