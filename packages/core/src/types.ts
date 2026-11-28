@@ -73,6 +73,12 @@ export interface SessionActivity {
    * (`cross-session.ts`). Absent when there is none.
    */
   promptedBy?: PromptSender[] | undefined
+  /**
+   * When the user last sent the session a prompt of his own (epoch ms, the record's `timestamp`;
+   * `conversation.ts` `isOwnPrompt`: not a cross-session message, a tool result or a slash command),
+   * from the transcript tail. Absent while the tail holds none: a turn can outgrow the tail.
+   */
+  lastOwnPromptAt?: number | undefined
 }
 
 /** The sender of a cross-session message, as the recipient's transcript names it (`cross-session.ts`). */

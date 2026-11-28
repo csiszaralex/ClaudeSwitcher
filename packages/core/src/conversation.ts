@@ -190,6 +190,20 @@ function conversationEntriesOf(rec: Record<string, unknown>): ConversationEntry[
   return command === undefined ? [] : [command]
 }
 
+/**
+ * Whether the record is the user's own prompt: the view's `prompt` entry (`origin.kind: "human"` on
+ * a `user` record or a `queued_command` attachment, not `isMeta`, not compacted, not a side chain;
+ * see `RECORD`). Not a cross-session message, a background task's notice, a tool result, a slash
+ * command or its output: a slash command is mostly a local one (measured 2026-11-28 on 7 days, 54
+ * transcripts, Claude Code up to 2.1.332: 42 of 49 were followed by their `<local-command-stdout>`),
+ * which tells the model nothing. `transcript.ts` `readActivityFromLines` keeps the latest one's time
+ * as `SessionActivity.lastOwnPromptAt`.
+ */
+export function isOwnPrompt(rec: Record<string, unknown>): boolean {
+  // An answer is never a prompt; skipping it saves building its entries on every scan.
+  return rec['type'] !== RECORD.assistant && conversationEntriesOf(rec).some((entry) => entry.kind === 'prompt')
+}
+
 /** How many turns the lines start (`startsTurn`). */
 export function countTurnStarts(lines: readonly string[]): number {
   let count = 0

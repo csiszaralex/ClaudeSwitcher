@@ -435,6 +435,63 @@ describe('readActivityFromLines: who prompted the session', () => {
   })
 })
 
+describe('readActivityFromLines: the last own prompt', () => {
+  // Invented records in the measured shapes (design doc "Auto-accept per session"); the times are made up.
+  const at = (minute: number): string => `2026-11-28T09:${String(minute).padStart(2, '0')}:00.000Z`
+  const ms = (minute: number): number => Date.parse(at(minute))
+  const own = (minute: number): string =>
+    JSON.stringify({ ...prompting, timestamp: at(minute), type: 'user', message: { role: 'user', content: 'Futtasd a teszteket.' }, origin: { kind: 'human' } })
+  const ownQueued = (minute: number): string =>
+    JSON.stringify({
+      ...prompting,
+      timestamp: at(minute),
+      type: 'attachment',
+      attachment: { type: 'queued_command', prompt: 'és a lintet is', commandMode: 'prompt', origin: { kind: 'human' } },
+    })
+  const later = (line: string, minute: number): string => JSON.stringify({ ...(JSON.parse(line) as Record<string, unknown>), timestamp: at(minute) })
+  const toolResult = (minute: number): string =>
+    JSON.stringify({
+      ...prompting,
+      timestamp: at(minute),
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'kimenet' }] },
+      toolUseResult: { stdout: 'kimenet' },
+    })
+  const command = (minute: number): string =>
+    JSON.stringify({
+      ...prompting,
+      timestamp: at(minute),
+      type: 'user',
+      message: { role: 'user', content: '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>' },
+    })
+  const commandOutput = (minute: number): string =>
+    JSON.stringify({ ...prompting, timestamp: at(minute), type: 'user', message: { role: 'user', content: '<local-command-stdout>Kész</local-command-stdout>' } })
+
+  it('keeps the time of the latest own prompt, a typed one and one that joined the running turn', () => {
+    expect(readActivityFromLines([own(1), toolTurn]).lastOwnPromptAt).toBe(ms(1))
+    expect(readActivityFromLines([own(1), later(toolTurn, 2), ownQueued(3), later(toolTurn, 4)]).lastOwnPromptAt).toBe(ms(3))
+  })
+
+  it('does not count a cross-session message, a tool result, a slash command or its output', () => {
+    const lines = [
+      own(1),
+      later(delivered(PIPE_A, 'Orchestrator'), 2),
+      later(absorbed(PIPE_A, 'Orchestrator'), 3),
+      toolResult(4),
+      command(5),
+      commandOutput(6),
+    ]
+    expect(readActivityFromLines(lines).lastOwnPromptAt).toBe(ms(1))
+    expect('lastOwnPromptAt' in readActivityFromLines(lines.slice(1))).toBe(false)
+  })
+
+  it('does not count a meta or compacted user record', () => {
+    const meta = JSON.stringify({ ...JSON.parse(own(2)) as Record<string, unknown>, isMeta: true })
+    const compacted = JSON.stringify({ ...JSON.parse(own(3)) as Record<string, unknown>, isCompactSummary: true })
+    expect(readActivityFromLines([own(1), meta, compacted]).lastOwnPromptAt).toBe(ms(1))
+  })
+})
+
 describe('readTranscriptActivity', () => {
   const TAIL = 256 * 1024
   // A tool result of about 2 KB that holds none of the cross-session markers.
